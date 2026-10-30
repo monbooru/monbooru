@@ -1,6 +1,6 @@
 {{define "partials/implications_dialog.html"}}
-<p>Tags implied by <strong style="color:{{catColor .Parent.CategoryColor}}">{{.Parent.Name}}</strong>:</p>
 {{if .Implications}}
+<p class="field-hint">Adding {{.Parent.Name}} also adds these.</p>
 {{range groupImplicationsByOrigin .Implications}}
 {{if $.OriginKinds}}{{template "partials/implication_group_header.html" (dict "Group" . "OriginKinds" $.OriginKinds "BaseURL" (printf "/tags/%d/implications/group" $.Parent.ID))}}{{end}}
 <ul class="tag-list">
@@ -26,7 +26,7 @@
       hx-target="#implication-add-flash"
       hx-on::after-request="handleImplicationAdded(event)">
   <div class="add-tag-input-wrap">
-    {{template "multi_tag_suggest_input" dict "Name" "implied_id" "InputID" "implication-add-input" "SuggestID" "implication-add-suggest" "Placeholder" "Imply tag(s)..." "Required" true "ValsKey" "q"}}
+    {{template "multi_tag_suggest_input" dict "Name" "implied_id" "InputID" "implication-add-input" "SuggestID" "implication-add-suggest" "Placeholder" "Imply tags..." "Required" true "ValsKey" "q"}}
   </div>
   <button type="submit" class="btn-sm">Add</button>
 </form>

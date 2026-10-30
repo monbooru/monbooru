@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/db"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 // PruneOrphanThumbnails fails the sweep on a failed id read: a partial set
@@ -102,4 +105,28 @@ func thumbnailOwner(name string) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+var staleTempPrefixes = []string{"export-", "import-", "merge-", "thumbnails-import-"}
+
+func SweepStaleTemps(dataDir string, before time.Time) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !slices.ContainsFunc(staleTempPrefixes, func(p string) bool { return strings.HasPrefix(e.Name(), p) }) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(before) {
+			continue
+		}
+		path := filepath.Join(dataDir, e.Name())
+		if err := os.RemoveAll(path); err != nil {
+			logx.Warnf("remove stale temp %q: %v", path, err)
+			continue
+		}
+		logx.Infof("removed stale temp %q", path)
+	}
 }

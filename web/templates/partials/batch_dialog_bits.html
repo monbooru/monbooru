@@ -3,9 +3,9 @@
 {{define "batch_toggle_dialog"}}
 <dialog id="{{.Prefix}}-dialog">
   <input type="hidden" id="{{.Prefix}}-scope">
-  <p>
+  <p class="dlg-title">
     {{.Lead}}
-    {{template "batch_count" .Prefix}}?
+    {{template "batch_count" .Prefix}}?{{template "webui/dialog_x"}}
   </p>
   <p style="color:var(--fg-dim);font-size:12px">{{.Hint}}</p>
   <div id="{{.Prefix}}-flash"></div>
@@ -72,7 +72,8 @@
              hx-get="/internal/tags/suggest"
              hx-trigger="input changed delay:200ms"
              hx-target="#{{.SuggestID}}"
-             hx-vals='js:{ {{.ValsKey}}: (document.getElementById("{{.InputID}}").value || "").split(/\s+/).pop()}'
+             hx-swap="innerHTML"
+             hx-vals='js:{ {{.ValsKey}}: wordAtCaret(document.getElementById("{{.InputID}}")).word}'
              onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
       <div id="{{.SuggestID}}" class="suggest-dropdown tag-suggest-dropdown"></div>
 {{end}}

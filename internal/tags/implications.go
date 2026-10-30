@@ -59,6 +59,18 @@ func (s *Service) ListImplications(parentID int64) ([]models.Implication, error)
 		 ORDER BY i.name`, parentID)
 }
 
+// ImplicationsDeclaredIn lists the edges whose parent sits in the
+// category, wherever the implied tag lives.
+func (s *Service) ImplicationsDeclaredIn(categoryID int64) ([]models.Implication, error) {
+	return db.QueryAll(s.db.Read, db.ScanRow(func(im *models.Implication) []any {
+		return []any{&im.ParentID, &im.ImpliedID}
+	}), `SELECT ti.parent_tag_id, ti.implied_tag_id
+	       FROM tag_implications ti
+	       JOIN tags p ON p.id = ti.parent_tag_id
+	      WHERE p.category_id = ?
+	      ORDER BY ti.parent_tag_id, ti.implied_tag_id`, categoryID)
+}
+
 func (s *Service) ImpliedBy(tagID int64) ([]models.Implication, error) {
 	return db.QueryAll(s.db.Read, scanImplication(false),
 		`SELECT ti.parent_tag_id, ti.implied_tag_id,

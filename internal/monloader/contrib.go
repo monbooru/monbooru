@@ -64,9 +64,9 @@ func (l *Link) ptrSubmitSpellings(ctx context.Context, storage []string, byTag m
 	if len(names) == 0 {
 		return storage, nil
 	}
-	graph := map[string]PTRTagInfo{}
-	for start := 0; start < len(names); start += ptrLookupBatch {
-		part, err := l.PTRTagLookup(ctx, names[start:min(start+ptrLookupBatch, len(names))])
+	graph := map[string]contract.PTRTagInfo{}
+	for start := 0; start < len(names); start += contract.MaxPTRTags {
+		part, err := l.PTRTagLookup(ctx, names[start:min(start+contract.MaxPTRTags, len(names))])
 		if err != nil {
 			return storage, nil
 		}
@@ -128,7 +128,7 @@ func imageTagAliases(tagSvc func() *tags.Service, imageTags []models.ImageTag) (
 
 // A tag the PTR holds that the ledger does not credit to it is still work
 // for a pull, which records the attribution.
-func PTRUnattributed(tagSvc func() *tags.Service, id int64, preview *ContribPreview) []string {
+func (l *Link) PTRUnattributed(rctx context.Context, tagSvc func() *tags.Service, id int64, preview *ContribPreview) []string {
 	known := map[string]bool{}
 	for _, t := range preview.ToAdd {
 		if t.Status == contract.PreviewKnown {
@@ -155,7 +155,29 @@ func PTRUnattributed(tagSvc func() *tags.Service, id int64, preview *ContribPrev
 		out = append(out, name)
 	}
 	sort.Strings(out)
-	return out
+	return l.ownPTRIdeals(rctx, out)
+}
+
+// A pull writes a tag the PTR files under another spelling (1girl under
+// 1_female) as that spelling, so it can never credit this one. No answer
+// leaves the list as it is.
+func (l *Link) ownPTRIdeals(rctx context.Context, names []string) []string {
+	ctx, cancel := context.WithTimeout(rctx, 8*time.Second)
+	defer cancel()
+	var kept []string
+	for start := 0; start < len(names); start += contract.MaxPTRTags {
+		part := names[start:min(start+contract.MaxPTRTags, len(names))]
+		graph, err := l.PTRTagLookup(ctx, part)
+		if err != nil {
+			return names
+		}
+		for _, name := range part {
+			if ideal := graph[name].Ideal; ideal == "" || ideal == name {
+				kept = append(kept, name)
+			}
+		}
+	}
+	return kept
 }
 
 func isPTRSource(src tags.TagSource) bool { return strings.EqualFold(src.Source, contract.SourcePTR) }
@@ -183,7 +205,7 @@ type ContribReceipt struct {
 
 // Verdicts pair with items by position, so a count mismatch would
 // mislabel them: it answers false.
-func ReadContribReceipt(items []contract.ContribItem, results []ContribSendResult) (ContribReceipt, bool) {
+func ReadContribReceipt(items []contract.ContribItem, results []contract.ContribResult) (ContribReceipt, bool) {
 	if len(results) != len(items) {
 		return ContribReceipt{}, false
 	}
@@ -193,7 +215,7 @@ func ReadContribReceipt(items []contract.ContribItem, results []ContribSendResul
 	return r, true
 }
 
-func receiptRows(items []contract.ContribItem, results []ContribSendResult) (adds, petitions, refused []ContribReceiptRow) {
+func receiptRows(items []contract.ContribItem, results []contract.ContribResult) (adds, petitions, refused []ContribReceiptRow) {
 	for i := 0; i < min(len(items), len(results)); i++ {
 		kind := items[i].Kind
 		var label string
@@ -271,7 +293,7 @@ func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Servi
 		return nil, err
 	}
 	d := &TagContribDiff{}
-	localAlias, localImplied := map[string]bool{}, map[string]bool{}
+	localAlias, localImplied, localImpliedBy := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	var aliasForms []string
 	for _, a := range aliases[id] {
 		form := tags.FormName(a.CategoryName, a.Name)
@@ -281,13 +303,14 @@ func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Servi
 	}
 	for _, im := range impliedBy {
 		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: tags.FormName(im.ParentCategoryName, im.ParentName), B: tagForm, Rel: "implied by"})
+		localImpliedBy[tags.FormName(im.ParentCategoryName, im.ParentName)] = true
 	}
 	for _, im := range implications {
 		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: tagForm, B: tags.FormName(im.ImpliedCategoryName, im.ImpliedName), Rel: "implies"})
 		localImplied[tags.FormName(im.ImpliedCategoryName, im.ImpliedName)] = true
 	}
 	names := append([]string{tagForm}, aliasForms...)
-	names = names[:min(len(names), ptrLookupBatch)]
+	names = names[:min(len(names), contract.MaxPTRTags)]
 	graph, err := l.PTRTagLookup(ctx, names)
 	if err != nil {
 		return nil, err
@@ -330,6 +353,11 @@ func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Servi
 		if a == "" || a == known || localAlias[localForm(tagSvc, a)] {
 			continue
 		}
+		// A tag of its own here whose PTR ideal is this one reads, on its
+		// own card, as a merge into this tag, which a petition contradicts.
+		if row, ok := tagSvc().FormRow(a); ok && !row.IsAlias && (info.Ideal == "" || info.Ideal == known) {
+			continue
+		}
 		candidates = append(candidates, TagPairRow{Kind: contract.ContribSibling, A: a, B: known, Rel: "alias of this"})
 	}
 	// The ideal is never a petition row: a pull adopts it as an alias
@@ -337,16 +365,24 @@ func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Servi
 	if info.Ideal != "" && info.Ideal != known && !localAlias[localForm(tagSvc, info.Ideal)] && tagSvc().FormExists(info.Ideal) {
 		d.IdealElsewhere = info.Ideal
 	}
-	for _, im := range info.Implications {
-		if im == "" || im == known || localImplied[localForm(tagSvc, im)] {
-			continue
+	undeclared := func(im string, declared map[string]bool) bool {
+		if im == "" || im == known || declared[localForm(tagSvc, im)] {
+			return false
 		}
 		// The pull skips an endpoint that is an alias here, so the edge
 		// has no local form to disagree with.
-		if row, ok := tagSvc().FormRow(im); ok && row.IsAlias {
-			continue
+		row, ok := tagSvc().FormRow(im)
+		return !ok || !row.IsAlias
+	}
+	for _, im := range info.Implications {
+		if undeclared(im, localImplied) {
+			candidates = append(candidates, TagPairRow{Kind: contract.ContribParent, A: known, B: im, Rel: "implies"})
 		}
-		candidates = append(candidates, TagPairRow{Kind: contract.ContribParent, A: known, B: im, Rel: "implies"})
+	}
+	for _, im := range info.ImpliedBy {
+		if undeclared(im, localImpliedBy) {
+			candidates = append(candidates, TagPairRow{Kind: contract.ContribParent, A: im, B: known, Rel: "implied by"})
+		}
 	}
 	toPreview = toPreview[:0]
 	for i := range candidates {
@@ -416,7 +452,7 @@ func localForm(tagSvc func() *tags.Service, name string) string {
 	return name
 }
 
-func heldByCluster(tagSvc func() *tags.Service, row TagPairRow, tagForm, known string, info PTRTagInfo) bool {
+func heldByCluster(tagSvc func() *tags.Service, row TagPairRow, tagForm, known string, info contract.PTRTagInfo) bool {
 	names := func(list []string) bool {
 		return slices.ContainsFunc(list, func(n string) bool { return localForm(tagSvc, n) == row.A })
 	}
@@ -432,7 +468,7 @@ func heldByCluster(tagSvc func() *tags.Service, row TagPairRow, tagForm, known s
 
 // Uses applyPTRTagInfo's normalization and row lookups: comparing
 // spellings as strings would keep offering a pull that adopts nothing.
-func pullWouldAdd(tagSvc func() *tags.Service, tagID int64, info PTRTagInfo, tagForm string) bool {
+func pullWouldAdd(tagSvc func() *tags.Service, tagID int64, info contract.PTRTagInfo, tagForm string) bool {
 	svc := tagSvc()
 	free := func(n string) bool { return n != "" && n != tagForm && svc.FormFree(n) }
 	implies := func(forward bool) func(string) bool {

@@ -18,11 +18,10 @@ func (b *whereBuilder) buildPhashFilter(e FilterExpr) string {
 	if val == "" {
 		return "i.phash IS NOT NULL"
 	}
-	hexPart := val
+	hexPart, distPart, hasDistance := strings.Cut(val, "~")
 	distance := -1
-	if idx := strings.IndexByte(val, '~'); idx >= 0 {
-		hexPart = val[:idx]
-		d, err := strconv.Atoi(strings.TrimSpace(val[idx+1:]))
+	if hasDistance {
+		d, err := strconv.Atoi(strings.TrimSpace(distPart))
 		if err != nil || d < 0 || d > 64 {
 			return "1=0"
 		}

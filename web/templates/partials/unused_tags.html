@@ -1,0 +1,15 @@
+{{define "partials/unused_tags.html"}}
+{{if .Err}}
+<div class="flash flash-err">{{.Err}}</div>
+{{else}}
+<p class="unused-tags-plain dlg-title">{{if .Unused}}Delete {{.Unused}} unused {{plural .Unused "tag" "tags"}}?{{else if .Kept}}Nothing to delete unless the kept tags go too.{{else}}No unused tags to delete.{{end}}{{template "webui/dialog_x"}}</p>
+{{if .Kept}}<p class="unused-tags-all dlg-title" hidden>Delete {{.All}} unused {{plural .All "tag" "tags"}}?{{template "webui/dialog_x"}}</p>{{end}}
+<p class="field-hint">{{if .Unused}}No image carries them, missing images included.{{end}}{{if .Kept}} {{.Kept}}{{if .Unused}} more{{end}} unused {{plural .Kept "tag carries" "tags carry"}} aliases, implications or a note and {{plural .Kept "is" "are"}} kept.{{end}}</p>
+{{if .Kept}}
+<label style="display:block;font-size:12px">
+  <input type="checkbox" name="include_kept" value="1" onchange="var b=this.closest('#unused-tags-dialog-body');b.querySelector('.unused-tags-plain').hidden=this.checked;b.querySelector('.unused-tags-all').hidden=!this.checked">
+  Delete {{plural .Kept "that one" "those"}} too, with {{plural .Kept "its" "their"}} aliases and implications
+</label>
+{{end}}
+{{end}}
+{{end}}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/session"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -16,12 +17,8 @@ func resolveCeiling(r *http.Request, cx *library.Gallery) *Ceiling {
 
 // The value reaches the search AST: anything outside the closed set is dropped.
 func readRatingCookie(r *http.Request) string {
-	c, err := r.Cookie(ratingCeilingCookieName)
-	if err != nil {
-		return ""
-	}
-	if tags.IsCanonicalRating(c.Value) {
-		return c.Value
+	if v := session.FromCookie(r, ratingCeilingCookieName); tags.IsCanonicalRating(v) {
+		return v
 	}
 	return ""
 }

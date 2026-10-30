@@ -113,7 +113,7 @@ func (s *Server) ptrContribPanel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	canContribute, contribHint := s.ml.ContribHint()
-	unattributed := monloader.PTRUnattributed(s.tagSvc, id, preview)
+	unattributed := s.ml.PTRUnattributed(r.Context(), s.tagSvc, id, preview)
 	s.renderTemplate(w, "partials/ptr_contrib_panel.html", map[string]any{
 		"ImageID":           id,
 		"NewCount":          len(newTags),
@@ -225,7 +225,7 @@ func (s *Server) sendContribItems(w http.ResponseWriter, r *http.Request, scope 
 	s.renderContribReceipt(w, items, resp)
 }
 
-func (s *Server) renderContribReceipt(w http.ResponseWriter, items []contract.ContribItem, resp *monloader.ContribSendResponse) {
+func (s *Server) renderContribReceipt(w http.ResponseWriter, items []contract.ContribItem, resp *contract.ContribResponse) {
 	receipt, ok := monloader.ReadContribReceipt(items, resp.Results)
 	if !ok {
 		s.renderTemplate(w, "partials/ptr_contrib_flash.html", map[string]any{

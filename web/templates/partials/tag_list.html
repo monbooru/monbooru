@@ -3,8 +3,6 @@
   {{if .ErrMsg}}<div class="flash flash-err" style="margin-bottom:4px">{{.ErrMsg}}</div>{{end}}
   {{if .WarnMsg}}<div class="flash flash-warn" style="margin-bottom:4px">{{.WarnMsg}}</div>{{end}}
   {{if .OkMsg}}<div class="flash flash-ok" style="margin-bottom:4px">{{.OkMsg}}</div>{{end}}
-  <h4 class="tag-list-added-title" hidden>Just added</h4>
-  <ul class="tag-list tag-list-added"></ul>
 </div>
 {{if .SetInput}}<script>
 (function(){var i=document.getElementById('tag-input');if(i){i.value={{.Input}};var d=document.getElementById('tag-suggest-dropdown');if(d)d.innerHTML='';}})();

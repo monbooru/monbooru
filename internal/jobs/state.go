@@ -151,6 +151,10 @@ func (m *Manager) Complete(summary string) {
 	m.end(func(st *models.JobState) { st.Summary, st.Message = summary, "" })
 }
 
+func (m *Manager) CompletePartial(summary string) {
+	m.end(func(st *models.JobState) { st.Summary, st.Message, st.Partial = summary, "", true })
+}
+
 func (m *Manager) Fail(errMsg string) {
 	m.end(func(st *models.JobState) { st.Error = errMsg })
 }
@@ -243,6 +247,9 @@ func (m *Manager) SetWatcherMessage(msg string) {
 	defer m.mu.Unlock()
 	if m.state != nil && m.state.Running {
 		m.state.Changes++
+		return
+	}
+	if m.state != nil && m.state.Error != "" {
 		return
 	}
 	now := time.Now().UTC()

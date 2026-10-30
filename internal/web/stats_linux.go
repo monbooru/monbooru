@@ -39,12 +39,10 @@ func readStatusKB(pid, prefix string) uint64 {
 	return 0
 }
 
+// Status, not smaps: the smaps walk costs time in proportion to what is
+// resident, and a tagger worker holds gigabytes of unshared anonymous pages.
 func procRSSAt(pid int) (rssBreakdown, bool) {
-	procDir := fmt.Sprintf("/proc/%d", pid)
-	if total, anon, file, db, ok := sumSmapsPssAt(procDir); ok {
-		return rssBreakdown{total: total, anon: anon, file: file, db: db}, true
-	}
-	return readStatusRssBreakdown(procDir)
+	return readStatusRssBreakdown(fmt.Sprintf("/proc/%d", pid))
 }
 
 func readStatusRssBreakdown(procDir string) (rssBreakdown, bool) {
@@ -80,7 +78,7 @@ func procRSS() (rssBreakdown, bool) {
 	if !ok {
 		return rssBreakdown{}, false
 	}
-	if total, _, file, db, ok := sumSmapsPssAt("/proc/self"); ok {
+	if total, file, db, ok := sumSmapsPssAt("/proc/self"); ok {
 		out.total = total
 		out.file = file
 		out.db = db
@@ -88,10 +86,10 @@ func procRSS() (rssBreakdown, bool) {
 	return out, true
 }
 
-func sumSmapsPssAt(procDir string) (totalPss, anonPss, filePss, dbPss uint64, ok bool) {
+func sumSmapsPssAt(procDir string) (totalPss, filePss, dbPss uint64, ok bool) {
 	f, err := os.Open(procDir + "/smaps")
 	if err != nil {
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, false
 	}
 	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
@@ -113,12 +111,10 @@ func sumSmapsPssAt(procDir string) (totalPss, anonPss, filePss, dbPss uint64, ok
 				if inDB {
 					dbPss += v
 				}
-			} else {
-				anonPss += v
 			}
 		}
 	}
-	return totalPss, anonPss, filePss, dbPss, true
+	return totalPss, filePss, dbPss, true
 }
 
 // Header lines start with a hex address; data lines with a capitalised key.

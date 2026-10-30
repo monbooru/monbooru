@@ -14,7 +14,6 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
-	"github.com/monbooru/monbooru/internal/lookup"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/search"
@@ -172,48 +171,69 @@ func (s *Server) perImageLoop(ids []int64, verb, gerund string, op func(i int, i
 
 func (s *Server) runBatchPlace(ids []int64, targetFolder *string, folderTmpl, nameTmpl *gallery.NameTemplate) {
 	total := len(ids)
-	var moved, renamed, suffixed int
-	sources := map[string]struct{}{}
 	verb, gerund, _ := placeVerbs(targetFolder != nil, nameTmpl != nil)
 	cx := s.active()
+	tally := newPlaceTally()
 	done, failed, cancelled := s.perImageLoop(ids, verb, gerund, func(i int, id int64) error {
 		folder, name, err := s.batchDestination(targetFolder, folderTmpl, nameTmpl, i, total, id)
 		if err != nil {
 			return err
 		}
-		res, err := cx.PlaceImage(id, folder, name)
-		if err != nil {
-			return err
-		}
-		if res.PrevDir != "" {
-			sources[res.PrevDir] = struct{}{}
-		}
-		if res.Moved {
-			moved++
-		}
-		if res.Renamed {
-			renamed++
-		}
-		if res.Suffixed {
-			suffixed++
-		}
-		return nil
+		return tally.place(cx, id, folder, name)
 	})
 
 	// Named from what the run did: the folder field opens on {folder}, so
 	// most renames move nothing.
-	_, _, past := placeVerbs(moved > 0, renamed > 0)
+	past := tally.past()
 	summary := fmt.Sprintf("%s %d image%s.", titleCase(past), done, plural(done))
 	if failed > 0 {
 		summary = fmt.Sprintf("%s %d image%s, %d failed.", titleCase(past), done, plural(done), failed)
 	}
-	if suffixed > 0 {
-		summary += fmt.Sprintf(" %d had a taken name and were numbered.", suffixed)
-	}
-	if n := countEmptiedDirs(sources); n > 0 {
-		summary += fmt.Sprintf(" %d %s now empty.", n, models.Plural(n, "folder is", "folders are"))
-	}
+	summary += tally.tail()
 	s.jobs.Finish(nil, cancelled, fmt.Sprintf("%s cancelled (%d/%d %s)", verb, done, total, past), summary)
+}
+
+type placeTally struct {
+	moved, renamed, suffixed int
+	sources                  map[string]struct{}
+}
+
+func newPlaceTally() *placeTally { return &placeTally{sources: map[string]struct{}{}} }
+
+func (t *placeTally) place(cx *library.Gallery, id int64, folder, name *string) error {
+	res, err := cx.PlaceImage(id, folder, name)
+	if err != nil {
+		return err
+	}
+	if res.PrevDir != "" {
+		t.sources[res.PrevDir] = struct{}{}
+	}
+	if res.Moved {
+		t.moved++
+	}
+	if res.Renamed {
+		t.renamed++
+	}
+	if res.Suffixed {
+		t.suffixed++
+	}
+	return nil
+}
+
+func (t *placeTally) past() string {
+	_, _, past := placeVerbs(t.moved > 0, t.renamed > 0)
+	return past
+}
+
+func (t *placeTally) tail() string {
+	var tail string
+	if t.suffixed > 0 {
+		tail += fmt.Sprintf(" %d had a taken name and %s numbered.", t.suffixed, models.Plural(t.suffixed, "was", "were"))
+	}
+	if n := countEmptiedDirs(t.sources); n > 0 {
+		tail += fmt.Sprintf(" %d %s now empty.", n, models.Plural(n, "folder is", "folders are"))
+	}
+	return tail
 }
 
 func countEmptiedDirs(dirs map[string]struct{}) int {
@@ -247,7 +267,7 @@ func (s *Server) runBatchPlaceCheck(ids []int64, targetFolder *string, folderTmp
 
 	summary := fmt.Sprintf("Checked %d image%s: no name is already taken.", done, plural(done))
 	if collisions > 0 {
-		summary = fmt.Sprintf("Checked %d image%s: %d would be numbered, their name is already taken.", done, plural(done), collisions)
+		summary = fmt.Sprintf("Checked %d image%s: %d would be numbered, %s already taken.", done, plural(done), collisions, models.Plural(collisions, "its name is", "their names are"))
 	}
 	if failed > 0 {
 		summary += fmt.Sprintf(" %d could not be checked.", failed)
@@ -315,11 +335,7 @@ func (s *Server) batchTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runBatchTag(ids []int64, op string, catTags []catTag, note string) {
-	type resolvedTag struct {
-		id   int64
-		name string
-	}
-	var resolved []resolvedTag
+	var tagIDs []int64
 	var refused skipReasons
 	var unmatched []string
 	if op == "add" {
@@ -330,7 +346,7 @@ func (s *Server) runBatchTag(ids []int64, op string, catTags []catTag, note stri
 				refused.add(fmt.Errorf("%s: %w", ct.name, err))
 				continue
 			}
-			resolved = append(resolved, resolvedTag{t.ID, t.Name})
+			tagIDs = append(tagIDs, t.ID)
 		}
 	} else {
 		for _, ct := range catTags {
@@ -339,10 +355,10 @@ func (s *Server) runBatchTag(ids []int64, op string, catTags []catTag, note stri
 				unmatched = append(unmatched, s.tagTokenLabel(ct))
 				continue
 			}
-			resolved = append(resolved, resolvedTag{t.ID, t.Name})
+			tagIDs = append(tagIDs, t.ID)
 		}
 	}
-	if len(resolved) == 0 {
+	if len(tagIDs) == 0 {
 		if refused.any() {
 			s.jobs.Fail("nothing to add: " + refused.String())
 			return
@@ -357,10 +373,6 @@ func (s *Server) runBatchTag(ids []int64, op string, catTags []catTag, note stri
 	}
 
 	total := len(ids)
-	tagIDs := make([]int64, 0, len(resolved))
-	for _, t := range resolved {
-		tagIDs = append(tagIDs, t.id)
-	}
 	progress := func(done, total int) { s.jobs.Update(done, total, label+"…") }
 	progress(0, total)
 	batch := s.tagSvc().BatchRemoveTags
@@ -493,7 +505,7 @@ func (s *Server) batchCollection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if utf8.RuneCountInString(collectionVal) > maxExternalSourceLen {
+	if utf8.RuneCountInString(collectionVal) > contract.MaxCollection {
 		flashStatus(w, http.StatusBadRequest, "Collection label too long.")
 		return
 	}
@@ -608,7 +620,7 @@ func (s *Server) runBatchLookup(opts monloader.BatchLookupOpts, on bool, ids []i
 
 func (s *Server) runBatchSchedule(ctx context.Context, cx *library.Gallery, on bool, ids []int64) {
 	processed, cancelled, err := jobs.Chunked(ctx, s.jobs, ids, 500, "setting scheduled lookup", func(chunk []int64) error {
-		return cx.SetScheduledLookup(chunk, []string{lookup.BackendBooru, lookup.BackendPTR}, on)
+		return cx.SetScheduledLookup(chunk, []string{contract.LookupBooru, contract.LookupPTR}, on)
 	})
 	onOff := "off"
 	if on {

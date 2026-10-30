@@ -190,36 +190,45 @@ func (s *Service) SyncSourceTags(imageID int64, tagIDs []int64, site string, rec
 			}
 		}
 
+		type sourceTag struct {
+			id       int64
+			isRating bool
+		}
+		var listed []sourceTag
+		// A PTR hash can carry several ratings: the highest lands, as an
+		// auto-tagger's does.
+		var rating int64
+		bestRank := -2
+		for _, tagID := range tagIDs {
+			var cat int64
+			var name string
+			switch err := tx.QueryRow(`SELECT category_id, name FROM tags WHERE id = ?`, tagID).Scan(&cat, &name); {
+			case errors.Is(err, sql.ErrNoRows):
+				continue
+			case err != nil:
+				return SyncResult{}, err
+			}
+			isRating := s.ratingCatID != 0 && cat == s.ratingCatID
+			if isRating && contract.RatingRank(name) > bestRank {
+				rating, bestRank = tagID, contract.RatingRank(name)
+			}
+			listed = append(listed, sourceTag{tagID, isRating})
+		}
+
 		var res SyncResult
 		var applied []int64
-		for _, tagID := range tagIDs {
-			isRating := false
-			if s.ratingCatID != 0 {
-				var cat int64
-				switch err := tx.QueryRow(`SELECT category_id FROM tags WHERE id = ?`, tagID).Scan(&cat); {
-				case errors.Is(err, sql.ErrNoRows):
-					continue
-				case err != nil:
-					return SyncResult{}, err
-				}
-				isRating = cat == s.ratingCatID
-			}
-			if isRating && alreadyRated {
+		for _, t := range listed {
+			if t.isRating && (alreadyRated || t.id != rating) {
 				continue
 			}
-			added, err := addSourceTagTx(tx, imageID, tagID, site)
+			added, err := addSourceTagTx(tx, imageID, t.id, site)
 			if err != nil {
 				return SyncResult{}, err
 			}
-			applied = append(applied, tagID)
+			applied = append(applied, t.id)
 			if added {
 				res.Added++
-				if isRating {
-					res.RatingFilled = true
-					// A payload with several ratings (a PTR hash can
-					// carry them) lands only the first.
-					alreadyRated = true
-				}
+				res.RatingFilled = res.RatingFilled || t.isRating
 			}
 		}
 		// After every insert: a parent fanned out first would leave its listed child implied.
@@ -695,28 +704,16 @@ func (s *Service) RemoveAllTagsFromImage(imageID int64) error {
 }
 
 func removeAllTagsFromImageTx(tx *sql.Tx, imageID int64) error {
-	tagIDs, err := db.QueryIDs(tx, `SELECT tag_id FROM image_tags WHERE image_id = ?`, imageID)
-	if err != nil {
+	var isMissing int
+	if err := tx.QueryRow(`SELECT is_missing FROM images WHERE id = ?`, imageID).Scan(&isMissing); err != nil && err != sql.ErrNoRows {
 		return err
 	}
-
-	if len(tagIDs) > 0 {
-		var isMissing int
-		if err := tx.QueryRow(`SELECT is_missing FROM images WHERE id = ?`, imageID).Scan(&isMissing); err != nil && err != sql.ErrNoRows {
+	if isMissing == 0 {
+		if err := ImagesVisibilityChangedTx(tx, []int64{imageID}, false); err != nil {
 			return err
 		}
-		if isMissing == 0 {
-			placeholders, args := db.InPlaceholders(tagIDs)
-			if _, err := tx.Exec(
-				`UPDATE tags SET usage_count = MAX(0, usage_count - 1) WHERE id IN (`+placeholders+`)`,
-				args...,
-			); err != nil {
-				return err
-			}
-		}
 	}
-
-	_, err = tx.Exec(`DELETE FROM image_tags WHERE image_id = ?`, imageID)
+	_, err := tx.Exec(`DELETE FROM image_tags WHERE image_id = ?`, imageID)
 	return err
 }
 

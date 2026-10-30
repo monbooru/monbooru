@@ -22,7 +22,8 @@ var chordMap = {
     m: ['#tag-batch-bar:not([hidden]) #btn-batch-merge'],
     i: ['#tag-batch-bar:not([hidden]) #btn-batch-imply'],
     f: ['#tag-batch-bar:not([hidden]) #btn-batch-merge-folded'],
-    p: ['#tag-batch-bar:not([hidden]) #btn-batch-ptr'],
+    d: ['#tag-batch-bar:not([hidden]) #btn-batch-distinct', '#tag-batch-bar:not([hidden]) #btn-batch-undistinct'],
+    p: ['#tag-batch-bar:not([hidden]) #btn-batch-ptr:not([disabled])'],
   },
   // Empty on purpose: its leaves are the digits, one per plugin button on
   // the bar that is up.
@@ -177,6 +178,48 @@ function navDetailArrow(direction, noun) {
   return false;
 }
 
+// A pinch-zoomed page is left alone, since there the finger pans.
+function onSwipe(el, prev, next) {
+  var x0 = null, y0 = 0, t0 = 0;
+  el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'touch' || !e.isPrimary || e.target.closest('video[controls]')) return;
+    x0 = e.clientX; y0 = e.clientY; t0 = e.timeStamp;
+  });
+  el.addEventListener('pointercancel', function () { x0 = null; });
+  el.addEventListener('pointerup', function (e) {
+    if (x0 === null || !e.isPrimary) return;
+    var dx = e.clientX - x0, dy = e.clientY - y0;
+    x0 = null;
+    if (e.timeStamp - t0 > 600 || Math.abs(dx) < 50 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+    if (window.visualViewport && window.visualViewport.scale > 1.01) return;
+    if (dx > 0) prev(); else next();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  var media = document.querySelector('.detail-media');
+  if (media) onSwipe(media, function () { navDetailArrow('prev', 'image'); }, function () { navDetailArrow('next', 'image'); });
+  var stage = document.querySelector('.reader-stage');
+  if (stage) {
+    var follow = function (sel) {
+      return function () { var a = stage.querySelector(sel); if (a) window.location.href = a.href; };
+    };
+    onSwipe(stage, follow('a.reader-side-prev'), follow('a.reader-side-next'));
+  }
+});
+
+// The tag page and the tags listing both host the editor as
+// #implications-editor, carrying its tag's id.
+function handleImplicationAdded(event) {
+  var hdr = event.detail.xhr.getResponseHeader('HX-Trigger') || '';
+  if (hdr.indexOf('implication-added') === -1) return;
+  var input = document.getElementById('implication-add-input');
+  if (input) input.value = '';
+  clearSlots('implication-add-suggest');
+  var editor = document.getElementById('implications-editor');
+  htmx.ajax('GET', '/tags/' + editor.dataset.tagId + '/implications', {target: '#implications-editor', swap: 'innerHTML'});
+}
+
 function pruneRelationRow(btn) {
   var li = btn.closest('li');
   if (!li) return;
@@ -289,12 +332,18 @@ function activeSurfaces() {
   if (document.getElementById('pages-grid-page')) s.push('pages');
   if (document.getElementById('relations-session-page')) s.push('relations');
   if (document.querySelector('.detail-img-link')) s.push('lightbox');
+  if (document.getElementById('slideshow-btn')) s.push('slideshow');
   return s;
+}
+
+// AltGraph, which types \ [ ] ? on AZERTY and QWERTZ, reports as Ctrl+Alt on Windows.
+function chorded(e) {
+  return (e.ctrlKey || e.metaKey || e.altKey) && !e.getModifierState('AltGraph');
 }
 
 function handlePagesGridKey(e) {
   var page = document.getElementById('pages-grid-page');
-  if (!page) return false;
+  if (!page || chorded(e)) return false;
   if (e.target.tagName.toLowerCase() === 'input' || e.target.isContentEditable) return false;
   if (document.querySelector('dialog[open]')) return false;
   var cells = Array.from(page.querySelectorAll('.manga-page-cell'));
@@ -466,7 +515,7 @@ var lightbox = (function () {
       return false;
     },
     handleKey: function (e) {
-      if (!dlg || !dlg.open) return false;
+      if (!dlg || !dlg.open || chorded(e)) return false;
       var t = e.target.tagName.toLowerCase();
       if (t === 'input' || t === 'textarea' || e.target.isContentEditable) return false;
       switch (e.key) {
@@ -484,6 +533,356 @@ var lightbox = (function () {
   };
 })();
 
+var slideshow = (function () {
+  var durations = [2, 3, 5, 10, 15, 30];
+  var dlg = null, slots = [], message = null, position = null, durationSelect = null, documentBound = false;
+  var ids = [], videos = new Set();
+  var index = -1, current = null, visibleSlot = 0, prepared = null;
+  var playing = true, muted = true, looping = false;
+  var durationMs = 5000, remainingMs = 0, startedAt = null;
+  var displayEpoch = 0, preloadEpoch = 0;
+  var autoTimer = null, skipTimer = null;
+  var leavingFullscreen = false, restacks = 0;
+  var detailStart = 0, detailBack = '';
+  var actions = {
+    first: function () { go(-ids.length); },
+    previous: function () { go(-1); },
+    next: function () { go(1); },
+    last: function () { go(ids.length); },
+    play: function () { if (playing) pause(); else resume(); },
+    restart: restart,
+    loop: toggleLoop,
+    mute: toggleMuted,
+    fullscreen: toggleFullscreen,
+    exit: function () { dlg.close(); },
+  };
+  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen' };
+
+  function readDuration() {
+    var seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10);
+    return durations.indexOf(seconds) >= 0 ? seconds : 5;
+  }
+  function itemAt(i) {
+    var id = ids[i], video = videos.has(id);
+    return { id: id, video: video, src: '/images/' + id + (video ? '/file' : '/view') };
+  }
+  function setMessage(text) { message.textContent = text; }
+  function button(action) { return dlg.querySelector('[data-slideshow="' + action + '"]'); }
+  function currentVideo() { return current && current.video ? slots[visibleSlot].querySelector('video') : null; }
+
+  function clearSlot(slot) {
+    var v = slot.querySelector('video');
+    if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
+    slot.replaceChildren();
+    slot.classList.remove('active');
+  }
+  function prepareMedia(slot, item) {
+    clearSlot(slot);
+    return new Promise(function (resolve, reject) {
+      var media = document.createElement(item.video ? 'video' : 'img');
+      var settled = false;
+      var timeout = setTimeout(function () { finish('#' + item.id + ' took too long to load.'); }, 12000);
+      function finish(err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        media.onload = media.onloadeddata = media.onerror = null;
+        if (err) reject(new Error(err)); else resolve(media);
+      }
+      media.onerror = function () { finish('Could not load #' + item.id + '.'); };
+      if (item.video) {
+        media.preload = 'auto';
+        media.muted = true;
+        media.playsInline = true;
+        media.onloadeddata = function () { finish(); };
+      } else {
+        media.alt = '';
+        media.onload = function () { media.decode().then(function () { finish(); }, function () { finish(); }); };
+      }
+      slot.appendChild(media);
+      media.src = item.src;
+    });
+  }
+
+  function show(i) {
+    if (i < 0 || i >= ids.length) return;
+    clearTimeout(autoTimer);
+    clearTimeout(skipTimer);
+    var epoch = ++displayEpoch;
+    preloadEpoch++;
+    if (prepared && prepared.index === i) {
+      var ready = prepared;
+      prepared = null;
+      activate(ready);
+      return;
+    }
+    prepared = null;
+    setMessage('Loading ' + (i + 1) + ' / ' + ids.length + '...');
+    var slot = 1 - visibleSlot;
+    var item = itemAt(i);
+    prepareMedia(slots[slot], item).then(function (media) {
+      if (epoch === displayEpoch) activate({ index: i, item: item, slot: slot, media: media });
+    }, function (err) {
+      if (epoch === displayEpoch) skip(i, err.message, epoch);
+    });
+  }
+  function activate(slide) {
+    var old = currentVideo();
+    if (old) old.pause();
+    slots[visibleSlot].classList.remove('active');
+    slots[slide.slot].classList.add('active');
+    visibleSlot = slide.slot;
+    current = slide.item;
+    index = slide.index;
+    remainingMs = durationMs;
+    startedAt = playing && !current.video ? Date.now() : null;
+    setMessage('');
+    if (current.video) {
+      var v = slide.media;
+      v.loop = looping;
+      v.muted = muted;
+      v.currentTime = 0;
+      v.onended = function () { if (index === slide.index) advance(); };
+      if (playing) playOrWait(v);
+    } else {
+      schedule();
+    }
+    updateControls();
+    prefetch(index + 1);
+  }
+  function prefetch(i) {
+    if (i >= ids.length) return;
+    var epoch = ++preloadEpoch;
+    var slot = 1 - visibleSlot;
+    var item = itemAt(i);
+    prepareMedia(slots[slot], item).then(function (media) {
+      if (epoch === preloadEpoch) prepared = { index: i, item: item, slot: slot, media: media };
+    }, function () {});
+  }
+  function skip(i, text, epoch) {
+    setMessage(text + ' Skipping...');
+    skipTimer = setTimeout(function () {
+      if (epoch !== displayEpoch) return;
+      if (i + 1 < ids.length) { show(i + 1); return; }
+      pause();
+      setMessage(text);
+    }, 700);
+  }
+
+  function schedule() {
+    clearTimeout(autoTimer);
+    if (!dlg.open || !current || current.video || !playing) return;
+    autoTimer = setTimeout(advance, remainingMs - (Date.now() - startedAt));
+  }
+  function advance() {
+    if (!dlg.open || !playing) return;
+    if (index + 1 >= ids.length) { pause(); return; }
+    show(index + 1);
+  }
+  function pause() {
+    if (!playing) return;
+    if (startedAt !== null) remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
+    startedAt = null;
+    playing = false;
+    clearTimeout(autoTimer);
+    var v = currentVideo();
+    if (v) v.pause();
+    updateControls();
+  }
+  function resume() {
+    playing = true;
+    if (current && !current.video) startedAt = Date.now();
+    var v = currentVideo();
+    if (v) playOrWait(v);
+    schedule();
+    updateControls();
+  }
+  // An AbortError is a play() that lost to a pause, a load or the end of a
+  // short clip; only the browser refusing to play waits for Space.
+  function playOrWait(v) {
+    var at = index;
+    v.play().catch(function (err) {
+      if (err.name !== 'NotAllowedError' || index !== at) return;
+      pause();
+      setMessage('Press Space to play the video.');
+    });
+  }
+  function go(delta) {
+    var target = Math.max(0, Math.min(ids.length - 1, index + delta));
+    if (index >= 0 && target !== index) show(target);
+  }
+  function restart() {
+    var v = currentVideo();
+    if (!v) return;
+    v.currentTime = 0;
+    if (playing) v.play().catch(function () {});
+  }
+  function toggleLoop() {
+    looping = !looping;
+    var v = currentVideo();
+    if (v) v.loop = looping;
+    updateControls();
+  }
+  function toggleMuted() {
+    muted = !muted;
+    var v = currentVideo();
+    if (v) v.muted = muted;
+    updateControls();
+  }
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      leavingFullscreen = true;
+      document.exitFullscreen().catch(function () {});
+    } else {
+      enterFullscreen();
+    }
+  }
+  // A close can land while the request is pending, and teardown then has no
+  // fullscreen to leave.
+  function enterFullscreen() {
+    document.documentElement.requestFullscreen().then(function () {
+      if (!dlg.open) { document.exitFullscreen().catch(function () {}); return; }
+      // The fullscreen root joins the top layer above the open dialog and
+      // paints the page over the show; reopening puts the show back on top.
+      restacks++;
+      dlg.close();
+      dlg.showModal();
+    }, function () {});
+  }
+
+  function updateControls() {
+    var isVideo = !!(current && current.video);
+    position.textContent = (index + 1) + ' / ' + ids.length;
+    dlg.querySelector('.slideshow-play-label').textContent = playing ? 'Pause' : 'Play';
+    dlg.querySelectorAll('[data-slideshow="first"], [data-slideshow="previous"]').forEach(function (b) { b.disabled = index <= 0; });
+    dlg.querySelectorAll('[data-slideshow="next"], [data-slideshow="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
+    button('restart').disabled = !isVideo;
+    var loop = button('loop');
+    loop.setAttribute('aria-pressed', String(looping));
+    loop.textContent = looping ? 'Loop: on' : 'Loop: off';
+    var mute = button('mute');
+    mute.setAttribute('aria-pressed', String(!muted));
+    mute.textContent = muted ? 'Sound: off' : 'Sound: on';
+  }
+
+  function teardown() {
+    displayEpoch++;
+    preloadEpoch++;
+    clearTimeout(autoTimer);
+    clearTimeout(skipTimer);
+    prepared = null;
+    current = null;
+    slots.forEach(clearSlot);
+    if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+  }
+  function ensure() {
+    if (dlg && dlg.isConnected) return true;
+    dlg = document.getElementById('slideshow-dialog');
+    if (!dlg) return false;
+    slots = Array.from(dlg.querySelectorAll('.slideshow-slot'));
+    message = document.getElementById('slideshow-message');
+    position = document.getElementById('slideshow-position');
+    durationSelect = document.getElementById('slideshow-duration');
+    dlg.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-slideshow]');
+      if (b) actions[b.dataset.slideshow]();
+    });
+    onSwipe(dlg.querySelector('.slideshow-stage'), actions.previous, actions.next);
+    dlg.addEventListener('close', function () {
+      if (restacks) { restacks--; return; }
+      var id = index >= 0 ? ids[index] : 0;
+      teardown();
+      if (!id) return;
+      if (detailStart) {
+        if (id !== detailStart) window.location.href = '/images/' + id + detailBack;
+        return;
+      }
+      var cards = Array.from(document.querySelectorAll('.thumb-card'));
+      var card = document.querySelector('.thumb-card[data-id="' + id + '"]');
+      if (card) { setFocused(cards, cards.indexOf(card)); return; }
+      var params = new URLSearchParams(window.location.search);
+      params.delete('page');
+      params.set('at', id);
+      window.location.href = '/?' + params + '#img-' + id;
+    });
+    durationSelect.addEventListener('change', function () {
+      localStorage.setItem('monbooru_slideshow_duration', durationSelect.value);
+      durationMs = parseInt(durationSelect.value, 10) * 1000;
+      if (!current || current.video) return;
+      remainingMs = durationMs;
+      startedAt = playing ? Date.now() : null;
+      schedule();
+    });
+    if (!documentBound) bindDocument();
+    return true;
+  }
+  function bindDocument() {
+    documentBound = true;
+    // On the document: a button disabled under focus drops it out of the dialog.
+    document.addEventListener('keydown', function (e) {
+      if (!dlg || !dlg.open || chorded(e) || e.target.tagName === 'SELECT') return;
+      var action = keys[e.key];
+      if (!action) return;
+      e.preventDefault();
+      actions[action]();
+    });
+    // In fullscreen the browser keeps Esc to itself, so a fullscreen exit
+    // the slideshow did not ask for is that Esc.
+    document.addEventListener('fullscreenchange', function () {
+      if (document.fullscreenElement || !dlg) return;
+      if (dlg.open && !leavingFullscreen) dlg.close();
+      leavingFullscreen = false;
+    });
+  }
+
+  return {
+    start: function (btn) {
+      if (!ensure() || dlg.open) return;
+      var flash = document.querySelector('[data-action-flash]');
+      var startID = Number(btn.dataset.start) || 0;
+      var firstID = startID;
+      var params;
+      if (startID) {
+        params = new URLSearchParams({ scope: 'search', q: btn.dataset.q, sort: btn.dataset.sort, order: btn.dataset.order, seed: btn.dataset.seed, next: btn.dataset.next });
+      } else {
+        var focused = document.querySelector('.thumb-card.focused');
+        if (focused) firstID = Number(focused.dataset.id);
+        var scope = selectAllMatching || pickedIDs.length === 0 ? 'search' : 'selection';
+        var parts = batchScopeParams(scope, flash);
+        if (!parts) return;
+        params = new URLSearchParams(['scope=' + scope].concat(parts).join('&'));
+      }
+      params.set('start', firstID);
+      postForm('/internal/slideshow', params, {
+        flashId: flash.id,
+        onOK: function (res) {
+          res.json().then(function (data) {
+            if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
+            ids = data.ids;
+            videos = new Set(data.videos);
+            index = -1;
+            current = null;
+            prepared = null;
+            visibleSlot = 0;
+            playing = false;
+            muted = true;
+            looping = false;
+            durationMs = readDuration() * 1000;
+            durationSelect.value = String(durationMs / 1000);
+            updateControls();
+            document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
+            dlg.showModal();
+            enterFullscreen();
+            detailStart = startID;
+            detailBack = btn.dataset.back || '';
+            show(data.start);
+          });
+        }
+      });
+    },
+  };
+})();
+
 function openReaderJumpDialog() {
   var dlg = document.getElementById('reader-jump-dialog');
   if (!dlg) return false;
@@ -495,7 +894,7 @@ function openReaderJumpDialog() {
 
 function handleReaderKey(e) {
   var reader = document.getElementById('reader');
-  if (!reader) return false;
+  if (!reader || chorded(e)) return false;
   if (e.target.tagName.toLowerCase() === 'input') return false;
   if (document.querySelector('dialog[open]')) return false;
   var page = parseInt(reader.dataset.page, 10) || 1;
@@ -566,6 +965,7 @@ document.addEventListener('keydown', function(e) {
   var isInput = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
 
   if (lightbox.handleKey(e)) return;
+  if (!isInput && !chorded(e) && chordStep(e)) return;
   if (handleReaderKey(e)) return;
   if (handlePagesGridKey(e)) return;
 
@@ -613,7 +1013,21 @@ document.addEventListener('keydown', function(e) {
 
   if (isInput) return;
 
-  if (chordStep(e)) return;
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+    if (document.querySelector('.thumb-checkbox')) {
+      e.preventDefault();
+      selectAll();
+      return;
+    }
+    var tagPageBox = document.getElementById('tag-select-page');
+    if (tagPageBox) {
+      e.preventDefault();
+      if (!tagPageBox.checked) tagPageBox.click();
+    }
+    return;
+  }
+
+  if (chorded(e)) return;
 
   if (e.key === '?') {
     var helpDlg = document.getElementById('shortcuts-help');
@@ -651,19 +1065,19 @@ document.addEventListener('keydown', function(e) {
     if (swDlg) { e.preventDefault(); swDlg.showModal(); return; }
   }
 
-  if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+  if (e.key === 'g') {
     e.preventDefault();
     enterChord(chordMap.g, 'g');
     return;
   }
 
-  if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey && isDetailPage()) {
+  if (e.key === 'e' && isDetailPage()) {
     e.preventDefault();
     enterChord(chordMap.e, 'e');
     return;
   }
 
-  if (e.key === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+  if (e.key === 'x') {
     if (chordDigitTargets(chordMap.x).length) {
       e.preventDefault();
       enterChord(chordMap.x, 'x');
@@ -671,23 +1085,9 @@ document.addEventListener('keydown', function(e) {
     }
   }
 
-  if (e.key === 't' && !e.ctrlKey && !e.metaKey && !e.altKey && (isTagsPage() || isTagDetailPage())) {
+  if (e.key === 't' && (isTagsPage() || isTagDetailPage())) {
     e.preventDefault();
     enterChord(chordMap.t, 't');
-    return;
-  }
-
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
-    if (document.querySelector('.thumb-checkbox')) {
-      e.preventDefault();
-      selectAll();
-      return;
-    }
-    var tagPageBox = document.getElementById('tag-select-page');
-    if (tagPageBox) {
-      e.preventDefault();
-      if (!tagPageBox.checked) tagPageBox.click();
-    }
     return;
   }
 
@@ -720,7 +1120,7 @@ document.addEventListener('keydown', function(e) {
     if (clickFirstSelector(['.btn-fav'])) { e.preventDefault(); return; }
   }
 
-  if (e.key === 'a' && !e.ctrlKey && !e.metaKey) {
+  if (e.key === 'a') {
     if (batchBarVisible()) { e.preventDefault(); openTagDialog('selection'); return; }
     var tagInput = document.getElementById('tag-input');
     if (tagInput) { e.preventDefault(); tagInput.focus(); return; }
@@ -740,6 +1140,10 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'P' && isDetailPage()) {
     var pagesBtn = document.querySelector('.btn-manga-action.btn-pages');
     if (pagesBtn) { e.preventDefault(); window.location.href = pagesBtn.href; return; }
+  }
+  if ((e.key === '[' || e.key === ']') && isDetailPage()) {
+    var step = document.querySelector('.coll-nav-keyed .coll-step[data-dir="' + (e.key === '[' ? 'prev' : 'next') + '"]');
+    if (step) { e.preventDefault(); window.location.href = step.href; return; }
   }
   if (e.key === 'C' && isDetailPage()) {
     if (clickFirstSelector(['.btn-manga-action.btn-generate-collection'])) { e.preventDefault(); return; }
@@ -797,7 +1201,7 @@ document.addEventListener('keydown', function(e) {
     if (clickFirstSelector(['#batch-invert'])) { e.preventDefault(); return; }
   }
 
-  if (e.key === 'A' && !e.ctrlKey && !e.metaKey) {
+  if (e.key === 'A') {
     if (clickFirstSelector(['#batch-select-all-matching:not([hidden])'])) { e.preventDefault(); return; }
   }
 
@@ -808,6 +1212,10 @@ document.addEventListener('keydown', function(e) {
       }
     }
     if (clickFirstSelector(['.add-tag-form .btn-hash-lookup:not([disabled])'])) { e.preventDefault(); return; }
+  }
+
+  if (e.key === 'w') {
+    if (clickFirstSelector(['#slideshow-btn'])) { e.preventDefault(); return; }
   }
 
   if (isGalleryPage()) {
@@ -934,7 +1342,7 @@ document.addEventListener('keydown', function(e) {
     }
     var focusedCard = document.querySelector('.thumb-card.focused a');
     if (focusedCard) { window.location.href = focusedCard.href; return; }
-    var tagLink = document.querySelector('.tag-row.focused .btn-see-detail');
+    var tagLink = document.querySelector('.tag-row.focused .tag-name-cell a');
     if (tagLink) { window.location.href = tagLink.href; return; }
   }
 });
@@ -1483,6 +1891,9 @@ function updateBatchBar() {
   const onPage = document.querySelectorAll('.thumb-checkbox:checked').length;
   const total = document.querySelectorAll('.thumb-checkbox').length;
   const active = selectAllMatching || pickedIDs.length > 0;
+  // A pick enters the mode the toggle does, so None or an Invert that
+  // empties the page leaves it up either way.
+  if (active) selectMode = true;
   const armed = selectionArmed();
   const bar = document.getElementById('batch-bar');
   const pluginBar = document.getElementById('plugin-batch-bar');
@@ -1602,6 +2013,8 @@ function takeTagStash() {
 
 document.addEventListener('DOMContentLoaded', function() {
   readSelection();
+  var mode = readStash('monbooru_select_mode', 30000, true);
+  if (mode && mode.url === selectionKey()) selectMode = true;
   syncSelectionBoxes();
   // Every box is set: across a reload a browser restores form state by
   // position.
@@ -1776,6 +2189,7 @@ function submitPageJump(inputId) {
   if (max && p > max) p = max;
   var u = new URL(window.location.href);
   u.searchParams.set('page', String(p));
+  u.searchParams.delete('at');
   window.location.href = u.toString();
 }
 
@@ -1794,8 +2208,10 @@ document.addEventListener('click', function(e) {
 function setPageSize(size) {
   postForm('/internal/view-prefs', {page_size: size}, {
     onOK: function() {
+      if (selectMode) writeStash('monbooru_select_mode', {url: selectionKey()});
       var u = new URL(location.href);
       u.searchParams.set('page', '1');
+      u.searchParams.delete('at');
       location.href = u.toString();
     }
   });
@@ -1934,6 +2350,23 @@ function initFolderTree() {
 }
 
 document.addEventListener('DOMContentLoaded', initFolderTree);
+
+function markInboxGrowth() {
+  var nav = document.getElementById('inbox-nav');
+  var count = document.getElementById('inbox-nav-count');
+  if (!nav || !count) return;
+  var n = parseInt((count.textContent.match(/\d+/) || ['0'])[0], 10);
+  var key = 'monbooru_inbox_seen:' + (document.body.dataset.gallery || '');
+  try {
+    var seen = parseInt(localStorage.getItem(key) || '0', 10);
+    if (nav.classList.contains('active') || n < seen) {
+      localStorage.setItem(key, String(n));
+    } else if (n > seen) {
+      nav.classList.add('inbox-new');
+    }
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', markInboxGrowth);
 document.addEventListener('htmx:afterSettle', function(e) {
   var el = e.detail.elt;
   if (el && el.querySelector && el.querySelector('.folder-toggle-btn')) initFolderTree();
@@ -1954,26 +2387,34 @@ function suggestInputOf(btn) {
   return input;
 }
 
+// The word the caret sits in or at the end of; an input keeps its caret
+// while a click on a suggestion has the focus.
+function wordAtCaret(input) {
+  var v = input.value;
+  var at = input.selectionStart == null ? v.length : input.selectionStart;
+  var start = at, end = at;
+  while (start > 0 && !/\s/.test(v[start - 1])) start--;
+  while (end < v.length && !/\s/.test(v[end])) end++;
+  return {start: start, end: end, word: v.slice(start, end)};
+}
+
 function applyTagSuggest(btn) {
   var tagName = btn.dataset.tagName;
   if (!tagName) return;
   var input = suggestInputOf(btn);
   if (!input) return;
   if (input.dataset.multiTags) {
-    var words = input.value.split(/(\s+)/);
-    var lastIdx = lastWordIndex(words);
-    if (lastIdx >= 0) words[lastIdx] = tagName;
-    else words.push(tagName);
-    input.value = words.join('') + ' ';
+    var w = wordAtCaret(input);
+    var after = input.value.slice(w.end);
+    if (!/^\s/.test(after)) after = ' ' + after;
+    input.value = input.value.slice(0, w.start) + tagName + after;
     input.focus();
+    var caret = w.start + tagName.length + 1;
+    input.setSelectionRange(caret, caret);
     return;
   }
   input.value = tagName;
   input.focus();
-  var form = input.closest('form');
-  if (form && form.id === 'add-tag-form') {
-    form.requestSubmit();
-  }
 }
 
 function applyLabelSuggest(btn, key) {
@@ -2063,14 +2504,11 @@ document.addEventListener('click', function (e) {
   var dlg = document.getElementById('tagger-cmd-dialog');
   if (!dlg) return;
   var host = btn.dataset.hostCmd || '';
-  var docker = btn.dataset.dockerCmd || '';
   document.getElementById('tagger-cmd-name').textContent = btn.dataset.taggerName || '';
   document.getElementById('tagger-cmd-desc').textContent = btn.dataset.taggerDesc || '';
   document.getElementById('tagger-cmd-gated').hidden = !btn.dataset.gated;
   document.getElementById('tagger-cmd-host').textContent = host;
-  document.getElementById('tagger-cmd-docker').textContent = docker;
   document.getElementById('tagger-cmd-host-copy').dataset.copy = host;
-  document.getElementById('tagger-cmd-docker-copy').dataset.copy = docker;
   dlg.showModal();
 });
 
@@ -2174,7 +2612,7 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     if (finishedAt) _lastReloadedFinishedAt = finishedAt;
     if (document.getElementById('gallery-grid') || document.getElementById('tags-page') || document.getElementById('tag-detail-page') || document.getElementById('collections-page')) {
       var pendingDone = el.querySelector('.job-done');
-      if (pendingDone) stashActionFlash(escapeHTML(pendingDone.textContent || ''), 'ok');
+      if (pendingDone) stashActionFlash(jobDoneFlash(pendingDone), 'ok');
       // Left armed: reload() does not stop this script, and a navigation
       // is still pending.
       window.location.reload();
@@ -2203,8 +2641,10 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     var grid = jobType === 'check' ? null : document.getElementById('gallery-grid');
     if (grid) {
       var doneEl = el.querySelector('.job-done');
-      if (doneEl) showActionFlash(escapeHTML(doneEl.textContent || ''), 'ok');
+      if (doneEl) showActionFlash(jobDoneFlash(doneEl), 'ok');
       if (!inboxBusy()) refreshGalleryGrid();
+    } else if (window.htmx && document.getElementById('footer-count-tags')) {
+      window.htmx.ajax('GET', '/internal/footer-counts', {target: '#footer', swap: 'none'});
     }
 
     var imageTags = document.getElementById('image-tags');
@@ -2216,6 +2656,13 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     }
   }
 });
+
+// showActionFlash colours only an error itself, so a partial run's line
+// arrives already classed.
+function jobDoneFlash(doneEl) {
+  var text = escapeHTML(doneEl.title || '');
+  return doneEl.classList.contains('job-partial') ? '<div class="flash flash-warn">' + text + '</div>' : text;
+}
 
 function scopeCount(scope, countEl, nounEl) {
   var n = scope === 'selection' ? pickedIDs.length : matchingTotal();
@@ -2278,8 +2725,8 @@ function openPluginPage(btn) {
   if (!dlg || !frame) return;
   dlg.querySelector('.plugin-open-title').textContent = btn.dataset.peer + ': ' + btn.textContent.trim();
   dlg.querySelector('.plugin-open-tab').href = btn.dataset.href;
-  if (!frame.dataset.wired) {
-    frame.dataset.wired = '1';
+  if (!frame.pluginWired) {
+    frame.pluginWired = true;
     frame.addEventListener('load', pluginPageNavigated);
     // Escape closes the dialog without passing through Close.
     dlg.addEventListener('close', function() { frame.src = 'about:blank'; });
@@ -2521,6 +2968,8 @@ function handleSuggestKey(e, dropdownId, inputId) {
     e.preventDefault();
     focused.click();
   } else if (e.key === 'Escape') {
+    // An open list takes this Escape, so a dialog around the input stays open.
+    if (dd.childElementCount > 0) e.preventDefault();
     dd.innerHTML = '';
   }
 }
@@ -2543,6 +2992,7 @@ var suggestPairs = {
   'alias-create-suggest': {input: 'alias-create-canon', clearOnEmpty: true},
   'batch-alias-suggest': {input: 'batch-alias-canon', clearOnEmpty: true},
   'batch-imply-suggest': {input: 'batch-imply-target', clearOnEmpty: true},
+  'tag-create-suggest': {input: 'tag-create-name', clearOnEmpty: true},
   'detail-alias-suggest': {input: 'detail-alias-canon', clearOnEmpty: true},
   'implication-add-suggest': {input: 'implication-add-input', clearOnEmpty: true},
   'implied-by-add-suggest': {input: 'implied-by-add-input', clearOnEmpty: true},
@@ -2837,22 +3287,45 @@ function mergeCategoryCollision(tagID, catID) {
       // The body is unescaped plain text, and tag names may hold < and >.
       onErr: function(t) { setFlashText(document.getElementById('tag-flash'), 'err', t || 'Merge failed.'); }
     });
-  }, 'Its images and implications move onto the existing tag and its name stays as a zero-usage alias. This cannot be undone.', 'Merge');
+  }, 'Its images and implications move onto the existing tag, and its name keeps working as an alias. This cannot be undone.', 'Merge');
+}
+
+function mergeRenameCollision(btn) {
+  var target = btn.textContent.replace(/^Merge into /, '');
+  showConfirm('Merge this tag into ' + target + '?', function() {
+    postForm('/tags/batch-alias', {ids: btn.dataset.id, canonical_id: '#' + btn.dataset.target}, {
+      dialogId: 'rename-dialog',
+      flashId: 'rename-error',
+      okStatus: 202,
+      failMsg: 'Merge failed.',
+      catchMsg: 'Merge request failed.',
+      onOK: function() { armGalleryReload(); }
+    });
+  }, 'Its images and implications move onto ' + target + ', and its name keeps working as an alias. This cannot be undone.', 'Merge');
+}
+
+function dropAliasAndRename(btn) {
+  postForm('/tags/' + btn.dataset.alias, {}, {
+    method: 'DELETE',
+    flashId: 'rename-error',
+    catchMsg: 'Request failed.',
+    onOK: function() { document.getElementById('rename-form').requestSubmit(); }
+  });
 }
 
 function deleteTagFlow(btn, tagID, onSuccess) {
   var name = btn.dataset.name;
   var isRating = btn.dataset.category === 'rating';
   var msg = isRating
-    ? 'Strip "' + name + '" from every image?'
+    ? 'Remove the rating "' + name + '" from every image?'
     : 'Delete tag "' + name + '" and remove it from every image?';
   var danger = isRating
-    ? 'The rating tag itself stays in the catalog and can be re-added later.'
+    ? 'The rating itself stays and can be added again later.'
     : 'This cannot be undone.';
   showConfirm(msg, function() {
     btn.disabled = true;
     var el = document.getElementById('tag-flash');
-    setFlashText(el, 'warn', (isRating ? 'Stripping' : 'Deleting') + ' "' + name + '"…');
+    setFlashText(el, 'warn', (isRating ? 'Clearing' : 'Deleting') + ' "' + name + '"…');
     postForm('/tags/' + tagID, null, {
       method: 'DELETE',
       catchMsg: 'Delete request failed.',
@@ -2864,7 +3337,7 @@ function deleteTagFlow(btn, tagID, onSuccess) {
         // A raw fetch does not process HX-Trigger, so the flash is
         // stashed by hand.
         stashActionFlash(escapeHTML(isRating
-          ? 'Stripped "' + name + '" from every image.'
+          ? 'Cleared "' + name + '" from every image.'
           : 'Tag "' + name + '" deleted.'), 'ok');
         onSuccess();
       },
@@ -2873,5 +3346,5 @@ function deleteTagFlow(btn, tagID, onSuccess) {
         setFlashText(el, 'err', t || 'Delete failed.');
       }
     });
-  }, danger, isRating ? 'Strip' : 'Delete');
+  }, danger, isRating ? 'Clear' : 'Delete');
 }

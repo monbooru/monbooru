@@ -9,6 +9,7 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/search"
+	"github.com/monbooru/monbooru/internal/shared/session"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -19,7 +20,7 @@ func pageGalleryStale(w http.ResponseWriter, r *http.Request, active string) boo
 		return false
 	}
 	page := r.Header.Get("X-Monbooru-Gallery")
-	if page == "" && !isMultipart(r) {
+	if page == "" && !session.IsMultipart(r) {
 		page = r.FormValue("_gallery")
 	}
 	if page == "" || page == active {
@@ -30,10 +31,14 @@ func pageGalleryStale(w http.ResponseWriter, r *http.Request, active string) boo
 	return true
 }
 
-func (s *Server) requireActive(w http.ResponseWriter) (*library.Gallery, bool) {
+func (s *Server) requireActive(w http.ResponseWriter, r *http.Request) (*library.Gallery, bool) {
 	cx := s.active()
 	if cx == nil || cx.DB == nil {
-		http.Error(w, "no gallery", http.StatusServiceUnavailable)
+		if isHTMXRequest(r) {
+			flashHeaderErr(w, http.StatusServiceUnavailable, "No gallery is open.")
+		} else {
+			http.Error(w, "No gallery is open.", http.StatusServiceUnavailable)
+		}
 		return nil, false
 	}
 	return cx, true
@@ -51,7 +56,11 @@ func (s *Server) db() *db.DB {
 
 func (s *Server) source() search.Source {
 	if cx := s.active(); cx != nil {
-		return cx.Source()
+		src := cx.Source()
+		s.cfgMu.RLock()
+		src.LookupBackends = s.cfg.LookupBackends(cx.Name)
+		s.cfgMu.RUnlock()
+		return src
 	}
 	return search.Source{}
 }

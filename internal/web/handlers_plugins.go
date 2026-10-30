@@ -16,6 +16,7 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 )
 
 type pluginRowView struct {
@@ -156,11 +157,25 @@ func (s *Server) pairedPeerCount() int {
 	return n
 }
 
+// The answers carry the nav notice and the settings count too, so a
+// decision clears them at once rather than on the next job-status poll.
 func (s *Server) pairViewData() map[string]any {
+	n := s.pairNotice()
+	n.OOB = true
 	return map[string]any{
 		"Pending": s.pendingOffers(),
 		"Paired":  s.pairedPeerCount(),
+		"Notice":  n,
+		"PairKey": n.Key(),
 	}
+}
+
+func (s *Server) pairNotice() webui.PairNotice {
+	n := webui.PairNotice{Href: "/settings#plugins"}
+	for _, req := range s.pairs.ListPending() {
+		n.Items = append(n.Items, webui.PairItem{App: req.App, Source: req.Source, Version: req.Version, Repair: req.Repair, ExpiresAt: req.ExpiresAt()})
+	}
+	return n
 }
 
 type pendingOffer struct {
@@ -192,6 +207,9 @@ func (s *Server) pendingOffers() []pendingOffer {
 func (s *Server) pluginPairingFragment(w http.ResponseWriter, r *http.Request) {
 	data := s.pairViewData()
 	count, _ := data["Paired"].(int)
+	if r.URL.Query().Get("pair") == data["PairKey"] {
+		delete(data, "Notice")
+	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", data)
 	if was := r.URL.Query().Get("paired"); was != "" && was != strconv.Itoa(count) {
 		s.renderPluginRows(w, r, true)

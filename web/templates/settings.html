@@ -1,7 +1,10 @@
 {{define "maintenance_row"}}
         <tr>
-          <td><strong{{if .Accent}} class="{{.Accent}}"{{end}}>{{.Title}}</strong>{{if .Mark}}<span class="status-badge status-faint">{{.Mark}}</span>{{end}} <span class="field-hint">- {{.Desc}}{{with .View}} (<a href="{{.}}">view</a>){{end}}</span></td>
+          <td><strong{{if .Accent}} class="{{.Accent}}"{{end}}>{{.Title}}</strong>{{if .Mark}}<span class="status-badge status-faint">{{.Mark}}</span>{{end}} <span class="field-hint">{{.Desc}}{{with .View}} (<a href="{{.}}">view</a>){{end}}</span></td>
           <td>
+            {{if .Dialog}}
+            <button type="button" class="btn-sm" onclick="openMaintenanceDialog({{.Dialog}})">{{.Verb}}</button>
+            {{else}}
             <form hx-post="{{.URL}}" hx-target="#flash-maintenance" hx-swap="innerHTML"
                   {{if .JobKick}}hx-on::after-request="if(event.detail.successful){refreshJobStatus()}"
                   {{end}}{{if .Confirm}}hx-confirm="{{.Confirm}}"
@@ -10,6 +13,7 @@
                   {{end}}style="display:inline">
               <button type="submit" class="{{if .Danger}}btn-danger {{end}}btn-sm{{if .Accent}} {{.Accent}}{{end}}"{{if .MlGated}} data-peer-title=""{{end}}{{if .Disabled}} disabled title="{{.DisabledReason}}"{{end}}>{{.Verb}}</button>
             </form>
+            {{end}}
           </td>
         </tr>
 {{end}}
@@ -20,7 +24,7 @@
     {{if .DesktopProfile}}<a href="#desktop">Desktop</a>{{end}}
     <a href="#general">General</a>
     <a href="#galleries">Galleries</a>
-    <a href="#plugins">Plugins</a>
+    <a href="#plugins">Plugins<span id="settings-pair-count" class="nav-count">{{with len .PairNotice.Items}} ({{.}}){{end}}</span></a>
     <a href="#tagger">Tagger</a>
     <a href="#relations">Relations</a>
     <a href="#auth">Auth</a>
@@ -90,82 +94,72 @@
     {{template "webui/settings_section_header" dict "Title" "General" "Hint" "File handling, display options and meta tags."}}
     <div id="flash-general"></div>
     <form hx-post="/settings/general" hx-target="#flash-general" hx-swap="innerHTML">
-      <div class="settings-cols">
-        <div class="settings-sub">
-          <h4>Files</h4>
-          {{$sizeHint := "Files larger than this are skipped on upload and during sync."}}{{if eq $cfg.Gallery.MaxFileSizeMB 0}}{{$sizeHint = "0 means no cap: no file is skipped for its size."}}{{end}}
-          {{template "partials/range_field.html" dict "Name" "max_file_size_mb" "Label" "Max file size (MB)" "Min" 1 "Max" 5120 "Step" 1 "Value" $cfg.Gallery.MaxFileSizeMB "Ticks" (list 512 1024 2048 3072 4096 5120) "Hint" $sizeHint "Pinned" ($cfg.EnvPinned "gallery.max_file_size_mb")}}
-          <div class="field">
-            <div class="field-title">
-              <label>Ignored files and folders</label>
-              <button type="button" class="btn-link-accent" id="ignore-edit" onclick="openIgnoreDialog()">[edit]</button>
-            </div>
-            {{template "partials/ignore_list.html" (dict "Ignore" $cfg.Gallery.Ignore)}}
+      <div class="settings-grid">
+        {{$sizeHint := "Files larger than this are skipped on upload and during sync."}}{{if eq $cfg.Gallery.MaxFileSizeMB 0}}{{$sizeHint = "0 means no cap: no file is skipped for its size."}}{{end}}
+        {{template "partials/range_field.html" dict "Name" "max_file_size_mb" "Label" "Max file size (MB)" "Min" 1 "Max" 5120 "Step" 1 "Value" $cfg.Gallery.MaxFileSizeMB "Ticks" (list 512 1024 2048 3072 4096 5120) "Hint" $sizeHint "Pinned" ($cfg.EnvPinned "gallery.max_file_size_mb")}}
+        {{template "partials/range_field.html" dict "Name" "page_size" "Label" "Default page size" "Min" 1 "Max" 100 "Step" 1 "Value" $cfg.UI.PageSize "Ticks" (list 20 40 60 80 100)}}
+        <div class="field">
+          <div class="field-title">
+            <label>Ignored files and folders</label>
+            <button type="button" class="btn-link-accent" id="ignore-edit" onclick="openIgnoreDialog()">[edit]</button>
           </div>
-          <div class="field">
-            <label>Where received files go</label>
-            <div class="dest-row">
-              <div class="dest-part">
-                <label for="default_upload_folder">folder</label>
-                <input type="text" name="default_upload_folder" id="default_upload_folder" value="{{$cfg.Gallery.DefaultUploadFolder}}" placeholder="(gallery root)">
-              </div>
-              <span class="dest-sep" aria-hidden="true">/</span>
-              <div class="dest-part">
-                <label for="default_upload_name">name</label>
-                <input type="text" name="default_upload_name" id="default_upload_name" value="{{$cfg.Gallery.DefaultUploadName}}" placeholder="(the sender's name)">
-              </div>
-            </div>
-            <div class="dest-hints">
-              <span class="field-hint">Blank = the gallery root.</span>
-              <span class="field-hint">Blank = the sender's name.</span>
-            </div>
-            {{template "partials/name_tokens.html" (dict "Targets" "default_upload_folder default_upload_name" "Received" true)}}
-            <div id="upload-dest-preview"
-                 hx-get="/internal/name/preview"
-                 hx-trigger="input delay:200ms from:#default_upload_folder, input delay:200ms from:#default_upload_name"
-                 hx-target="this"
-                 hx-vals='js:{scope: "upload", folder: document.getElementById("default_upload_folder").value, name: document.getElementById("default_upload_name").value}'></div>
-          </div>
-          <div class="field">
-            <label>
-              <input type="checkbox" name="rename_on_ingest" {{if $cfg.Gallery.RenameOnIngest}}checked{{end}}>
-              Apply to files found on disk too
-            </label>
-            <span class="field-hint">Files and names what the watcher and a sync pick up, wherever it was dropped.</span>
-          </div>
-          <div class="field">
-            <label>
-              {{$pin := $cfg.EnvPinned "gallery.watch_enabled"}}
-              <input type="checkbox" name="watch_enabled" {{if $cfg.Gallery.WatchEnabled}}checked{{end}}{{if $pin}} disabled{{end}}>
-              Watch gallery for new files automatically
-            </label>
-            <span class="field-hint">{{if $pin}}Set by {{$pin}} in the environment.{{else}}Takes effect after a restart.{{end}}</span>
+          {{template "partials/ignore_list.html" (dict "Ignore" $cfg.Gallery.Ignore)}}
+        </div>
+        <div class="field">
+          <label>Thumbnails</label>
+          <div class="radio-row">
+            <label><input type="radio" name="thumbnail_fit" value="square" {{if ne $cfg.UI.ThumbnailFit "natural"}}checked{{end}}> Square (cropped)</label>
+            <label><input type="radio" name="thumbnail_fit" value="natural" {{if eq $cfg.UI.ThumbnailFit "natural"}}checked{{end}}> Real aspect ratio</label>
           </div>
         </div>
-        <div class="settings-col">
-          <div class="settings-sub">
-            <h4>UI</h4>
-            {{template "partials/range_field.html" dict "Name" "page_size" "Label" "Default page size" "Min" 1 "Max" 100 "Step" 1 "Value" $cfg.UI.PageSize "Ticks" (list 20 40 60 80 100)}}
-            <div class="field">
-              <label>Thumbnails</label>
-              <div class="radio-row">
-                <label><input type="radio" name="thumbnail_fit" value="square" {{if ne $cfg.UI.ThumbnailFit "natural"}}checked{{end}}> Square (cropped)</label>
-                <label><input type="radio" name="thumbnail_fit" value="natural" {{if eq $cfg.UI.ThumbnailFit "natural"}}checked{{end}}> Real aspect ratio</label>
-              </div>
+        <div class="field">
+          <label>
+            {{$pin := $cfg.EnvPinned "gallery.watch_enabled"}}
+            <input type="checkbox" name="watch_enabled" {{if $cfg.Gallery.WatchEnabled}}checked{{end}}{{if $pin}} disabled{{end}}>
+            Watch gallery for new files automatically
+          </label>
+          <span class="field-hint">{{if $pin}}Set by {{$pin}} in the environment.{{else}}Takes effect after a restart.{{end}}</span>
+        </div>
+        <div class="field">
+          <label>
+            {{$pin := $cfg.EnvPinned "gallery.auto_meta_tags"}}
+            <input type="checkbox" name="auto_meta_tags" {{if $cfg.Gallery.AutoMetaTags}}checked{{end}}{{if $pin}} disabled{{end}}>
+            Automatically generate meta tags from the file
+          </label>
+          <span class="field-hint">Adds tags like highres, animated or greyscale from the file itself.</span>
+          {{with $pin}}<span class="field-hint">Set by {{.}} in the environment.</span>{{end}}
+        </div>
+        <div class="field">
+          <label>Where received files go</label>
+          <span class="field-hint">Uploads, and files sent by monloader or the API.</span>
+          <div class="dest-row">
+            <div class="dest-part">
+              <label for="default_upload_folder">folder</label>
+              <input type="text" name="default_upload_folder" id="default_upload_folder" value="{{$cfg.Gallery.DefaultUploadFolder}}" placeholder="(gallery root)">
+            </div>
+            <span class="dest-sep" aria-hidden="true">/</span>
+            <div class="dest-part">
+              <label for="default_upload_name">name</label>
+              <input type="text" name="default_upload_name" id="default_upload_name" value="{{$cfg.Gallery.DefaultUploadName}}" placeholder="(the sender's name)">
             </div>
           </div>
-          <div class="settings-sub">
-            <h4>Meta tags</h4>
-            <div class="field">
-              <label>
-                {{$pin := $cfg.EnvPinned "gallery.auto_meta_tags"}}
-                <input type="checkbox" name="auto_meta_tags" {{if $cfg.Gallery.AutoMetaTags}}checked{{end}}{{if $pin}} disabled{{end}}>
-                Automatically generate meta tags from the file
-              </label>
-              <span class="field-hint">Generate some meta tags automatically: highres, lowres, animated, greyscale...</span>
-              {{with $pin}}<span class="field-hint">Set by {{.}} in the environment.</span>{{end}}
-            </div>
+          <div class="dest-hints">
+            <span class="field-hint">Blank = the gallery root.</span>
+            <span class="field-hint">Blank = the sender's name.</span>
           </div>
+          {{template "partials/name_tokens.html" (dict "Targets" "default_upload_folder default_upload_name" "Received" true)}}
+          <div id="upload-dest-preview"
+               hx-get="/internal/name/preview"
+               hx-trigger="input delay:200ms from:#default_upload_folder, input delay:200ms from:#default_upload_name"
+               hx-target="this"
+               hx-vals='js:{scope: "upload", folder: document.getElementById("default_upload_folder").value, name: document.getElementById("default_upload_name").value}'></div>
+        </div>
+        <div class="field">
+          <label>
+            <input type="checkbox" name="rename_on_ingest" {{if $cfg.Gallery.RenameOnIngest}}checked{{end}}>
+            Apply to files found on disk too
+          </label>
+          <span class="field-hint">Also file new images that appear in the gallery folder (sync or watcher). A blank folder leaves them where they were dropped. Images already in the gallery keep their names. See <a href="#maintenance">Maintenance - Apply destination</a> to move them too.</span>
         </div>
       </div>
       <div class="settings-actions"><button type="submit">Save</button></div>
@@ -175,7 +169,7 @@
   <dialog id="ignore-dialog">
     <form id="ignore-form" hx-post="/settings/general/ignore" hx-target="#flash-ignore" hx-swap="innerHTML"
           hx-on::after-request="onIgnoreSaved()">
-      <p><strong>Ignored files and folders</strong></p>
+      <p class="dlg-title">Ignored files and folders{{template "webui/dialog_x"}}</p>
       <textarea name="ignore" id="ignore" rows="12" spellcheck="false" aria-label="Ignored files and folders"></textarea>
       <ul class="ignore-rules">
         <li>One name or path per line.</li>
@@ -191,8 +185,8 @@
   <script>
   function openIgnoreDialog() {
     var field = document.getElementById('ignore');
-    var lines = Array.prototype.map.call(document.querySelectorAll('#ignore-list code'),
-      function(c) { return c.textContent; });
+    var list = document.querySelector('#ignore-list span[title]');
+    var lines = list ? list.title.split('\n') : [];
     field.value = lines.join('\n');
     field.rows = Math.min(Math.max(lines.length + 1, 6), 20);
     clearSlots('flash-ignore');
@@ -215,60 +209,50 @@
     {{template "webui/settings_section_header" dict "Title" "Galleries" "Hint" "Add, switch, export or import your galleries."}}
     <div id="flash-galleries"></div>
     <div class="table-scroll">
-    <table class="gallery-table">
+    <table class="gallery-table stack-table">
       <thead>
         <tr>
-          <th>Name</th><th>Gallery path</th><th>Status</th><th>Content</th>
-          <th>Switch</th><th>Set default</th><th>Rename</th>
-          <th>Export</th><th>Import</th><th>Delete</th>
+          <th>Name</th><th>Gallery path</th><th>Status</th><th>Content</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {{range $galleries}}
         <tr>
-          <td><strong>{{.Name}}</strong></td>
-          <td class="gallery-path-cell"><code>{{.GalleryPath}}</code>{{range .LeavesOut}}<span class="gallery-leaves">leaves out {{.}}</span>{{end}}</td>
-          <td class="gallery-status-cell">
-            {{if eq .Name $active}}<span class="status-badge status-ok">active</span>{{end}}
-            {{if eq .Name $cfg.DefaultGallery}}<span class="status-badge status-ok">default</span>{{end}}
+          <td class="stack-head"><strong>{{.Name}}</strong></td>
+          <td class="gallery-path-cell" data-label="Gallery path"><code>{{.GalleryPath}}</code>{{range .LeavesOut}}<span class="gallery-leaves">leaves out {{.}}</span>{{end}}</td>
+          <td class="gallery-status-cell" data-label="Status">
+            {{- if eq .Name $active}}<span class="status-badge status-ok">active</span>{{end}}
+            {{- if eq .Name $cfg.DefaultGallery}}<span class="status-badge status-ok">default</span>{{end -}}
           </td>
-          <td class="gallery-info"><span title="?gallery={{.Name}}">{{.Images}} img{{if .Images}} · {{.Tags}} tags{{end}}</span></td>
+          <td class="gallery-info" data-label="Content"><span>{{.Images}} img{{if .Images}} · {{.Tags}} tags{{end}}</span></td>
           <td>
+            <div class="gallery-actions">
             {{if ne .Name $active}}
-            <form hx-post="/internal/gallery/switch" hx-target="#flash-galleries" hx-swap="innerHTML" style="display:inline">
+            <form hx-post="/internal/gallery/switch" hx-target="#flash-galleries" hx-swap="innerHTML">
               <input type="hidden" name="name" value="{{.Name}}">
               <button type="submit" class="btn-sm">Switch</button>
             </form>
             {{else}}
-            <span class="status-dim">-</span>
+            <button class="btn-sm gallery-action-spacer" tabindex="-1" aria-hidden="true">Switch</button>
             {{end}}
-          </td>
-          <td>
             {{if ne .Name $cfg.DefaultGallery}}
-            <form hx-post="/settings/galleries/{{.Name}}/default" hx-target="#flash-galleries" hx-swap="innerHTML" style="display:inline">
+            <form hx-post="/settings/galleries/{{.Name}}/default" hx-target="#flash-galleries" hx-swap="innerHTML">
               <button type="submit" class="btn-sm btn-success">Set default</button>
             </form>
             {{else}}
-            <span class="status-dim">-</span>
+            <button class="btn-sm gallery-action-spacer" tabindex="-1" aria-hidden="true">Set default</button>
             {{end}}
-          </td>
-          <td>
             <button class="btn-sm btn-gallery-rename" data-name="{{.Name}}">Rename</button>
-          </td>
-          <td>
             <button class="btn-sm btn-gallery-export" data-name="{{.Name}}">Export</button>
-          </td>
-          <td>
             <button class="btn-sm btn-danger btn-gallery-import"
                     data-name="{{.Name}}"
                     data-can-replace="{{if or (eq .Name $active) (eq .Name $cfg.DefaultGallery)}}false{{else}}true{{end}}">Import</button>
-          </td>
-          <td>
             {{if and (ne .Name $active) (ne .Name $cfg.DefaultGallery) (gt (len $galleries) 1)}}
             <button class="btn-sm btn-danger btn-gallery-delete" data-name="{{.Name}}" data-keeps="{{range $i, $k := .LeavesOut}}{{if $i}}, {{end}}{{$k}}{{end}}">Delete</button>
             {{else}}
-            <span class="status-dim" title="{{if le (len $galleries) 1}}The last gallery cannot be deleted{{else if eq .Name $active}}Switch to another gallery first{{else}}Set another gallery as the default first{{end}}">-</span>
+            <button class="btn-sm btn-danger" disabled title="{{if le (len $galleries) 1}}The last gallery cannot be deleted{{else if eq .Name $active}}Switch to another gallery first{{else}}Set another gallery as the default first{{end}}">Delete</button>
             {{end}}
+            </div>
           </td>
         </tr>
         {{end}}
@@ -285,7 +269,7 @@
             hx-encoding="multipart/form-data" class="add-gallery-form"
             hx-on::before-request="setAddGalleryBusy(this, true)"
             hx-on::after-request="onAddGalleryResponse(this)">
-        <p>Add a new gallery</p>
+        <p class="dlg-title">Add a new gallery{{template "webui/dialog_x"}}</p>
         <div class="field">
           <label>Name</label>
           <input type="text" name="name" required pattern="[A-Za-z0-9_\-]+"
@@ -344,7 +328,7 @@
   <dialog id="gallery-rename-dialog">
     <form id="gallery-rename-form" hx-post="" hx-target="#flash-gallery-rename" hx-swap="innerHTML"
           hx-on::after-request="onRenameGalleryResponse()">
-      <p>Rename <strong id="gallery-rename-src"></strong></p>
+      <p class="dlg-title">Rename <strong id="gallery-rename-src"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>New name</label>
         <input type="text" name="new_name" id="gallery-rename-input" required pattern="[A-Za-z0-9_\-]+" autocomplete="off"
@@ -359,7 +343,7 @@
   <dialog id="gallery-delete-dialog">
     <form id="gallery-delete-form" hx-post="" hx-target="#flash-gallery-delete" hx-swap="innerHTML"
           hx-on::after-request="onDeleteGalleryResponse()">
-      <p>Delete gallery <strong id="gallery-delete-src"></strong>?</p>
+      <p class="dlg-title">Delete gallery <strong id="gallery-delete-src"></strong>?{{template "webui/dialog_x"}}</p>
       <p class="confirm-dialog-danger">The database and thumbnails will be erased.</p>
       <div class="field">
         <label><input type="checkbox" name="remove_folder"> Also delete the gallery folder and everything in it</label>
@@ -377,7 +361,7 @@
   <dialog id="gallery-export-dialog">
     <form id="gallery-export-form" method="get" action=""
           onsubmit="setTimeout(function(){document.getElementById('gallery-export-dialog').close()}, 100)">
-      <p>Export gallery <strong id="gallery-export-src"></strong></p>
+      <p class="dlg-title">Export gallery <strong id="gallery-export-src"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label><input type="radio" name="format" value="db" checked> Database (.db): SQLite snapshot, monbooru format</label>
       </div>
@@ -399,7 +383,7 @@
           hx-encoding="multipart/form-data"
           hx-on::before-request="setImportBusy(this, true)"
           hx-on::after-request="onImportResponse(this)">
-      <p>Import into gallery <strong id="gallery-import-src"></strong></p>
+      <p class="dlg-title">Import into gallery <strong id="gallery-import-src"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label><input type="radio" name="mode" value="merge" checked onchange="syncImportModeFields()"> Merge: add tags from the uploaded file, and images too when it carries their files (.zip)</label>
       </div>
@@ -521,8 +505,8 @@
     window.location.reload();
   }
 
-  // A successful import switches the active gallery, so the page reloads
-  // and the summary rides the stash.
+  // A successful import reloads the page to repaint the table, and the
+  // summary rides the stash.
   function onImportResponse(form) {
     setImportBusy(form, false);
     reloadWithGalleryFlash('flash-gallery-import', 'gallery-import-dialog', '.flash-ok');
@@ -552,7 +536,7 @@
     <div id="flash-plugins"></div>
     <div class="settings-sub">
       <h4>Pairing requests</h4>
-      {{template "partials/plugin_pairing.html" (dict "Pending" $pluginPending "Paired" $pluginPaired)}}
+      {{template "partials/plugin_pairing.html" (dict "Pending" $pluginPending "Paired" $pluginPaired "PairKey" .PairNotice.Key)}}
     </div>
     <div class="settings-sub">
       <div class="settings-sub-head">
@@ -596,7 +580,7 @@
             <p class="field-hint">{{if $pin}}Set by {{$pin}} in the environment.{{else}}Providers need a matching ONNX Runtime library.{{end}}</p>
           </div>
           {{template "partials/range_field.html" dict "Name" "parallel" "Label" "Parallel workers" "Min" 1 "Max" 16 "Step" 1 "Value" $cfg.Tagger.Parallel "Ticks" (list 1 2 4 8 12 16) "Hint" "Images tagged in parallel."}}
-          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Tagger RAM/VRAM idle release (minutes)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "Use 0 to free it just after inference."}}
+          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Unload the model after (minutes idle)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "0 unloads it right after each run."}}
         </div>
         <div class="settings-actions"><button type="submit">Save</button></div>
       </div>
@@ -605,25 +589,25 @@
       <h4>Taggers list</h4>
       {{if $rows}}
       <div class="table-scroll">
-      <table class="tagger-table">
+      <table class="tagger-table stack-table">
         <thead>
           <tr><th>Tagger</th><th>Status</th><th>Configuration</th><th>Actions</th></tr>
         </thead>
         <tbody>
           {{range $r := $rows}}
           <tr>
-            <td>
+            <td class="stack-head">
               <strong>{{$r.Name}}</strong>
               {{if and $r.Installed (not $r.Supported)}}<span class="status-badge status-off" title="Not in the catalog">not in catalog</span>{{end}}
               {{if $r.Description}}<div class="field-hint tagger-row-desc">{{$r.Description}}</div>{{end}}
             </td>
-            <td>
+            <td data-label="Status">
               {{if not $r.Installed}}<span class="status-badge status-faint" title="Not installed">not installed</span>
               {{else if not $r.Available}}<span class="status-badge status-warn" title="{{$r.Reason}}">unavailable</span>
               {{else if $r.Enabled}}<span class="status-badge status-enabled" title="Enabled">enabled</span>
               {{else}}<span class="status-badge status-off" title="Disabled">disabled</span>{{end}}
             </td>
-            <td>
+            <td data-label="Configuration">
               {{if $r.Malformed}}
               <span class="field-hint">{{$r.Reason}}</span>
               {{else if $r.Installed}}
@@ -648,8 +632,7 @@
                         data-tagger-name="{{$r.Name}}"
                         data-tagger-desc="{{$r.Description}}"
                         data-gated="{{if $r.Gated}}1{{end}}"
-                        data-host-cmd="{{$r.HostCommand}}"
-                        data-docker-cmd="{{$r.DockerCommand}}">Install</button>
+                        data-host-cmd="{{$r.HostCommand}}">Install</button>
                 {{end}}
               {{end}}
               {{if and $r.Installed (not $r.Malformed)}}
@@ -683,14 +666,14 @@
     </div>
     {{range $rows}}{{if and .Installed (not .Malformed)}}
     <dialog id="tagger-config-{{.Name}}" class="tagger-config-dialog">
-      <h4>{{.Name}}</h4>
+      <h4 class="dlg-title">{{.Name}}{{template "webui/dialog_x"}}</h4>
       <div id="tagger-config-{{.Name}}-body">Loading...</div>
     </dialog>
     {{end}}{{end}}
     {{if .DesktopProfile}}
     {{range $rows}}{{if .Files}}
     <dialog id="tagger-get-{{.Name}}" class="tagger-get-dialog">
-      <p><strong>{{.Name}}</strong> - {{.Description}}</p>
+      <p class="dlg-title">{{.Name}} <span class="dlg-title-sub">- {{.Description}}</span>{{template "webui/dialog_x"}}</p>
       {{if .Gated}}
       <p class="field-hint">This model is login-gated on Hugging Face: accept its terms on the model page while signed in to this browser, then use the links below.</p>
       {{end}}
@@ -715,19 +698,15 @@
     {{end}}{{end}}
     {{else}}
     <dialog id="tagger-cmd-dialog">
-      <p><strong id="tagger-cmd-name"></strong> - <span id="tagger-cmd-desc"></span></p>
-      <p class="field-hint">Run one of the commands below on a host with internet access, then reload the Settings page.</p>
+      <p class="dlg-title"><span id="tagger-cmd-name"></span> <span class="dlg-title-sub">- <span id="tagger-cmd-desc"></span></span>{{template "webui/dialog_x"}}</p>
+      <p class="field-hint">Run the command below on a host with internet access, then reload the Settings page.</p>
       <p class="field-hint" id="tagger-cmd-gated" hidden>This model is login-gated on Hugging Face: accept its terms on the model page while logged in, then <code>export HF_TOKEN=&lt;your access token&gt;</code> before running.</p>
       <p class="code-block-label"><strong>Direct host install</strong> <span class="field-hint">(run inside <code>{{$cfg.Paths.ModelPath}}</code>)</span>
         <button type="button" class="btn-sm code-block-copy" id="tagger-cmd-host-copy" title="Copy command">Copy</button>
         <span class="copy-flash" hidden>copied</span>
       </p>
       <pre class="code-block"><code id="tagger-cmd-host"></code></pre>
-      <p class="code-block-label"><strong>Docker (monbooru container)</strong>
-        <button type="button" class="btn-sm code-block-copy" id="tagger-cmd-docker-copy" title="Copy command">Copy</button>
-        <span class="copy-flash" hidden>copied</span>
-      </p>
-      <pre class="code-block"><code id="tagger-cmd-docker"></code></pre>
+      <p class="field-hint">Docker: the image has no shell or <code>curl</code>, so run the same command on the host, inside the folder mounted at <code>/models</code>.</p>
       <div class="dialog-actions">
         <button type="button" onclick="this.closest('dialog').close()">Close</button>
       </div>
@@ -866,7 +845,7 @@
         <div class="settings-sub">
           <h4>Default session order</h4>
           <div class="field">
-            <label><input type="radio" name="default_session_order" value="smallest_distance_first" {{if eq $cfg.Relations.DefaultSessionOrder "smallest_distance_first"}}checked{{end}}> Smallest distance first</label>
+            <label><input type="radio" name="default_session_order" value="smallest_distance_first" {{if eq $cfg.Relations.DefaultSessionOrder "smallest_distance_first"}}checked{{end}}> Most alike first</label>
             <label><input type="radio" name="default_session_order" value="largest_file_first" {{if eq $cfg.Relations.DefaultSessionOrder "largest_file_first"}}checked{{end}}> Largest file first</label>
             <label><input type="radio" name="default_session_order" value="random" {{if eq $cfg.Relations.DefaultSessionOrder "random"}}checked{{end}}> Random</label>
           </div>
@@ -875,14 +854,14 @@
           <h4>Rare tag similarity pairs</h4>
           <div class="field">
             <label><input type="checkbox" name="tag_pairs" {{if $cfg.Relations.TagPairs}}checked{{end}}> Also queue pairs that share rare tags</label>
-            <p class="field-hint">Finds recolours, redraws and based-on work that image similarity cannot see. Adds a full pass over the library to every find-pairs run.</p>
+            <p class="field-hint">Finds recolours, redraws and based-on work that image similarity cannot see. Makes Find new pairs take longer.</p>
           </div>
         </div>
       </div>
       <div class="settings-cols">
         <div class="settings-sub">
-          <h4>pHash matching distance</h4>
-          {{template "partials/range_field.html" dict "Name" "default_distance" "Label" "Hamming distance" "Min" 0 "Max" 12 "Step" 1 "Value" $cfg.Relations.DefaultDistance "Ticks" (list 0 2 4 6 8 10 12)}}
+          <h4>How alike images must look</h4>
+          {{template "partials/range_field.html" dict "Name" "default_distance" "Label" "Max difference" "Min" 0 "Max" 12 "Step" 1 "Value" $cfg.Relations.DefaultDistance "Ticks" (list 0 2 4 6 8 10 12) "Hint" "0 = identical, 12 = loose."}}
         </div>
         <div class="settings-sub">
           <h4>Rare tag similarity match strength</h4>
@@ -900,7 +879,7 @@
       {{template "webui/auth_password_section" (dict "AuthEnabled" $cfg.Auth.EnablePassword "HasPassword" (ne $cfg.Auth.PasswordHash "") "Pinned" (or ($cfg.EnvPinned "auth.password_hash") ($cfg.EnvPinned "auth.enable_password")))}}
       <div class="settings-sub">
         <h4>API Tokens</h4>
-        <p class="field-hint">Bearer tokens for the REST API. The secret is shown once, at creation.</p>
+        <p class="field-hint">For scripts and apps that talk to monbooru. A token is shown once, when you create it.</p>
         {{template "webui/auth_tokens" (dict "Tokens" $cfg.Auth.Tokens)}}
         <form hx-post="/settings/auth/tokens" hx-target="#flash-auth" hx-swap="innerHTML" style="margin-top:8px"
               hx-on:token-created="this.reset()">
@@ -921,10 +900,11 @@
           <div class="table-scroll">
           <table class="maintenance-table">
             <tbody>
-              {{template "maintenance_row" dict "Title" "Missing images" "Desc" "remove DB entries whose files are gone" "View" "/?q=missing:true" "URL" "/settings/maintenance/prune-missing" "Verb" "Prune" "Danger" true "Confirm" "Prune the images marked missing whose file is gone from disk?" "ConfirmDanger" "Tags on those images are removed too. An image whose file is still on disk is kept. Re-mounting the gallery volume before pruning restores the files." "ConfirmOK" "Prune"}}
-              {{template "maintenance_row" dict "Title" "Orphaned thumbnails" "Desc" "remove thumbnail files with no matching image" "URL" "/settings/maintenance/prune-orphaned-thumbnails" "Verb" "Remove" "Confirm" "Remove every thumbnail file with no matching image?" "ConfirmOK" "Remove"}}
-              {{template "maintenance_row" dict "Title" "Empty folders" "Desc" "list the folders under the gallery root holding nothing, then remove the ones you pick" "URL" "/settings/maintenance/empty-folders" "Verb" "Scan" "Mark" "report"}}
-              {{template "maintenance_row" dict "Title" "Rebuild thumbnails" "Desc" "regenerate thumbnail files for every image" "URL" "/settings/maintenance/rebuild-thumbnails" "Verb" "Rebuild" "Mark" "long job" "JobKick" true "Confirm" "Rebuild thumbnails for every image in this gallery?" "ConfirmDanger" "Long-running job; blocks other jobs until it finishes." "ConfirmOK" "Rebuild"}}
+              {{template "maintenance_row" dict "Title" "Missing images" "Desc" "Forget images whose file is gone from disk, with their tags and notes" "View" "/?q=missing:true" "URL" "/settings/maintenance/prune-missing" "Verb" "Remove" "Danger" true "Confirm" "Remove the images marked missing whose file is gone from disk?" "ConfirmDanger" "Tags on those images are removed too. An image whose file is still on disk is kept. Re-mounting the gallery volume before removing them restores the files." "ConfirmOK" "Remove"}}
+              {{template "maintenance_row" dict "Title" "Orphaned thumbnails" "Desc" "Remove thumbnail files with no matching image" "URL" "/settings/maintenance/prune-orphaned-thumbnails" "Verb" "Remove" "Confirm" "Remove every thumbnail file with no matching image?" "ConfirmOK" "Remove"}}
+              {{template "maintenance_row" dict "Title" "Empty folders" "Desc" "List empty folders in the gallery, then remove the ones you pick" "URL" "/settings/maintenance/empty-folders" "Verb" "Scan" "Mark" "report"}}
+              {{template "maintenance_row" dict "Title" "Apply destination" "Desc" "Rename and file the images already in the gallery the way Where received files go names new ones" "Dialog" "apply-dest-dialog" "Verb" "Preview" "Mark" "long job"}}
+              {{template "maintenance_row" dict "Title" "Rebuild thumbnails" "Desc" "Regenerate thumbnail files for every image" "URL" "/settings/maintenance/rebuild-thumbnails" "Verb" "Rebuild" "Mark" "long job" "JobKick" true "Confirm" "Rebuild thumbnails for every image in this gallery?" "ConfirmDanger" "Long-running job; blocks other jobs until it finishes." "ConfirmOK" "Rebuild"}}
             </tbody>
           </table>
           </div>
@@ -935,9 +915,11 @@
           <div class="table-scroll">
           <table class="maintenance-table">
             <tbody>
-              {{template "maintenance_row" dict "Title" "Tag counts" "Desc" "recompute usage counts" "URL" "/settings/maintenance/recalc-tags" "Verb" "Recalculate"}}
-              {{template "maintenance_row" dict "Title" "Category conflicts" "Desc" "list tags whose name occupies more than one category" "URL" "/settings/maintenance/tag-conflicts" "Verb" "List" "Mark" "report"}}
-              {{template "maintenance_row" dict "Title" "Find folded duplicates" "Desc" "pair pre-widening folded tags with their corrected spelling, then review and merge on the Tags page (Folded dup. filter)" "URL" "/settings/maintenance/find-folded-duplicates" "Verb" "Scan" "Mark" "report" "JobKick" true}}
+              {{template "maintenance_row" dict "Title" "Tag counts" "Desc" "Fix the image counts shown next to tags" "URL" "/settings/maintenance/recalc-tags" "Verb" "Recalculate"}}
+              {{template "maintenance_row" dict "Title" "Category conflicts" "Desc" "List tag names used in more than one category" "URL" "/settings/maintenance/tag-conflicts" "Verb" "List" "Mark" "report"}}
+              {{template "maintenance_row" dict "Title" "Find old tag spellings" "Desc" "Find tags an older version saved simplified, then merge them on the Tags page (Old spellings filter)" "URL" "/settings/maintenance/find-folded-duplicates" "Verb" "Scan" "Mark" "report" "JobKick" true}}
+              {{template "maintenance_row" dict "Title" "Unused tags" "Desc" "Delete the tags no image carries; ones with aliases, implications or a note are kept unless you say so" "Verb" "Remove…" "Dialog" "unused-tags-dialog"}}
+              {{template "maintenance_row" dict "Title" "Reset tags" "Desc" "Delete every tag, alias and implication in the gallery" "Verb" "Reset…" "Dialog" "reset-tags-dialog" "Mark" "long job"}}
             </tbody>
           </table>
           </div>
@@ -950,11 +932,11 @@
           <div class="table-scroll">
           <table class="maintenance-table">
             <tbody>
-              {{template "maintenance_row" dict "Title" "Compute hashes" "Desc" "backfill the perceptual hash and md5 of every image missing one; search -phash: or -md5: to see which" "URL" "/settings/maintenance/compute-hashes" "Verb" "Compute" "Mark" "long job" "JobKick" true "Confirm" "Compute the missing perceptual hashes and md5 digests?" "ConfirmDanger" "The md5 pass reads every file in the gallery from disk. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Compute"}}
-              {{template "maintenance_row" dict "Title" "Meta tags" "Desc" "derive the meta tags every image's own properties imply; new files get them as they arrive" "URL" "/settings/maintenance/meta-tags" "Verb" "Generate" "Mark" "long job" "JobKick" true "Confirm" "Derive meta tags for every image in this gallery?" "ConfirmDanger" "Reads a thumbnail per image. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Generate"}}
-              {{template "maintenance_row" dict "Title" "Remove meta tags" "Desc" "withdraw every tag monbooru derived; one another source also applied stays under that source" "URL" "/settings/maintenance/meta-tags/remove" "Verb" "Remove" "Mark" "long job" "Danger" true "JobKick" true "Confirm" "Remove every meta tag monbooru derived?" "ConfirmDanger" "Tags you added by hand, and tags a source also vouches for, are kept." "ConfirmOK" "Remove"}}
-              {{template "maintenance_row" dict "Title" "Index ComfyUI workflows" "Desc" "rebuild the node and input index the comfyui: search seeks; new files are indexed as they arrive" "URL" "/settings/maintenance/index-workflows" "Verb" "Index" "Mark" "long job" "JobKick" true "Confirm" "Rebuild the ComfyUI workflow index?" "ConfirmDanger" "Re-reads every stored workflow. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Index"}}
-              {{template "maintenance_row" dict "Title" "Re-extract metadata" "Desc" "re-parse metadata for every image" "URL" "/settings/maintenance/re-extract-metadata" "Verb" "Re-extract" "Mark" "long job" "Confirm" "Re-parse metadata for every image in this gallery?" "ConfirmDanger" "Long-running job; blocks other jobs until it finishes." "ConfirmOK" "Re-extract"}}
+              {{template "maintenance_row" dict "Title" "Compute hashes" "Desc" "Compute the hashes used to find look-alikes and known images, for images missing them" "URL" "/settings/maintenance/compute-hashes" "Verb" "Compute" "Mark" "long job" "JobKick" true "Confirm" "Compute the missing perceptual hashes and md5 digests?" "ConfirmDanger" "The md5 pass reads every file in the gallery from disk. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Compute"}}
+              {{template "maintenance_row" dict "Title" "Meta tags" "Desc" "Add highres, animated, greyscale... to existing images; new images get them automatically" "URL" "/settings/maintenance/meta-tags" "Verb" "Generate" "Mark" "long job" "JobKick" true "Confirm" "Derive meta tags for every image in this gallery?" "ConfirmDanger" "Reads a thumbnail per image. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Generate"}}
+              {{template "maintenance_row" dict "Title" "Remove meta tags" "Desc" "Remove those tags again; a tag a source also added stays" "URL" "/settings/maintenance/meta-tags/remove" "Verb" "Remove" "Mark" "long job" "Danger" true "JobKick" true "Confirm" "Remove every meta tag monbooru derived?" "ConfirmDanger" "Tags you added by hand, and tags a source also vouches for, are kept." "ConfirmOK" "Remove"}}
+              {{template "maintenance_row" dict "Title" "Index ComfyUI workflows" "Desc" "Rebuild what comfyui: searches look through; new images are indexed automatically" "URL" "/settings/maintenance/index-workflows" "Verb" "Index" "Mark" "long job" "JobKick" true "Confirm" "Rebuild the ComfyUI workflow index?" "ConfirmDanger" "Re-reads every stored workflow. Long-running; blocks other jobs until it finishes. Safe to cancel and resume." "ConfirmOK" "Index"}}
+              {{template "maintenance_row" dict "Title" "Re-extract metadata" "Desc" "Read prompts and generation settings from every file again" "URL" "/settings/maintenance/re-extract-metadata" "Verb" "Re-extract" "Mark" "long job" "Confirm" "Re-parse metadata for every image in this gallery?" "ConfirmDanger" "Long-running job; blocks other jobs until it finishes." "ConfirmOK" "Re-extract"}}
             </tbody>
           </table>
           </div>
@@ -966,7 +948,7 @@
           <div class="table-scroll">
           <table class="maintenance-table">
             <tbody>
-              {{template "maintenance_row" dict "Title" "Look up unsourced images" "Accent" "peer-accent" "Desc" "run the scheduled lookup now on the images that are due" "URL" "/settings/maintenance/lookup-due" "Verb" "Look up" "JobKick" true "Confirm" "Look up the images that are due now?" "ConfirmDanger" "Online lookups count against monloader's daily budget." "ConfirmOK" "Look up" "Disabled" (not .MonloaderUsable) "DisabledReason" (monloaderOffReason .MonloaderConn) "MlGated" true}}
+              {{template "maintenance_row" dict "Title" "Look up unsourced images" "Accent" "peer-accent" "Desc" "Run the scheduled lookup now on the images that are due" "URL" "/settings/maintenance/lookup-due" "Verb" "Look up" "JobKick" true "Confirm" "Look up the images that are due now?" "ConfirmDanger" "Online lookups count against monloader's daily budget." "ConfirmOK" "Look up" "Disabled" (not .MonloaderUsable) "DisabledReason" (monloaderOffReason .MonloaderConn) "MlGated" true}}
             </tbody>
           </table>
           </div>
@@ -978,8 +960,8 @@
           <div class="table-scroll">
           <table class="maintenance-table">
             <tbody>
-              {{template "maintenance_row" dict "Title" "Vacuum database" "Desc" "compact the SQLite file after mass deletions" "URL" "/settings/maintenance/vacuum-db" "Verb" "Vacuum" "Mark" "long job" "Confirm" "Compact the SQLite database now?" "ConfirmDanger" "Holds a database lock for the duration of the VACUUM; other jobs and queries will wait." "ConfirmOK" "Vacuum"}}
-              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "shrink SQLite caches, return the Go heap, and release the auto-tagger from RAM/VRAM" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
+              {{template "maintenance_row" dict "Title" "Vacuum database" "Desc" "Shrink the database file after deleting many images" "URL" "/settings/maintenance/vacuum-db" "Verb" "Vacuum" "Mark" "long job" "Confirm" "Compact the SQLite database now?" "ConfirmDanger" "Holds a database lock for the duration of the VACUUM; other jobs and queries will wait." "ConfirmOK" "Vacuum"}}
+              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, including a loaded tagger model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
             </tbody>
           </table>
           </div>
@@ -1019,8 +1001,72 @@
     emptyFolderBoxes().forEach(function(b) { b.checked = on; });
     updateEmptyFolderCount();
   });
+  // The body is fetched on open: General saves without a reload, so a
+  // render from page load could show a destination since replaced.
+  function openMaintenanceDialog(id) {
+    var body = document.getElementById(id + '-body');
+    delete body.dataset.rows;
+    clearSlots(id + '-body', id + '-flash');
+    htmx.trigger(body, 'preview');
+    var dlg = document.getElementById(id);
+    dlg.showModal();
+    dlg.querySelector('.dialog-actions button[type="button"]').focus();
+  }
+  function onApplyDestChecked() {
+    if (document.querySelector('#apply-dest-dialog-flash .flash-ok')) {
+      refreshJobStatus();
+      mirrorJobSummary('apply-dest-dialog-flash');
+    }
+  }
+  function onMaintenanceDialogStarted(id) {
+    var flash = document.getElementById(id + '-flash');
+    if (!flash.querySelector('.flash-ok')) return;
+    document.getElementById('flash-maintenance').innerHTML = flash.innerHTML;
+    flash.innerHTML = '';
+    document.getElementById(id).close();
+    refreshJobStatus();
+  }
   </script>
   </section>
+
+  <dialog id="apply-dest-dialog">
+    <p class="dlg-title">Apply the received-file destination to every image in the gallery:{{template "webui/dialog_x"}}</p>
+    <p class="field-hint">Each image goes where a file found on disk would: renamed, and moved when the folder says so. An image that already follows the destination is left alone, so a second run changes nothing. <a href="#general" class="btn-link-accent" onclick="document.getElementById('apply-dest-dialog').close()">[edit in General]</a></p>
+    <div id="apply-dest-dialog-body"
+         hx-get="/settings/maintenance/apply-destination"
+         hx-trigger="preview"
+         hx-vals='js:{rows: document.getElementById("apply-dest-dialog-body").dataset.rows || 5}'></div>
+    <button type="button" class="name-preview-more"
+            hx-post="/settings/maintenance/apply-destination" hx-vals='{"check": "1"}'
+            hx-target="#apply-dest-dialog-flash" hx-swap="innerHTML"
+            hx-on::after-request="onApplyDestChecked()">check the whole gallery for name clashes</button>
+    <div id="apply-dest-dialog-flash"></div>
+    <form hx-post="/settings/maintenance/apply-destination" hx-target="#apply-dest-dialog-flash" hx-swap="innerHTML"
+          hx-confirm="Rename and move the images that do not follow the received-file destination?"
+          data-confirm-danger="Long-running job; blocks other jobs until it finishes."
+          data-confirm-ok="Apply"
+          hx-on::after-request="onMaintenanceDialogStarted('apply-dest-dialog')">
+      {{template "dialog_actions" dict "ID" "apply-dest-dialog" "Submit" "Apply"}}
+    </form>
+  </dialog>
+
+  <dialog id="unused-tags-dialog">
+    <form hx-post="/settings/maintenance/unused-tags" hx-target="#unused-tags-dialog-flash" hx-swap="innerHTML"
+          hx-on::after-request="onMaintenanceDialogStarted('unused-tags-dialog')">
+      <div id="unused-tags-dialog-body" hx-get="/settings/maintenance/unused-tags" hx-trigger="preview" hx-target="this"></div>
+      <div id="unused-tags-dialog-flash"></div>
+      {{template "dialog_actions" dict "ID" "unused-tags-dialog" "Submit" "Delete" "Class" "btn-danger"}}
+    </form>
+  </dialog>
+
+  <dialog id="reset-tags-dialog">
+    <form hx-post="/settings/maintenance/reset-tags" hx-target="#reset-tags-dialog-flash" hx-swap="innerHTML"
+          hx-on::after-request="onMaintenanceDialogStarted('reset-tags-dialog')">
+      <div id="reset-tags-dialog-body" hx-get="/settings/maintenance/reset-tags" hx-trigger="preview" hx-target="this"></div>
+      <div id="reset-tags-dialog-flash"></div>
+      {{template "dialog_actions" dict "ID" "reset-tags-dialog" "Submit" "Reset tags" "Class" "btn-danger"}}
+    </form>
+  </dialog>
 
   {{$sched := $cfg.Schedule}}
   {{$schedSt := .ScheduleStatus}}
@@ -1175,9 +1221,9 @@
             {{end}}
           </td></tr>
           <tr><th>Models</th><td>{{range $i, $n := $tg.Sessions}}{{if $i}}, {{end}}{{$n}}{{end}}</td></tr>
-          {{if $tg.WorkerPSS}}
+          {{if $tg.WorkerRSS}}
           <tr><th>Worker PID</th><td>{{$tg.WorkerPID}}</td></tr>
-          <tr><th class="stats-d1">Worker memory (PSS)</th><td>{{humanBytes $tg.WorkerPSS}}</td></tr>
+          <tr><th class="stats-d1">Worker memory (RSS)</th><td>{{humanBytes $tg.WorkerRSS}}</td></tr>
           <tr><th class="stats-d2">Worker native (ONNX + CGO)</th><td>{{humanBytes $tg.WorkerAnon}}</td></tr>
           <tr><th class="stats-d2">Worker code &amp; libs</th><td>{{humanBytes $tg.WorkerFile}}</td></tr>
           {{end}}

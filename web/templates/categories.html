@@ -4,13 +4,14 @@
 
 <div id="categories-page">
   <h2>Categories</h2>
-  <p class="field-hint">Categories group tags (artist, character, ...) and set their color.</p>
+  <p class="field-hint">Categories group tags (artist, character, ...), set their color and the order tags are grouped in. Drag &equiv; to reorder, or focus it and press &uarr; / &darr;.</p>
+  <span id="cat-order-live" class="cat-order-live" aria-live="polite"></span>
 
   <div id="cat-flash" data-action-flash></div>
   <div class="table-scroll">
   <table class="grid-table cat-table">
-    <thead><tr><th>Name</th><th>Color</th><th>Actions</th></tr></thead>
-    <tbody id="cat-list">
+    <thead><tr><th class="cat-grip">Order</th><th>Name</th><th>Color</th><th>Actions</th></tr></thead>
+    <tbody id="cat-list" data-default-order="{{range $i, $id := .DefaultOrder}}{{if $i}},{{end}}{{$id}}{{end}}">
       {{range .Categories}}
       {{template "partials/category_row.html" .}}
       {{end}}
@@ -28,6 +29,8 @@
              spellcheck="false" autocomplete="off" aria-label="Hex color for the new category">
     </span>
     <button type="submit">Add</button>
+    <button type="button" id="cat-order-reset" hidden
+            title="Back to the shipped order: rating, year, meta, medium, person, artist, copyright, character, species, your categories, general">Reset order</button>
   </form>
 
   <datalist id="cat-palette">
@@ -37,7 +40,7 @@
 
 <dialog id="cat-rename-dialog">
   <form id="cat-rename-form" hx-post="" hx-target="#cat-rename-error" hx-swap="innerHTML">
-    <p>Rename category <strong id="cat-rename-src"></strong></p>
+    <p class="dlg-title">Rename category <strong id="cat-rename-src"></strong>{{template "webui/dialog_x"}}</p>
     <div class="field">
       <label>New name</label>
       <input type="text" name="name" id="cat-rename-input" required autocomplete="off">
@@ -48,7 +51,7 @@
 </dialog>
 
 <dialog id="delete-cat-dialog">
-  <p>Delete category <strong id="del-cat-name"></strong>?</p>
+  <p class="dlg-title">Delete category <strong id="del-cat-name"></strong>?{{template "webui/dialog_x"}}</p>
   <p id="del-cat-tag-info" class="field-hint"></p>
   <div id="del-cat-move-section">
     <div class="field">
@@ -64,10 +67,30 @@
   </div>
 </dialog>
 
+<dialog id="cat-cleanup-dialog">
+  <p class="dlg-title">Clean up <strong id="cat-cleanup-name"></strong>{{template "webui/dialog_x"}}</p>
+  <table class="maintenance-table stack-table">
+    <tbody>
+      <tr><td><strong>Tags</strong> <span class="field-hint" id="cat-cleanup-tags"></span></td>
+          <td><button type="button" class="btn-sm btn-danger" data-cleanup="tags">Delete tags</button></td></tr>
+      <tr><td><strong>Implications</strong> <span class="field-hint" id="cat-cleanup-implications"></span></td>
+          <td><button type="button" class="btn-sm btn-danger" data-cleanup="implications">Delete implications</button></td></tr>
+      <tr><td><strong>Aliases</strong> <span class="field-hint" id="cat-cleanup-aliases"></span></td>
+          <td><button type="button" class="btn-sm btn-danger" data-cleanup="aliases">Delete aliases</button></td></tr>
+    </tbody>
+  </table>
+  <div id="cat-cleanup-flash"></div>
+  <div class="dialog-actions">
+    <button type="button" onclick="document.getElementById('cat-cleanup-dialog').close()">Close</button>
+  </div>
+</dialog>
+
 <script>
 // Bound on the list: a recolour swaps its row, dropping listeners on the
 // row's own buttons.
 document.getElementById('cat-list').addEventListener('click', function(e) {
+  var cleanup = e.target.closest('.btn-cat-cleanup');
+  if (cleanup) { openCatCleanupDialog(cleanup.dataset.id, cleanup.dataset.name); return; }
   var rename = e.target.closest('.btn-cat-rename-trigger');
   if (rename) { openCatRenameDialog(rename.dataset.id, rename.dataset.name); return; }
   var del = e.target.closest('.btn-delete-category');
@@ -86,6 +109,120 @@ document.getElementById('cat-list').addEventListener('keydown', function(e) {
 // row's colour.
 document.getElementById('cat-list').addEventListener('htmx:validation:halted', function(e) {
   e.target.value = e.target.defaultValue;
+});
+
+var catList = document.getElementById('cat-list');
+var catOrderReset = document.getElementById('cat-order-reset');
+var catSaved = catOrder();
+var catKeyTimer = null;
+var catDrag = null;
+syncCatOrderReset();
+
+function catOrder() {
+  return Array.from(catList.rows).map(function(tr) { return tr.dataset.id; }).join(',');
+}
+
+function syncCatOrderReset() {
+  catOrderReset.hidden = catOrder() === catList.dataset.defaultOrder;
+}
+
+function setCatOrder(ids) {
+  ids.split(',').forEach(function(id) {
+    var tr = document.getElementById('cat-row-' + id);
+    if (tr) catList.appendChild(tr);
+  });
+  syncCatOrderReset();
+}
+
+function saveCatOrder() {
+  var order = catOrder();
+  syncCatOrderReset();
+  if (order === catSaved) return;
+  postForm('/tags/categories/order', {ids: order}, {
+    onOK: function() { catSaved = order; showActionFlash('Category order saved.', 'ok'); },
+    onErr: function(t) {
+      showActionFlash(escapeHTML(t || 'Could not save the order.'), 'err');
+      setCatOrder(catSaved);
+    }
+  });
+}
+
+// The neighbours move rather than the dragged or focused row: moving that
+// row out of the DOM would drop its pointer capture or its focus.
+function moveCatRow(tr, up) {
+  var other = up ? tr.previousElementSibling : tr.nextElementSibling;
+  if (!other) return false;
+  catList.insertBefore(other, up ? tr.nextElementSibling : tr);
+  return true;
+}
+
+catOrderReset.addEventListener('click', function() {
+  setCatOrder(catList.dataset.defaultOrder);
+  saveCatOrder();
+});
+
+catList.addEventListener('keydown', function(e) {
+  var grip = e.target.closest('.cat-grip-btn');
+  if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  var tr = grip.closest('tr');
+  if (!moveCatRow(tr, e.key === 'ArrowUp')) return;
+  syncCatOrderReset();
+  var rows = Array.from(catList.rows);
+  document.getElementById('cat-order-live').textContent =
+    tr.querySelector('td:nth-child(2) span').textContent + ', ' + (rows.indexOf(tr) + 1) + ' of ' + rows.length;
+  clearTimeout(catKeyTimer);
+  catKeyTimer = setTimeout(saveCatOrder, 400);
+});
+
+catList.addEventListener('pointerdown', function(e) {
+  var grip = e.target.closest('.cat-grip-btn');
+  if (!grip || e.button !== 0) return;
+  e.preventDefault();
+  grip.setPointerCapture(e.pointerId);
+  catDrag = {tr: grip.closest('tr'), before: catOrder(), y: e.clientY, timer: setInterval(scrollCatDrag, 30)};
+  catDrag.tr.classList.add('cat-dragging');
+});
+
+catList.addEventListener('pointermove', function(e) {
+  if (!catDrag) return;
+  catDrag.y = e.clientY;
+  followCatDrag();
+});
+
+function followCatDrag() {
+  var tr = catDrag.tr;
+  while (tr.previousElementSibling && catDrag.y < midY(tr.previousElementSibling)) moveCatRow(tr, true);
+  while (tr.nextElementSibling && catDrag.y > midY(tr.nextElementSibling)) moveCatRow(tr, false);
+}
+
+function midY(el) {
+  var r = el.getBoundingClientRect();
+  return r.top + r.height / 2;
+}
+
+function scrollCatDrag() {
+  var box = document.getElementById('content').getBoundingClientRect();
+  var step = catDrag.y < box.top + 40 ? -12 : catDrag.y > box.bottom - 40 ? 12 : 0;
+  if (!step) return;
+  document.getElementById('content').scrollTop += step;
+  followCatDrag();
+}
+
+function endCatDrag(keep) {
+  if (!catDrag) return;
+  clearInterval(catDrag.timer);
+  catDrag.tr.classList.remove('cat-dragging');
+  var before = catDrag.before;
+  catDrag = null;
+  if (keep) saveCatOrder();
+  else setCatOrder(before);
+}
+
+catList.addEventListener('pointerup', function() { endCatDrag(true); });
+catList.addEventListener('pointercancel', function() { endCatDrag(false); });
+document.addEventListener('keydown', function(e) {
+  if (catDrag && e.key === 'Escape') endCatDrag(false);
 });
 
 var addSwatch = document.getElementById('add-cat-swatch');
@@ -166,6 +303,66 @@ function openCatDeleteDialog(catId, catName) {
       }, '', 'Delete');
     });
 }
+
+function countOf(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+function openCatCleanupDialog(catId, catName) {
+  clearSlots('cat-cleanup-flash');
+  fetch('/tags/categories/' + catId + '/count')
+    .then(function(r) {
+      if (sessionLost(r)) {
+        showLoginNotice();
+        return null;
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data) return;
+      var dlg = document.getElementById('cat-cleanup-dialog');
+      dlg.dataset.id = catId;
+      dlg.dataset.name = catName;
+      document.getElementById('cat-cleanup-name').textContent = catName;
+      var lines = {
+        tags: [data.count, 'Delete the ' + countOf(data.count, 'tag', 'tags') + ' filed under ' + catName + ' with the aliases pointing at them, and take them off every image.'],
+        implications: [data.implications, 'Delete the ' + countOf(data.implications, 'implication', 'implications') + ' declared on ' + catName + ' tags. Tags they alone added come off the images.'],
+        aliases: [data.aliases, 'Delete the ' + countOf(data.aliases, 'alias', 'aliases') + ' filed under ' + catName + '.']
+      };
+      Object.keys(lines).forEach(function(kind) {
+        document.getElementById('cat-cleanup-' + kind).textContent = lines[kind][1];
+        dlg.querySelector('[data-cleanup="' + kind + '"]').disabled = !lines[kind][0];
+      });
+      dlg.showModal();
+    })
+    .catch(function() { setFlashText(document.getElementById('cat-flash'), 'err', 'Could not count the category.'); });
+}
+
+document.getElementById('cat-cleanup-dialog').addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-cleanup]');
+  if (!btn) return;
+  var dlg = document.getElementById('cat-cleanup-dialog');
+  var kind = btn.dataset.cleanup, id = dlg.dataset.id, name = dlg.dataset.name;
+  var asks = {
+    tags: 'Delete every tag filed under ' + name + '?',
+    implications: 'Remove every implication declared on ' + name + ' tags?',
+    aliases: 'Delete every alias filed under ' + name + '?'
+  };
+  showConfirm(asks[kind], function() {
+    var opts = {
+      flashId: 'cat-cleanup-flash',
+      catchMsg: 'Clean up request failed.',
+      onOK: function() {
+        dlg.close();
+        setFlashText(document.getElementById('cat-flash'), 'ok', 'Cleaning up ' + name + ': ' + kind + '.');
+        refreshJobStatus();
+      }
+    };
+    if (kind === 'implications') {
+      postForm('/tags/categories/' + id + '/remove-implications', null, opts);
+    } else {
+      postForm('/tags/delete-search', {cat: id, type: kind === 'tags' ? 'tag' : 'alias'}, opts);
+    }
+  }, 'This cannot be undone.', 'Delete');
+});
 
 function doDeleteCategory(catId, action, targetCatId) {
   var url = '/tags/categories/' + catId + '?action=' + encodeURIComponent(action);

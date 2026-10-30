@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/monbooru/monbooru/internal/relations"
@@ -102,24 +103,16 @@ func (h *Handler) addRelation(w http.ResponseWriter, r *http.Request) {
 		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "relations not wired")
 		return
 	}
-	add, known := relationAdders[body.Type]
-	if !known {
+	err := g.RelationsSvc.Add(body.Type, left, right)
+	if errors.Is(err, relations.ErrUnknownKind) {
 		contract.WriteError(w, http.StatusBadRequest, "invalid_request", "unknown type")
 		return
 	}
-	if err := add(g.RelationsSvc, left, right); err != nil {
+	if err != nil {
 		writeRelationError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
-}
-
-var relationAdders = map[string]func(svc *relations.Service, a, b int64) error{
-	"duplicate":   (*relations.Service).AddDuplicate,
-	"alternate":   (*relations.Service).AddAlternate,
-	"version":     (*relations.Service).AddVersionEdge,
-	"derivative":  (*relations.Service).AddDerivativeEdge,
-	"not_related": (*relations.Service).AddNotRelated,
 }
 
 type relationsRemoveBody struct {

@@ -42,10 +42,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm -f /tmp/ort.tgz
 
 # ffmpeg + ffprobe: the project's trimmed fully-static builds.
-ARG FFMPEG_BUILD=v8.1.3-mb1
-ARG FFMPEG_NAME=ffmpeg-8.1.3-mb1
-ARG FFMPEG_SHA256_LINUX64=2fc794c828a3f61836605f09f97bc9e59f906a52b971c6c170aaf480be63a216
-ARG FFMPEG_SHA256_LINUXARM64=2decca9ea2a50b25c138ccc9faa45bf9d1dc92ef176ccc5d58185a3503805d9e
+ARG FFMPEG_BUILD=v8.1.3-mb2
+ARG FFMPEG_NAME=ffmpeg-8.1.3-mb2
+ARG FFMPEG_SHA256_LINUX64=eb15fba0c9f2c01a5ae1da1a6d6392ff5822dee950650521e2c0b214e9851c65
+ARG FFMPEG_SHA256_LINUXARM64=012a038248c9beb6a560564b50823793ef06128c4aa342e53c568194b3fa6b38
 RUN ARCH=$(dpkg --print-architecture) && \
     case "$ARCH" in \
       amd64) FF_ARCH="linux64";    FF_SHA="${FFMPEG_SHA256_LINUX64}" ;; \

@@ -210,6 +210,11 @@ func ingestWithHash(h Handle, path, hash, sum, origin string) (*models.Image, in
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if prefilledSeries != "" {
+		if prefilledSeries, err = ExistingLabelTx(tx, prefilledSeries); err != nil {
+			return nil, ingestCreated, err
+		}
+	}
 	var imgID int64
 	insertErr := tx.QueryRow(
 		`INSERT INTO images (sha256, md5, canonical_path, folder_path, file_type, width, height, file_size, source_type, origin, page_count, series, duration_seconds)
@@ -357,7 +362,9 @@ type fileFacts struct {
 // The error is an archive that will not open; the facts still carry its generation metadata.
 func deriveFileFacts(path, fileType, logCtx string) (fileFacts, error) {
 	var f fileFacts
-	f.sd, f.comfy, f.sourceType = extractGenerationMeta(path, fileType)
+	if !IsVideoType(fileType) {
+		f.sd, f.comfy, f.sourceType = ExtractGenerationMeta(path, fileType)
+	}
 	switch {
 	case fileType == models.FileTypeCBZ:
 		archive, err := OpenManga(path)
@@ -385,24 +392,36 @@ func deriveFileFacts(path, fileType, logCtx string) (fileFacts, error) {
 		if p.width > 0 {
 			f.width, f.height = &p.width, &p.height
 		}
+		f.comfy, f.sourceType = p.comfy, generationSourceType(nil, p.comfy)
 	default:
 		f.width, f.height = stillDimensions(path, fileType)
 	}
 	return f, nil
 }
 
-// A path that rewrites a file's bytes must store all three.
-func extractGenerationMeta(path, fileType string) (*models.SDMetadata, *models.ComfyUIMetadata, string) {
-	sd, comfy := metadata.Extract(path, fileType)
+// ExtractGenerationMeta reads a video's recipe from its container tags,
+// through ffprobe. A path that rewrites a file's bytes must store all three.
+func ExtractGenerationMeta(path, fileType string) (*models.SDMetadata, *models.ComfyUIMetadata, string) {
+	var sd *models.SDMetadata
+	var comfy *models.ComfyUIMetadata
+	if IsVideoType(fileType) {
+		comfy = probeVideo(path).comfy
+	} else {
+		sd, comfy = metadata.Extract(path, fileType)
+	}
+	return sd, comfy, generationSourceType(sd, comfy)
+}
+
+func generationSourceType(sd *models.SDMetadata, comfy *models.ComfyUIMetadata) string {
 	switch {
 	case sd != nil && comfy != nil:
-		return sd, comfy, models.SourceTypeBoth
+		return models.SourceTypeBoth
 	case sd != nil:
-		return sd, comfy, models.SourceTypeA1111
+		return models.SourceTypeA1111
 	case comfy != nil:
-		return sd, comfy, models.SourceTypeComfyUI
+		return models.SourceTypeComfyUI
 	}
-	return sd, comfy, models.SourceTypeNone
+	return models.SourceTypeNone
 }
 
 // replaceGenerationMetadata drops the old rows even when no new ones

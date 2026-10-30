@@ -186,6 +186,11 @@ func readsMD5(tmpls []*NameTemplate) bool {
 	return slices.ContainsFunc(tmpls, func(t *NameTemplate) bool { return t.uses(tokMD5) })
 }
 
+func (t *NameTemplate) Uses(token string) bool {
+	tok, known := nameTokens[token]
+	return known && t.uses(tok)
+}
+
 func (t *NameTemplate) uses(tok nameToken) bool {
 	return t != nil && slices.ContainsFunc(t.parts, func(p namePart) bool { return p.tok == tok })
 }
@@ -246,6 +251,22 @@ func LoadNameFacts(ctx context.Context, database *db.DB, galleryName string, id 
 // empty; a rename or move refuses rather than file a scope under ids or
 // flatten it.
 func (t *NameTemplate) Render(f NameFacts) (string, error) {
+	out := t.render(f)
+	switch {
+	case out != "":
+		return out, nil
+	// A {folder} template may render the root: that is where a root row
+	// already is.
+	case t.scope.Folder() && (t.scope.source() || t.uses(tokFolder)):
+		return "", nil
+	case t.scope.source():
+		return strconv.FormatInt(f.ID, 10), nil
+	default:
+		return "", fmt.Errorf("the template names nothing for image %d", f.ID)
+	}
+}
+
+func (t *NameTemplate) render(f NameFacts) string {
 	var b []byte
 	for _, p := range t.parts {
 		v := p.lit
@@ -264,19 +285,7 @@ func (t *NameTemplate) Render(f NameFacts) (string, error) {
 		}
 		b = append(b, v...)
 	}
-	out := tidyNamePath(string(b))
-	switch {
-	case out != "":
-		return out, nil
-	// A {folder} template may render the root: that is where a root row
-	// already is.
-	case t.scope.Folder() && (t.scope.source() || t.uses(tokFolder)):
-		return "", nil
-	case t.scope.source():
-		return strconv.FormatInt(f.ID, 10), nil
-	default:
-		return "", fmt.Errorf("the template names nothing for image %d", f.ID)
-	}
+	return tidyNamePath(string(b))
 }
 
 // identityTokens tell rows apart; a date, a type or a gallery groups them
@@ -419,6 +428,41 @@ func (n Naming) Apply(ctx context.Context, database *db.DB, b *Boundary, id int6
 			return "", renderErr
 		}
 		name = &rendered
+	}
+	res, err := PlaceImage(database, b, id, folder, name)
+	if err != nil {
+		return "", err
+	}
+	return res.NewCanonicalPath, nil
+}
+
+// Existing renders n for a row already in the gallery. A half that renders
+// empty stays nil instead of falling back as an arrival does: the row
+// already has a name and a folder.
+func (n Naming) Existing(f NameFacts) (folder, name *string) {
+	half := func(t *NameTemplate) *string {
+		if t == nil {
+			return nil
+		}
+		if out := t.render(f); out != "" {
+			return &out
+		}
+		return nil
+	}
+	return half(n.Folder), half(n.Name)
+}
+
+func (n Naming) ApplyExisting(ctx context.Context, database *db.DB, b *Boundary, id int64) (string, error) {
+	if n.Empty() {
+		return "", nil
+	}
+	facts, _, err := LoadNameFacts(ctx, database, n.Gallery, id, 0, n.Folder, n.Name)
+	if err != nil {
+		return "", err
+	}
+	folder, name := n.Existing(facts)
+	if folder == nil && name == nil {
+		return "", nil
 	}
 	res, err := PlaceImage(database, b, id, folder, name)
 	if err != nil {

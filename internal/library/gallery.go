@@ -4,6 +4,7 @@
 package library
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/relations"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/logx"
@@ -55,6 +57,7 @@ type Gallery struct {
 	// bgMu guards the watcher and the reclaimer: a set change starts them
 	// after its lock, so a shutdown's Close can come in between.
 	bgMu          sync.Mutex
+	watcher       *gallery.Watcher
 	watcherCancel context.CancelFunc
 	watcherDone   chan struct{}
 
@@ -71,6 +74,7 @@ func (cx *Gallery) Sync(ctx context.Context, maxFileSizeMB int, naming gallery.N
 		cx.InvalidateCaches()
 		changed()
 	}
+	cx.WaitIngests(ctx)
 	result, err := gallery.Sync(ctx, cx.Handle, maxFileSizeMB, naming, progress, onChange, cx.phashSink())
 	cx.InvalidateCaches()
 	return result, err
@@ -233,6 +237,8 @@ func (cx *Gallery) warmCaches() {
 	cx.CollectionsCount()
 }
 
+var processStart = time.Now()
+
 func Open(g config.Gallery) (*Gallery, error) {
 	if dbDir := filepath.Dir(g.DBPath); dbDir != "" && dbDir != "." {
 		if err := os.MkdirAll(dbDir, 0o755); err != nil {
@@ -255,6 +261,7 @@ func Open(g config.Gallery) (*Gallery, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("gallery %q: create thumbnails dir: %w", g.Name, err)
 	}
+	gallery.SweepStaleTemps(filepath.Dir(g.DBPath), processStart)
 	degraded := false
 	if _, err := os.ReadDir(g.GalleryPath); err != nil {
 		logx.Warnf("gallery %q: path %q unreadable: %v - degraded mode", g.Name, g.GalleryPath, err)
@@ -345,12 +352,20 @@ func (cx *Gallery) ShrinkMemory() error {
 	return cx.DB.ShrinkMemory(context.Background())
 }
 
+// Optimize skips an exporting gallery for the reason ShrinkMemory does.
+func (cx *Gallery) Optimize() error {
+	if cx.exporting() {
+		return nil
+	}
+	return cx.DB.Optimize(context.Background())
+}
+
 func (cx *Gallery) ReleaseIdle(idle time.Duration) (dropped bool, err error) {
 	dropped = cx.tallies.ReleaseIdleCountedTags(idle)
 	if cx.bkTree.ReleaseIdle(idle) {
 		dropped = true
 	}
-	err = cx.ShrinkMemory()
+	err = cmp.Or(cx.Optimize(), cx.ShrinkMemory())
 	cx.cache.Sweep()
 	return dropped, err
 }
@@ -397,7 +412,7 @@ func (cx *Gallery) indexWorkflows() {
 			logx.Warnf("gallery %q: workflow index: %v", cx.Name, err)
 			return
 		}
-		logx.Infof("gallery %q: indexed %d workflow(s)", cx.Name, indexed)
+		logx.Infof("gallery %q: indexed %d %s", cx.Name, indexed, models.Plural(indexed, "workflow", "workflows"))
 	}()
 }
 
@@ -419,6 +434,7 @@ func (cx *Gallery) startWatcher(settings func() Background, jm *jobs.Manager) {
 	w.OnPhash = cx.phashSink()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	cx.watcher = w
 	cx.watcherCancel = cancel
 	cx.watcherDone = done
 	go func() {
@@ -448,8 +464,20 @@ func (cx *Gallery) stopWatcher() {
 	}
 	cx.watcherCancel()
 	<-cx.watcherDone
+	cx.watcher = nil
 	cx.watcherCancel = nil
 	cx.watcherDone = nil
+}
+
+// WaitIngests is for a job that suppresses the watcher's ingests: one already
+// past its check could otherwise rename a file under the job.
+func (cx *Gallery) WaitIngests(ctx context.Context) {
+	cx.bgMu.Lock()
+	w := cx.watcher
+	cx.bgMu.Unlock()
+	if w != nil {
+		_ = w.WaitIngests(ctx)
+	}
 }
 
 func (cx *Gallery) startMangaReclaim() {

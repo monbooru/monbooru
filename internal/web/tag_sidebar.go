@@ -14,19 +14,12 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/session"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
 // Deeper chains render at this level: the column is too narrow for more.
 const maxTagDepth = 3
-
-var categoryRank = map[string]int{
-	"rating": 0, "year": 1, "meta": 2, "medium": 3,
-	"person": 4, "artist": 5, "copyright": 6, "character": 7,
-	"species": 8, "general": 10,
-}
-
-const customCategoryRank = 9
 
 type tagSidebarRow struct {
 	models.ImageTag
@@ -38,6 +31,9 @@ type tagSidebarRow struct {
 	Source     string
 	Orphaned   bool
 	RemoveURL  string
+	// The parents on the image that imply the row, when it is listed in
+	// its own category rather than under them.
+	ImpliedBy string
 }
 
 // An implied row goes with its parent, so it gets a button only once orphaned.
@@ -59,38 +55,58 @@ const (
 
 const tagModeCookieName = "monbooru_tag_mode"
 
+const (
+	impliedNested = "nested"
+	impliedOwn    = "own"
+)
+
+const impliedModeCookieName = "monbooru_implied_mode"
+
 type tagSidebar struct {
 	ImageID    int64
 	Sections   []tagSidebarSection
 	StaleCount int
 	Mode       string
+	Implied    string
+	HasImplied bool
 }
 
-func normalizeTagMode(v string) string {
-	if v == tagModeSource {
-		return tagModeSource
+type viewPref struct{ cookie, def, alt string }
+
+var (
+	tagModePref     = viewPref{cookie: tagModeCookieName, def: tagModeCategory, alt: tagModeSource}
+	impliedModePref = viewPref{cookie: impliedModeCookieName, def: impliedNested, alt: impliedOwn}
+)
+
+func (p viewPref) normalize(v string) string {
+	if v == p.alt {
+		return p.alt
 	}
-	return tagModeCategory
+	return p.def
 }
 
-func readTagModeCookie(r *http.Request) string {
-	c, err := r.Cookie(tagModeCookieName)
-	if err != nil {
-		return tagModeCategory
-	}
-	return normalizeTagMode(c.Value)
-}
+func (p viewPref) read(r *http.Request) string { return p.normalize(session.FromCookie(r, p.cookie)) }
 
-func writeTagModeCookie(w http.ResponseWriter, r *http.Request, mode string) {
-	if mode == tagModeSource {
-		setPrefCookie(w, r, tagModeCookieName, tagModeSource)
+func (p viewPref) write(w http.ResponseWriter, r *http.Request, mode string) {
+	if mode == p.alt {
+		setPrefCookie(w, r, p.cookie, p.alt)
 		return
 	}
-	setPrefCookie(w, r, tagModeCookieName, "")
+	setPrefCookie(w, r, p.cookie, "")
 }
 
-func (s *Server) buildTagSidebar(imageID int64, mode string, imageTags []models.ImageTag) tagSidebar {
-	sb := tagSidebar{ImageID: imageID, Mode: mode}
+func (p viewPref) resolve(w http.ResponseWriter, r *http.Request, param string) string {
+	requested := r.URL.Query().Get(param)
+	if requested == "" {
+		return p.read(r)
+	}
+	mode := p.normalize(requested)
+	p.write(w, r, mode)
+	return mode
+}
+
+func (s *Server) buildTagSidebar(imageID int64, mode, impliedMode string, imageTags []models.ImageTag) tagSidebar {
+	sb := tagSidebar{ImageID: imageID, Mode: mode, Implied: impliedMode}
 	if len(imageTags) == 0 {
 		return sb
 	}
@@ -113,13 +129,14 @@ func (s *Server) buildTagSidebar(imageID int64, mode string, imageTags []models.
 		if t.Stale {
 			sb.StaleCount++
 		}
+		sb.HasImplied = sb.HasImplied || t.IsImplied
 		rows[t.TagID] = r
 	}
 	implied := s.impliedUnder(imageTags)
 	if mode == tagModeSource {
 		sb.Sections = groupTagRowsBySource(imageID, imageTags, rows, implied, ledger, taggerNames)
 	} else {
-		sb.Sections = groupTagRowsByCategory(imageID, imageTags, rows, implied)
+		sb.Sections = groupTagRowsByCategory(imageID, imageTags, rows, implied, impliedMode == impliedOwn)
 	}
 	return sb
 }
@@ -166,8 +183,6 @@ func groupTagRowsBySource(imageID int64, imageTags []models.ImageTag,
 			DeleteCount:  len(group),
 			DeleteShared: shared[name],
 		}
-		// Per group, so each source's copy of a parent nests its subtree.
-		attached := map[int64]bool{}
 		for _, t := range group {
 			row := rows[t.TagID]
 			if row.MarkerKind == "sources" {
@@ -176,7 +191,7 @@ func groupTagRowsBySource(imageID int64, imageTags []models.ImageTag,
 			row.RemoveURL = fmt.Sprintf("/images/%d/source-contribution?source=%s&tag=%d",
 				imageID, url.QueryEscape(name), t.TagID)
 			section.Rows = append(section.Rows, row)
-			section.Rows = append(section.Rows, nestImplied(nil, t.TagID, 1, rows, implied, attached)...)
+			section.Rows = append(section.Rows, nestImplied(nil, t.TagID, 1, rows, implied, map[int64]bool{})...)
 		}
 		if section.DeleteCount > 0 {
 			section.DeleteURL = fmt.Sprintf("/images/%d/source-contribution?source=%s", imageID, url.QueryEscape(name))
@@ -259,8 +274,10 @@ func sourceHint(sources []tags.TagSource, taggerName string, confidence *float64
 	return strings.Join(lines, "\n")
 }
 
+// own lists each implied row in its own category, naming the parents that
+// imply it, instead of nesting it under them.
 func groupTagRowsByCategory(imageID int64, imageTags []models.ImageTag,
-	rows map[int64]tagSidebarRow, implied map[int64][]int64) []tagSidebarSection {
+	rows map[int64]tagSidebarRow, implied map[int64][]int64, own bool) []tagSidebarSection {
 
 	tops := make([]models.ImageTag, 0, len(imageTags))
 	for _, t := range imageTags {
@@ -268,14 +285,31 @@ func groupTagRowsByCategory(imageID int64, imageTags []models.ImageTag,
 			tops = append(tops, t)
 		}
 	}
-	// Sorted first: a tag two parents imply nests under the first one shown.
-	sortForDisplay(tops)
-	attached := map[int64]bool{}
+	// Each parent lists its whole implied set, so a tag two parents imply
+	// shows under both.
 	subtrees := make(map[int64][]tagSidebarRow, len(tops))
-	for _, t := range tops {
-		subtrees[t.TagID] = nestImplied(nil, t.TagID, 1, rows, implied, attached)
+	if own {
+		justified := tags.JustifiedImplied(imageTags, implied)
+		parents := impliedParents(rows, implied)
+		for _, t := range imageTags {
+			if t.IsImplied && justified[t.TagID] {
+				r := rows[t.TagID]
+				r.ImpliedBy = strings.Join(parents[t.TagID], ", ")
+				r.NameHint += "\nimplied by " + r.ImpliedBy
+				rows[t.TagID] = r
+				tops = append(tops, t)
+			}
+		}
+	} else {
+		for _, t := range tops {
+			subtrees[t.TagID] = nestImplied(nil, t.TagID, 1, rows, implied, map[int64]bool{})
+		}
 	}
 	orphans := orphanedImplied(imageTags, implied)
+	orphaned := make(map[int64]bool, len(orphans))
+	for _, t := range orphans {
+		orphaned[t.TagID] = true
+	}
 	tops = append(tops, orphans...)
 	sortForDisplay(tops)
 
@@ -286,7 +320,7 @@ func groupTagRowsByCategory(imageID int64, imageTags []models.ImageTag,
 		}
 		section := &out[len(out)-1]
 		row := rows[t.TagID]
-		row.Orphaned = t.IsImplied
+		row.Orphaned = orphaned[t.TagID]
 		section.Rows = append(section.Rows, row)
 		section.Rows = append(section.Rows, subtrees[t.TagID]...)
 		if !t.IsImplied {
@@ -313,6 +347,19 @@ func orphanedImplied(imageTags []models.ImageTag, implied map[int64][]int64) []m
 	return out
 }
 
+func impliedParents(rows map[int64]tagSidebarRow, implied map[int64][]int64) map[int64][]string {
+	out := map[int64][]string{}
+	for parentID, children := range implied {
+		for _, childID := range children {
+			out[childID] = append(out[childID], rows[parentID].TagName)
+		}
+	}
+	for _, names := range out {
+		sort.Slice(names, func(i, j int) bool { return gallery.NaturalLess(strings.ToLower(names[i]), strings.ToLower(names[j])) })
+	}
+	return out
+}
+
 func nestImplied(out []tagSidebarRow, parentID int64, depth int,
 	rows map[int64]tagSidebarRow, implied map[int64][]int64, attached map[int64]bool) []tagSidebarRow {
 
@@ -332,22 +379,14 @@ func nestImplied(out []tagSidebarRow, parentID int64, depth int,
 
 func sortForDisplay(list []models.ImageTag) {
 	sort.SliceStable(list, func(i, j int) bool {
-		ri, rj := rankCategory(list[i].Category), rankCategory(list[j].Category)
-		if ri != rj {
-			return ri < rj
+		if pi, pj := list[i].CategoryPosition, list[j].CategoryPosition; pi != pj {
+			return pi < pj
 		}
 		if list[i].Category != list[j].Category {
 			return list[i].Category < list[j].Category
 		}
 		return gallery.NaturalLess(strings.ToLower(list[i].TagName), strings.ToLower(list[j].TagName))
 	})
-}
-
-func rankCategory(name string) int {
-	if r, ok := categoryRank[name]; ok {
-		return r
-	}
-	return customCategoryRank
 }
 
 func (s *Server) aliasNames(imageTags []models.ImageTag) map[int64]string {

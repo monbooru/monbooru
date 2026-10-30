@@ -42,6 +42,8 @@ var (
 	ErrInvalidCategoryName = errors.New("invalid category name (use lowercase letters, digits, underscore, or hyphen)")
 
 	ErrCategoryExists = errors.New("a category with this name already exists")
+
+	ErrCategoryOrderStale = errors.New("the categories changed since this page loaded; reload to see them")
 )
 
 func IsValidCategoryColor(s string) bool { return categoryColorRe.MatchString(s) }
@@ -100,6 +102,7 @@ type TagFilter struct {
 	ZeroOnly      bool
 	Stale         string
 	FoldedOnly    bool
+	DistinctOnly  bool
 }
 
 type Service struct {

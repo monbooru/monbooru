@@ -1,6 +1,6 @@
 {{define "partials/sort_select.html"}}
 <select name="sort" id="search-sort" aria-label="Sort" onchange="applySortChange(this)"{{if .SortSelectOOB}} hx-swap-oob="true"{{end}}>
-  <option value="newest"   {{if eq .Sort "newest"}}selected{{end}}>Newest</option>
+  <option value="newest"   {{if eq .Sort "newest"}}selected{{end}}>Date added</option>
   <option value="filesize" {{if eq .Sort "filesize"}}selected{{end}}>File size</option>
   <option value="order"    {{if eq .Sort "order"}}selected{{end}}>Collection order</option>
   {{if eq .Sort "random"}}<option value="random" selected>Random</option>{{end}}

@@ -16,7 +16,7 @@ func (s *Server) deleteSavedSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := search.DeleteSavedSearch(s.db(), id); err != nil {
 		logx.Warnf("delete saved search %d: %v", id, err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
+		flashHeaderErr(w, http.StatusInternalServerError, "Delete failed; check server log.")
 		return
 	}
 	// 200 + empty body - HTMX outerHTML swap removes the element.

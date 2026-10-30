@@ -37,7 +37,7 @@ func (s *Service) RelatedImages(imageID int64, limit int, excluded []int64) ([]m
 	}
 	args = append(args, limit*2+5, limit)
 
-	rows, err := s.db.Read.Query(
+	return db.QueryAll(s.db.Read, db.ScanRow(func(img *models.Image) []any { return []any{&img.ID, &img.FileType, &img.PageCount} }),
 		`WITH my_tags AS (
 		     SELECT tag_id FROM (
 		         SELECT it.tag_id, tc.name AS cat_name,
@@ -68,22 +68,6 @@ func (s *Service) RelatedImages(imageID int64, limit int, excluded []int64) ([]m
 		 LIMIT ?`,
 		args...,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []models.Image
-	for rows.Next() {
-		var img models.Image
-		var pageCount *int
-		if err := rows.Scan(&img.ID, &img.FileType, &pageCount); err != nil {
-			return nil, err
-		}
-		img.PageCount = pageCount
-		out = append(out, img)
-	}
-	return out, rows.Err()
 }
 
 // categoryName narrows the suggestions to one category; "" takes every one.

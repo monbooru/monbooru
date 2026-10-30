@@ -93,9 +93,11 @@ func (s *Service) ScanFoldedDuplicates() (int, error) {
 	return len(countByOld), nil
 }
 
+// CROSS JOIN keeps the few pairs as the driver: planner statistics taken
+// while the catalog was small pair every tag with its whole category.
 const liveFoldedPairs = `folded_tag_pairs fp
-	JOIN tags o ON o.id = fp.old_id AND o.is_alias = 0
-	JOIN tags n ON n.id = fp.new_id AND n.is_alias = 0 AND n.category_id = o.category_id`
+	CROSS JOIN tags o ON o.id = fp.old_id AND o.is_alias = 0
+	CROSS JOIN tags n ON n.id = fp.new_id AND n.is_alias = 0 AND n.category_id = o.category_id`
 
 func (s *Service) FoldedDuplicatesCount() (int, error) {
 	var n int

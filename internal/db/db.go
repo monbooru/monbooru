@@ -76,7 +76,7 @@ const NormalizeWindowsFolderPathSQL = `UPDATE images SET folder_path = ltrim(rep
 
 // Bump bootstrapSchemaVersion for a new one-shot or an index the planner
 // needs stats for: ANALYZE runs once per bump.
-const bootstrapSchemaVersion = 15
+const bootstrapSchemaVersion = 16
 
 // A library below MinUpgradeUserVersion was last opened outside the
 // two-minor upgrade window; UpgradeVia is a release that still upgrades
@@ -141,13 +141,23 @@ func Open(path string) (*DB, error) {
 // Each connection has its own page cache, so ShrinkMemory holds them all
 // at once to reach every one.
 func (db *DB) ShrinkMemory(ctx context.Context) error {
-	if err := shrinkPool(ctx, db.Read); err != nil {
+	if err := execEachConn(ctx, db.Read, `PRAGMA shrink_memory`); err != nil {
 		return err
 	}
-	return shrinkPool(ctx, db.Write)
+	return execEachConn(ctx, db.Write, `PRAGMA shrink_memory`)
 }
 
-func shrinkPool(ctx context.Context, pool *sql.DB) error {
+// Optimize refreshes the planner statistics a library outgrows. A
+// connection reads them only when it opens, so every pooled reader is
+// made to reload them; 0x10002 also covers tables the writer never read.
+func (db *DB) Optimize(ctx context.Context) error {
+	if _, err := db.Write.ExecContext(ctx, `PRAGMA optimize=0x10002`); err != nil {
+		return err
+	}
+	return execEachConn(ctx, db.Read, `ANALYZE sqlite_schema`)
+}
+
+func execEachConn(ctx context.Context, pool *sql.DB, stmt string) error {
 	n := pool.Stats().MaxOpenConnections
 	if n <= 0 {
 		n = 1
@@ -166,7 +176,7 @@ func shrinkPool(ctx context.Context, pool *sql.DB) error {
 		conns = append(conns, c)
 	}
 	for _, c := range conns {
-		if _, err := c.ExecContext(ctx, `PRAGMA shrink_memory`); err != nil {
+		if _, err := c.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
@@ -191,3 +201,12 @@ func (db *DB) Vacuum(ctx context.Context) error {
 func (db *DB) Close() error {
 	return cmp.Or(db.Read.Close(), db.Write.Close())
 }
+
+const DefaultCategoryOrder = `CASE name
+	WHEN 'rating' THEN 0 WHEN 'year' THEN 1 WHEN 'meta' THEN 2 WHEN 'medium' THEN 3
+	WHEN 'person' THEN 4 WHEN 'artist' THEN 5 WHEN 'copyright' THEN 6 WHEN 'character' THEN 7
+	WHEN 'species' THEN 8 WHEN 'general' THEN 10 ELSE 9 END, name`
+
+const ResetCategoryPositions = `UPDATE tag_categories SET position = r.pos
+	FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY ` + DefaultCategoryOrder + `) - 1 AS pos FROM tag_categories) r
+	WHERE r.id = tag_categories.id`

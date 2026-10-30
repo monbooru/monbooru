@@ -56,7 +56,7 @@ func (s *Server) openFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	kind := r.FormValue("kind")
 	if !slices.Contains(openFolderKinds, kind) {
-		flashStatus(w, http.StatusBadRequest, "Unknown folder.")
+		externalErr(w, r, "Unknown folder.", http.StatusBadRequest)
 		return
 	}
 	dir, ours := s.desktopFolder(kind)
@@ -65,25 +65,25 @@ func (s *Server) openFolder(w http.ResponseWriter, r *http.Request) {
 		name := r.FormValue("name")
 		if name != "" {
 			if err := tagger.ValidateTaggerName(name); err != nil {
-				flashStatus(w, http.StatusBadRequest, err.Error())
+				externalErr(w, r, err.Error(), http.StatusBadRequest)
 				return
 			}
 			dir = filepath.Join(dir, name)
 		}
 	}
 	if dir == "" {
-		flashStatus(w, http.StatusBadRequest, "That folder is not configured.")
+		externalErr(w, r, "That folder is not configured.", http.StatusBadRequest)
 		return
 	}
 	if ours {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			flashStatus(w, http.StatusInternalServerError, "Could not create "+dir+": "+err.Error())
+			externalErr(w, r, "Could not create "+dir+": "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 	if err := s.folderOpener(dir); err != nil {
 		logx.Warnf("open-folder %s: %v", kind, err)
-		flashStatus(w, http.StatusInternalServerError, "Could not open "+dir+".")
+		externalErr(w, r, "Could not open "+dir+".", http.StatusInternalServerError)
 		return
 	}
 	writeInlineFlash(w, "ok", "Opened "+dir+".")

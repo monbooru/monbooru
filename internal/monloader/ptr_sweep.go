@@ -6,14 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tags"
 )
-
-const ptrLookupBatch = contract.MaxPTRTags
 
 // Both halves share the job slot the caller already holds.
 // The spelling is exact, a bare one meaning general, as the PTR writes it.
@@ -57,10 +56,10 @@ func ptrLookupCands(svc *tags.Service, ids []int64) ([]ptrLookupCand, error) {
 // An orphan spelling answers known with nothing behind it, so a connected
 // candidate beats it wherever it turns up; otherwise the tag's own orphan
 // name would shadow an alias holding the whole cluster.
-func resolvePTRSpelling(graph map[string]PTRTagInfo, own string, aliases []string) (string, PTRTagInfo, bool) {
-	bareName, bareInfo, haveBare := "", PTRTagInfo{}, false
-	connected := func(name string, info PTRTagInfo) bool {
-		if len(info.Aliases)+len(info.Implications)+len(info.ImpliedBy) > 0 || (info.Ideal != "" && info.Ideal != name) {
+func resolvePTRSpelling(graph map[string]contract.PTRTagInfo, own string, aliases []string) (string, contract.PTRTagInfo, bool) {
+	bareName, bareInfo, haveBare := "", contract.PTRTagInfo{}, false
+	connected := func(name string, info contract.PTRTagInfo) bool {
+		if ptrConnected(name, info) {
 			return true
 		}
 		if !haveBare {
@@ -88,7 +87,11 @@ func resolvePTRSpelling(graph map[string]PTRTagInfo, own string, aliases []strin
 	if haveBare {
 		return bareName, bareInfo, true
 	}
-	return "", PTRTagInfo{}, false
+	return "", contract.PTRTagInfo{}, false
+}
+
+func ptrConnected(name string, info contract.PTRTagInfo) bool {
+	return len(info.Aliases)+len(info.Implications)+len(info.ImpliedBy) > 0 || (info.Ideal != "" && info.Ideal != name)
 }
 
 func ptrAliasForms(svc *tags.Service, ids []int64) (map[int64][]string, error) {
@@ -108,7 +111,7 @@ func ptrAliasForms(svc *tags.Service, ids []int64) (map[int64][]string, error) {
 // A spelling that answered for the tag joins its aliases, so the pull
 // adopts it and the staleness sync never retires it. An `as` the operator
 // named gets no alias fallback.
-func (l *Link) ptrResolveChunk(ctx context.Context, svc *tags.Service, chunk []ptrLookupCand, as string) (map[int64]PTRTagInfo, error) {
+func (l *Link) ptrResolveChunk(ctx context.Context, svc *tags.Service, chunk []ptrLookupCand, as string) (map[int64]contract.PTRTagInfo, error) {
 	if as != "" && len(chunk) == 1 {
 		graph, err := l.PTRTagLookup(ctx, []string{as})
 		if err != nil {
@@ -116,12 +119,12 @@ func (l *Link) ptrResolveChunk(ctx context.Context, svc *tags.Service, chunk []p
 		}
 		info := graph[as]
 		if !info.Known {
-			return map[int64]PTRTagInfo{}, nil
+			return map[int64]contract.PTRTagInfo{}, nil
 		}
 		if as != chunk[0].name {
 			info.Aliases = append(info.Aliases, as)
 		}
-		return map[int64]PTRTagInfo{chunk[0].id: info}, nil
+		return map[int64]contract.PTRTagInfo{chunk[0].id: info}, nil
 	}
 	names := make([]string, len(chunk))
 	for i, c := range chunk {
@@ -131,28 +134,30 @@ func (l *Link) ptrResolveChunk(ctx context.Context, svc *tags.Service, chunk []p
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[int64]PTRTagInfo, len(chunk))
-	var unknown []int64
+	out := make(map[int64]contract.PTRTagInfo, len(chunk))
+	// An orphan own name retries too, as the tag card resolves it: an
+	// alias may carry the cluster.
+	var retry []int64
 	for _, c := range chunk {
-		if info := graph[c.name]; info.Known {
+		if info := graph[c.name]; info.Known && ptrConnected(c.name, info) {
 			out[c.id] = info
 		} else {
-			unknown = append(unknown, c.id)
+			retry = append(retry, c.id)
 		}
 	}
-	if len(unknown) == 0 {
+	if len(retry) == 0 {
 		return out, nil
 	}
-	forms, err := ptrAliasForms(svc, unknown)
+	forms, err := ptrAliasForms(svc, retry)
 	if err != nil {
 		return nil, err
 	}
 	var all []string
-	for _, id := range unknown {
+	for _, id := range retry {
 		all = append(all, forms[id]...)
 	}
-	for start := 0; start < len(all); start += ptrLookupBatch {
-		part, err := l.PTRTagLookup(ctx, all[start:min(start+ptrLookupBatch, len(all))])
+	for start := 0; start < len(all); start += contract.MaxPTRTags {
+		part, err := l.PTRTagLookup(ctx, all[start:min(start+contract.MaxPTRTags, len(all))])
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +168,9 @@ func (l *Link) ptrResolveChunk(ctx context.Context, svc *tags.Service, chunk []p
 			continue
 		}
 		if spelling, info, ok := resolvePTRSpelling(graph, c.name, forms[c.id]); ok {
-			info.Aliases = append(info.Aliases, spelling)
+			if spelling != c.name {
+				info.Aliases = append(info.Aliases, spelling)
+			}
 			out[c.id] = info
 		}
 	}
@@ -199,13 +206,17 @@ func (l *Link) PTRTagSweep(svc *tags.Service, ids []int64, as string) {
 	l.jobs.Update(0, total, "PTR lookup…")
 	for len(cands) > 0 && !cancelled && !unavailable {
 		createdTags := map[int64]struct{}{}
-		for start := 0; start < len(cands) && !cancelled; start += ptrLookupBatch {
+		for start := 0; start < len(cands) && !cancelled; start += contract.MaxPTRTags {
 			if ctx.Err() != nil {
 				cancelled = true
 				break
 			}
-			chunk := cands[start:min(start+ptrLookupBatch, len(cands))]
+			chunk := cands[start:min(start+contract.MaxPTRTags, len(cands))]
 			results, err := l.ptrResolveChunk(ctx, svc, chunk, as)
+			var support map[int64]map[int64]bool
+			if err == nil {
+				support, err = l.ptrImpliedBySupport(ctx, svc, chunk, results)
+			}
 			if errors.Is(err, ErrPTRUnavailable) {
 				// The PTR going away mid-sweep is a degraded stop, not a
 				// failure: what already applied stays.
@@ -227,9 +238,9 @@ func (l *Link) PTRTagSweep(svc *tags.Service, ids []int64, as string) {
 					// Unknown now, so every relation it pulled earlier
 					// goes stale.
 					unknown++
-					retired += syncPTRStaleness(svc, c.id, nil, nil)
+					retired += syncPTRStaleness(svc, c.id, nil, support[c.id])
 				} else {
-					a, i, d, al, r := applyPTRTagInfo(svc, c.id, info, fanOutParents, createdTags, seed[c.id])
+					a, i, d, al, r := applyPTRTagInfo(svc, c.id, info, support[c.id], fanOutParents, createdTags, seed[c.id])
 					aliases += a
 					implications += i
 					dropped += d
@@ -306,9 +317,12 @@ func ptrResolve(svc *tags.Service, name string) (catID int64, normalized string,
 // The PTR ideal becomes an alias too, since locally this tag stays the
 // canonical. An alias only takes an unused name, so the operator's
 // catalog wins; AddImplicationFrom guards cycles and aliases.
-func applyPTRTagInfo(svc *tags.Service, tagID int64, info PTRTagInfo, fanOutParents, createdTags map[int64]struct{}, pullImpliedBy bool) (aliases, implications, dropped, aliased, retired int) {
+func applyPTRTagInfo(svc *tags.Service, tagID int64, info contract.PTRTagInfo, supported map[int64]bool, fanOutParents, createdTags map[int64]struct{}, pullImpliedBy bool) (aliases, implications, dropped, aliased, retired int) {
 	freshAliases := map[tags.AliasKey]bool{}
-	freshImplied := map[int64]bool{}
+	freshImplied := maps.Clone(supported)
+	if freshImplied == nil {
+		freshImplied = map[int64]bool{}
+	}
 	aliasNames := info.Aliases
 	if info.Ideal != "" {
 		aliasNames = append([]string{info.Ideal}, aliasNames...)
@@ -406,6 +420,64 @@ func applyPTRTagInfo(svc *tags.Service, tagID int64, info PTRTagInfo, fanOutPare
 	}
 	retired = syncPTRStaleness(svc, tagID, freshAliases, freshImplied)
 	return aliases, implications, dropped, aliased, retired
+}
+
+// A child's own answer and its target's implied_by spell a cluster
+// differently whenever its ideal is a separate tag here, so an edge stays
+// current while either answer lists it.
+func (l *Link) ptrImpliedBySupport(ctx context.Context, svc *tags.Service, chunk []ptrLookupCand, results map[int64]contract.PTRTagInfo) (map[int64]map[int64]bool, error) {
+	support := map[int64]map[int64]bool{}
+	mark := func(child, target int64) {
+		if support[child] == nil {
+			support[child] = map[int64]bool{}
+		}
+		support[child][target] = true
+	}
+	inChunk := make(map[string]int64, len(chunk))
+	for _, c := range chunk {
+		inChunk[c.name] = c.id
+	}
+	// The chunk's own implied_by pulls create edges after this runs, so
+	// their answers vouch for them directly.
+	for _, c := range chunk {
+		for _, child := range results[c.id].ImpliedBy {
+			if id, ok := inChunk[child]; ok {
+				mark(id, c.id)
+			}
+		}
+	}
+	type edge struct {
+		child, target int64
+		childForm     string
+	}
+	byTarget := map[string][]edge{}
+	for _, c := range chunk {
+		rows, err := svc.ListImplications(c.id)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			form := tags.FormName(r.ImpliedCategoryName, r.ImpliedName)
+			if _, swept := inChunk[form]; r.Origin == contract.SourcePTR && !swept && !slices.Contains(results[c.id].Implications, form) {
+				byTarget[form] = append(byTarget[form], edge{c.id, r.ImpliedID, c.name})
+			}
+		}
+	}
+	targets := slices.Sorted(maps.Keys(byTarget))
+	for start := 0; start < len(targets); start += contract.MaxPTRTags {
+		graph, err := l.PTRTagLookup(ctx, targets[start:min(start+contract.MaxPTRTags, len(targets))])
+		if err != nil {
+			return nil, err
+		}
+		for form, info := range graph {
+			for _, e := range byTarget[form] {
+				if slices.Contains(info.ImpliedBy, e.childForm) {
+					mark(e.child, e.target)
+				}
+			}
+		}
+	}
+	return support, nil
 }
 
 // A redirected name is an alias here: storing the edge on its canonical

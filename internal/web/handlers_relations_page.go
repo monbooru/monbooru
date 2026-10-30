@@ -56,7 +56,7 @@ func (s *Server) settingsRelationsPost(w http.ResponseWriter, r *http.Request) {
 	threshold := config.DefaultTagPairThreshold
 	if raw := r.FormValue("tag_pair_threshold"); raw != "" {
 		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
+		if err != nil || math.IsNaN(v) {
 			writeInlineFlash(w, "err", "Match strength must be a number between 70 and 100.")
 			return
 		}
@@ -171,7 +171,7 @@ type browseCard struct {
 }
 
 func (s *Server) relationsPage(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -730,7 +730,7 @@ func resolveBrowseSort(kind, requested string) string {
 const browseRelationsPageSize = 60
 
 func (s *Server) browseRelationsPage(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}

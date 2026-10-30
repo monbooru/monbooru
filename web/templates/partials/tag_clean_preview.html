@@ -1,0 +1,9 @@
+{{define "partials/tag_clean_preview.html"}}
+<div class="name-preview">
+  <span class="name-preview-cap">{{.Renames}} to rename, {{.Merges}} to merge, {{.Skips}} skipped{{with .Unchanged}}, {{.}} unchanged{{end}}</span>
+  <dl class="name-preview-rows">
+    {{range .Steps}}<dt class="name-preview-from" title="{{.Name}}">{{.Name}}</dt><dd class="name-preview-to tag-clean-{{.Action}}">{{if eq .Action "rename"}}{{.Cleaned}}{{else if eq .Action "merge"}}{{.Cleaned}}, merging into {{.Note}}{{else}}skipped: {{.Note}}{{end}}</dd>{{end}}
+  </dl>
+  {{with .More}}<span class="name-preview-cap">and {{.}} more</span>{{end}}
+</div>
+{{end}}

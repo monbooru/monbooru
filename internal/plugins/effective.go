@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/config"
-	"github.com/monbooru/monbooru/internal/peer"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
@@ -30,7 +30,7 @@ func EnsureDir(dir string) {
 }
 
 func reserveName(name string) (string, bool) {
-	if name == peer.Companion {
+	if name == contract.AppMonloader {
 		return "the name belongs to the companion", true
 	}
 	if err := config.ValidatePluginName(name); err != nil {

@@ -17,10 +17,6 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 )
 
-// Companion is the companion's name in pairing records; its credential and
-// pause live in [monloader], every other peer's in a [[plugin]] block.
-const Companion = contract.AppMonloader
-
 type Req struct {
 	pairing.Request
 	URL       string
@@ -90,7 +86,7 @@ func Grant(c *config.Config, req Req, tok apitoken.Token) {
 	// token is gone.
 	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == req.App })
 	c.Auth.Tokens = append(c.Auth.Tokens, tok)
-	if req.App == Companion {
+	if req.App == contract.AppMonloader {
 		if c.EnvPinned("monloader.api_token") == "" {
 			c.Monloader.APIToken = req.PeerToken
 		}
@@ -106,7 +102,7 @@ func Grant(c *config.Config, req Req, tok apitoken.Token) {
 }
 
 func SetPaused(c *config.Config, app string, paused bool) {
-	if app == Companion {
+	if app == contract.AppMonloader {
 		c.Monloader.Paused = paused
 		return
 	}
@@ -119,7 +115,7 @@ func SetPaused(c *config.Config, app string, paused bool) {
 // and re-pair.
 func Revoke(c *config.Config, app string) {
 	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == app })
-	if app == Companion {
+	if app == contract.AppMonloader {
 		if c.EnvPinned("monloader.api_token") == "" {
 			c.Monloader.APIToken = ""
 		}
@@ -137,7 +133,7 @@ func Revoke(c *config.Config, app string) {
 }
 
 func OverrideURL(c *config.Config, app string) string {
-	if app == Companion {
+	if app == contract.AppMonloader {
 		return strings.TrimSpace(c.Monloader.APIURL)
 	}
 	if p := c.FindPlugin(app); p != nil {

@@ -112,8 +112,14 @@ func statMissing(path string) bool {
 }
 
 // EnabledTaggers ignores gallery scoping; a job on one gallery uses
-// EnabledTaggersForGallery.
-func EnabledTaggers(cfg *config.Config) []TaggerStatus { return enabledTaggers(cfg, nil) }
+// EnabledTaggersForGallery. It passes no predicate: AppliesToGallery("")
+// is false for a gallery-scoped tagger.
+func EnabledTaggers(cfg *config.Config) []TaggerStatus {
+	if !buildSupportsInference() {
+		return nil
+	}
+	return enabledIn(DiscoverTaggers(cfg), nil)
+}
 
 func SelectForGallery(cfg *config.Config, gallery, name string) ([]TaggerStatus, error) {
 	enabled := EnabledTaggersForGallery(cfg, gallery)
@@ -150,15 +156,6 @@ func GalleryTaggers(cfg *config.Config, gallery string) (enabled []TaggerStatus,
 		reason = fmt.Sprintf("no enabled tagger applies to gallery %q", gallery)
 	}
 	return enabled, len(all) > 0, reason
-}
-
-// The unscoped listing passes no predicate: AppliesToGallery("") is false
-// for a gallery-scoped tagger.
-func enabledTaggers(cfg *config.Config, extra func(TaggerStatus) bool) []TaggerStatus {
-	if !buildSupportsInference() {
-		return nil
-	}
-	return enabledIn(DiscoverTaggers(cfg), extra)
 }
 
 func enabledIn(list []TaggerStatus, extra func(TaggerStatus) bool) []TaggerStatus {

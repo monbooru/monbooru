@@ -2,7 +2,6 @@ package api
 
 import (
 	"cmp"
-	"encoding/json"
 	"html/template"
 	"maps"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/peer"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 func buildSpec(baseURL string) map[string]any {
@@ -67,6 +67,10 @@ func buildSpec(baseURL string) map[string]any {
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; absent when never applied."},
 					"note":         map[string]any{"type": "string", "description": "The operator's note on the tag, in annotation markup; empty when none. An alias has none."},
 					"links":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The tag's links as stored, one entry per line; a leading '-' marks a dead link."},
+					"distinct_from": map[string]any{"type": "array", "description": "The same-name tags in other categories the operator marked as different things; they stop counting as a category conflict. Empty when none.", "items": objectSchema(nil, map[string]any{
+						"id":       map[string]any{"type": "integer"},
+						"category": map[string]any{"type": "string"},
+					})},
 				}),
 				"Implication": objectSchema(nil, map[string]any{
 					"parent_id":        map[string]any{"type": "integer"},
@@ -79,12 +83,46 @@ func buildSpec(baseURL string) map[string]any {
 					"name":       map[string]any{"type": "string"},
 					"color":      map[string]any{"type": "string"},
 					"is_builtin": map[string]any{"type": "boolean"},
+					"position":   map[string]any{"type": "integer", "description": "Place in the order set on the Categories page, lowest first; list responses come in this order"},
 				}),
 				"Gallery": objectSchema(nil, map[string]any{
 					"name":   map[string]any{"type": "string"},
 					"images": map[string]any{"type": "integer", "description": "Visible (non-missing) image count"},
 					"tags":   map[string]any{"type": "integer", "description": "Non-alias tag count"},
 					"active": map[string]any{"type": "boolean", "description": "True for the gallery used when no ?gallery= selector is given"},
+				}),
+				"Tagger": objectSchema(nil, map[string]any{
+					"name":      map[string]any{"type": "string", "description": "The tagger's folder name under paths.model_path; what tagger_name takes"},
+					"enabled":   map[string]any{"type": "boolean", "description": "Turned on in Settings"},
+					"available": map[string]any{"type": "boolean", "description": "Its model loads in this build"},
+					"applies":   map[string]any{"type": "boolean", "description": "An auto-tag in the selected gallery runs it: enabled, available and in scope for the gallery"},
+					"reason":    map[string]any{"type": "string", "description": "Why it is unavailable; absent when it is"},
+				}),
+				"CurrentJob": objectSchema(nil, map[string]any{
+					"running":  map[string]any{"type": "boolean", "description": "The job slot is held: a job runs, or a scheduled run sits between its phases. A job started now would wait or be refused"},
+					"finished": map[string]any{"type": "integer", "description": "Jobs finished since the server started. It only grows, so a poller that saw it below this value knows a job ended even after the status bar dropped it"},
+					"queued":   map[string]any{"type": "integer", "description": "Images waiting in the auto-tag queue for the slot"},
+					"job": objectSchema(nil, map[string]any{
+						"type":        map[string]any{"type": "string", "description": "sync, autotag, tag, delete, move, relations, ..."},
+						"processed":   map[string]any{"type": "integer"},
+						"total":       map[string]any{"type": "integer"},
+						"message":     map[string]any{"type": "string", "description": "The progress line"},
+						"summary":     map[string]any{"type": "string", "description": "The outcome, once finished"},
+						"error":       map[string]any{"type": "string", "description": "Why it failed, once finished"},
+						"partial":     map[string]any{"type": "boolean", "description": "Finished with part of the work left undone"},
+						"started_at":  map[string]any{"type": "string", "format": "date-time"},
+						"finished_at": map[string]any{"type": "string", "format": "date-time", "nullable": true},
+						"galleries":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The galleries it writes to; empty stands for all of them"},
+					}),
+				}),
+				"Collection": objectSchema(nil, map[string]any{
+					"name":  map[string]any{"type": "string", "description": "The label; images/search?q=collection:\"<name>\"&sort=order pages its members in reading order"},
+					"count": map[string]any{"type": "integer", "description": "Members whose file is present"},
+				}),
+				"PaginatedCollections": paginatedSchema("#/components/schemas/Collection"),
+				"ImplicationJob": objectSchema(nil, map[string]any{
+					"created": map[string]any{"type": "boolean", "description": "Declare only: false when the edge already existed and is re-applied"},
+					"job":     map[string]any{"type": "string", "description": "GET /jobs/current follows the run"},
 				}),
 				"PaginatedTags":   paginatedSchema("#/components/schemas/TagRow"),
 				"PaginatedImages": paginatedSchema("#/components/schemas/Image"),
@@ -113,6 +151,10 @@ func buildSpec(baseURL string) map[string]any {
 					"folder_deleted":     map[string]any{"type": "boolean", "description": "True when delete_empty_folder removed the emptied folder"},
 					"folder":             map[string]any{"type": "string", "description": "The removed folder, relative to the gallery root"},
 					"kept_changed_files": map[string]any{"type": "integer", "description": "The image's files kept on disk because they no longer hold its bytes"},
+				}),
+				"AutotagResponse": objectSchema(nil, map[string]any{
+					"autotag": map[string]any{"type": "string", "description": "autotag job started, or autotag queued while another job holds the slot"},
+					"images":  map[string]any{"type": "integer", "description": "How many images were queued"},
 				}),
 				"CreateImageResponse": map[string]any{
 					"type":        "object",
@@ -179,7 +221,7 @@ func buildSpec(baseURL string) map[string]any {
 							"last_at":     map[string]any{"type": "string", "format": "date-time", "description": "When the last attempt concluded"},
 							"last_result": map[string]any{"type": "string", "description": "'hit' or 'miss'; absent while nothing has concluded"},
 							"attempts":    map[string]any{"type": "integer", "description": "Consecutive concluded misses"},
-							"next_due_at": map[string]any{"type": "string", "format": "date-time", "description": "When the backend may try again; absent when nothing is scheduled"},
+							"next_due_at": map[string]any{"type": "string", "format": "date-time", "description": "When the backend may try again; absent when no scheduled run will try it"},
 						}),
 					},
 					"auto_tagged_at":   map[string]any{"type": "string", "format": "date-time", "nullable": true},
@@ -289,7 +331,7 @@ func buildSpec(baseURL string) map[string]any {
 									"file":                        map[string]any{"type": "string", "format": "binary", "description": "Image, video, or cbz/zip archive"},
 									"tags":                        map[string]any{"type": "string", "description": "JSON-encoded array of tag names"},
 									"folder":                      map[string]any{"type": "string", "description": "Destination subfolder under the gallery root; missing directories are created. Blank uses gallery.default_upload_folder (the gallery root when that is unset)."},
-									"autotag":                     map[string]any{"type": "string", "description": "Set to \"true\" to kick off an auto-tag job on the new image"},
+									"autotag":                     map[string]any{"type": "string", "description": "Set to \"true\" to auto-tag the new image, queued while another job runs"},
 									"tagger_name":                 map[string]any{"type": "string", "description": "Optional auto-tagger name; when set with autotag, restricts the job to that tagger"},
 									"via":                         map[string]any{"type": "string", "description": "Optional caller-supplied identifier (app name, URL...). Stored as images.origin and attached to each initial tag via image_tags.tagger_name, unless a non-empty source is sent, which takes the attribution instead so each source owns a prunable slice. Blank defaults images.origin to 'upload' for multipart mode."},
 									"source":                      map[string]any{"type": "string", "description": "Optional site label for the image's origin (site name, scraper...). Recorded as a source; on a duplicate-SHA push its tags and provenance merge into the existing image instead of being discarded."},
@@ -316,7 +358,7 @@ func buildSpec(baseURL string) map[string]any {
 									"path":                        map[string]any{"type": "string", "description": "Path to a file already inside the gallery. Absolute paths are used as given; a relative path resolves under gallery/<folder> when folder is set, and otherwise against the server's working directory, so send an absolute path or a folder. The file must sit inside the gallery root, in a folder the gallery indexes, or the request is refused with 400."},
 									"tags":                        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 									"folder":                      map[string]any{"type": "string", "description": "Destination subfolder for relative paths"},
-									"autotag":                     map[string]any{"type": "boolean", "description": "Kick off an auto-tag job on the new image"},
+									"autotag":                     map[string]any{"type": "boolean", "description": "Auto-tag the new image, queued while another job runs"},
 									"tagger_name":                 map[string]any{"type": "string", "description": "Optional auto-tagger name"},
 									"via":                         map[string]any{"type": "string", "description": "Optional caller-supplied identifier. Stored as images.origin and attached to each initial tag, unless a non-empty source is sent, which takes the attribution instead. Blank defaults images.origin to 'ingest' for JSON path-reference mode."},
 									"source":                      map[string]any{"type": "string", "description": "Optional site label for the image's origin (site name, scraper...). Recorded as a source; on a duplicate-SHA push its tags and provenance merge into the existing image instead of being discarded."},
@@ -354,7 +396,7 @@ func buildSpec(baseURL string) map[string]any {
 					[]map[string]any{
 						galleryParam(),
 						queryParam("q", "Search query (tag list, filters, wildcards)"),
-						queryParam("sort", "Sort field: newest, filesize, order, random"),
+						queryParam("sort", "Sort field: newest, filesize, order, random, similarity (ranks by tag overlap with the image a similar: term names; newest without one)"),
 						queryParam("order", "Sort order: asc, desc"),
 						queryParam("seed", "Random-sort seed for stable pagination when sort=random"),
 						queryParam("page", "Page number (1-based)"),
@@ -461,6 +503,23 @@ func buildSpec(baseURL string) map[string]any {
 					},
 				},
 			},
+			"/images/{id}/autotag": map[string]any{
+				"post": opBody("Auto-tag an image", "autotagImage",
+					[]map[string]any{pathParam("id", "Image ID"), galleryParam()},
+					jsonBodySchema(false, objectSchema(nil, map[string]any{
+						"tagger_name": map[string]any{"type": "string", "description": "Run only this tagger (a name GET /taggers lists as applying). Empty runs every tagger that applies."},
+					})),
+					autotagResponses("Not found")),
+			},
+			"/images/autotag": map[string]any{
+				"post": opBody("Auto-tag several images", "autotagImages",
+					[]map[string]any{galleryParam()},
+					jsonBodySchema(true, objectSchema([]string{"ids"}, map[string]any{
+						"ids":         map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "1 to 5000 image ids; nothing is queued when one names no image"},
+						"tagger_name": map[string]any{"type": "string", "description": "Run only this tagger. Empty runs every tagger that applies."},
+					})),
+					autotagResponses("An id names no image")),
+			},
 			"/images/{id}/tags": map[string]any{
 				"get": op("List image tags", "listImageTags",
 					[]map[string]any{pathParam("id", "Image ID"), galleryParam()},
@@ -530,7 +589,7 @@ func buildSpec(baseURL string) map[string]any {
 					}),
 				"post": map[string]any{
 					"summary":     "Replace the image's file in place",
-					"description": "The file-carrying sibling of enrich: the uploaded bytes replace the existing row's file while the row and everything attached to it survive. Content-derived state (sha256, dimensions, size, type, embedded metadata, thumbnail, phash) is re-derived, annotation boxes scale to the new dimensions, and the accompanying metadata fields land through the same merge as a push. The driving origin is marked exact (similarity reset, md5 refreshed). An upload whose sha256 matches the stored file applies the metadata only and answers replaced=false. Still-image and GIF rows only; a video or archive row, or a video or archive upload, is 409 wrong_type.",
+					"description": "The file-carrying sibling of enrich: the uploaded bytes replace the existing row's file while the row and everything attached to it survive. Content-derived state (sha256, dimensions, size, type, embedded metadata, thumbnail, phash) is re-derived, annotation boxes scale to the new dimensions, and the accompanying metadata fields land through the same merge as a push. The driving origin is marked exact (similarity reset, md5 refreshed), except after a JPEG rescue (the upload re-encoded because it does not decode): that origin keeps the md5 the source served, a similarity mark of 100 and upgrade_kept, so a verified refresh applies unverified instead of answering 409 hash_mismatch. An upload whose sha256 matches the stored file applies the metadata only and answers replaced=false. Still-image and GIF rows only; a video or archive row, or a video or archive upload, is 409 wrong_type.",
 					"operationId": "replaceImageFile",
 					"parameters":  []map[string]any{pathParam("id", "Image ID"), galleryParam()},
 					"requestBody": map[string]any{
@@ -658,13 +717,15 @@ func buildSpec(baseURL string) map[string]any {
 						galleryParam(),
 						queryParam("q", "Name filter; prefix match, or * as a wildcard anywhere"),
 						queryParam("category", "Filter by category name. An unknown name matches nothing."),
-						queryParam("sort", "Sort field (usage, alpha)"),
+						queryParam("sort", "Sort field: usage (default), name, created, last_used; alpha is accepted for name"),
+						queryParam("order", "Sort order: asc, desc. Empty keeps the sort's default: descending for usage, created and last_used, ascending for name."),
 						queryParam("page", "Page number"),
 						queryParam("limit", "Results per page (default 100, max 500)"),
 						queryParam("page_size", "Synonym for limit"),
-						queryParam("show_zero", "Hide zero-usage non-alias tags ('0' to opt out). Default surfaces them so the API total matches the /tags page total."),
+						queryParam("show_zero", "'0' hides zero-usage non-alias tags; the default shows them so the API total matches the /tags page total."),
 						queryParam("origin", "Filter by stored creation origin ('user', a booru site, 'ptr', an auto-tagger name, ...). The legacy 'alias' value narrows to alias rows. Empty (default) returns every tag."),
 						queryParam("type", "Structural filter: 'tag' (non-alias rows), 'alias' (alias rows). Empty (default) returns both; any other value matches nothing."),
+						queryParam("used_by", "Only tags this source applied to at least one image (an auto-tagger name, a booru site, 'user', a via label), whoever created the tag."),
 					},
 					map[string]any{
 						"200": resp("Paginated tag list", "#/components/schemas/PaginatedTags"),
@@ -672,12 +733,12 @@ func buildSpec(baseURL string) map[string]any {
 				"post": opBody("Create a tag (get-or-create)", "createTag",
 					[]map[string]any{galleryParam()},
 					jsonBodySchema(true, objectSchema([]string{"name"}, map[string]any{
-						"name":     map[string]any{"type": "string"},
+						"name":     map[string]any{"type": "string", "description": "Tag name. A category:name prefix naming an existing category files the tag there, overriding category; any other prefix stays part of the name."},
 						"category": map[string]any{"type": "string", "description": "Category name; defaults to general."},
 					})),
 					map[string]any{
 						"201": resp("The tag (created, or the existing row when the name already exists in the category)", "#/components/schemas/TagRow"),
-						"400": resp("Missing name, unknown category, or invalid tag name", "#/components/schemas/Error"),
+						"400": resp("Missing name, a name left empty by its category prefix, unknown category, or invalid tag name", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/{id}": map[string]any{
@@ -690,12 +751,12 @@ func buildSpec(baseURL string) map[string]any {
 				"patch": opBody("Rename a tag and/or move it to another category", "patchTag",
 					[]map[string]any{pathParam("id", "Tag ID"), galleryParam()},
 					jsonBodySchema(true, objectSchema(nil, map[string]any{
-						"name":     map[string]any{"type": "string", "description": "New name."},
+						"name":     map[string]any{"type": "string", "description": "New name. A category:name prefix naming an existing category also moves the tag there, overriding category."},
 						"category": map[string]any{"type": "string", "description": "Move to this category by name."},
 					})),
 					map[string]any{
 						"200": resp("Updated tag", "#/components/schemas/TagRow"),
-						"400": resp("No fields supplied, or a rating-tag edit", "#/components/schemas/Error"),
+						"400": resp("No fields supplied, a rating-tag edit, or a name left empty by its category prefix", "#/components/schemas/Error"),
 						"404": resp("Tag not found", "#/components/schemas/Error"),
 						"409": resp("A tag with the new name already exists in the target category", "#/components/schemas/Error"),
 					}),
@@ -710,7 +771,7 @@ func buildSpec(baseURL string) map[string]any {
 				"post": opBody("Create an alias", "createAlias",
 					[]map[string]any{galleryParam()},
 					jsonBodySchema(true, objectSchema([]string{"name", "canonical_id"}, map[string]any{
-						"name":         map[string]any{"type": "string", "description": "Alias name."},
+						"name":         map[string]any{"type": "string", "description": "Alias name. A category:name prefix naming an existing category files the alias there, overriding category."},
 						"category":     map[string]any{"type": "string", "description": "Category for the alias; defaults to general."},
 						"canonical_id": map[string]any{"type": "integer", "description": "The tag this alias resolves to."},
 					})),
@@ -745,17 +806,18 @@ func buildSpec(baseURL string) map[string]any {
 				"post": map[string]any{
 					"summary":     "Declare an implication",
 					"operationId": "addImplication",
-					"description": "Declares parent -> implied. The edge is effective immediately for future tag adds; the historical fan-out across images already carrying the parent (the web background job) is not run from the API.",
-					"parameters":  []map[string]any{pathParam("id", "Parent tag ID"), galleryParam()},
+					"description": "Declares parent -> implied. The edge is effective immediately for future tag adds. Images already carrying the parent gain the implied tag only with propagate=true, which runs the background job the web page runs; re-declaring an edge with it re-applies the edge.",
+					"parameters":  []map[string]any{pathParam("id", "Parent tag ID"), galleryParam(), propagateParam()},
 					"requestBody": jsonBodySchema(true, objectSchema([]string{"implied_id"}, map[string]any{
 						"implied_id": map[string]any{"type": "integer", "description": "Existing tag id the parent implies. Both sides must be canonical (non-alias)."},
 					})),
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Edge already declared (no-op)"},
 						"201": map[string]any{"description": "Edge created"},
+						"202": resp("propagate=true: the edge is declared and the fan-out job started", "#/components/schemas/ImplicationJob"),
 						"400": resp("Missing implied_id, self-implication, or an alias on either side", "#/components/schemas/Error"),
 						"404": resp("Parent or implied tag not found", "#/components/schemas/Error"),
-						"409": resp("Edge would close a cycle", "#/components/schemas/Error"),
+						"409": resp("Edge would close a cycle, or propagate=true while another job runs (nothing is written)", "#/components/schemas/Error"),
 					},
 				},
 			},
@@ -763,11 +825,13 @@ func buildSpec(baseURL string) map[string]any {
 				"delete": map[string]any{
 					"summary":     "Remove an implication",
 					"operationId": "removeImplication",
-					"description": "Drops the edge only; the image-side sweep of rows implied solely by this edge is the web background job and is not run from the API.",
-					"parameters":  []map[string]any{pathParam("id", "Parent tag ID"), pathParam("impliedID", "Implied tag ID"), galleryParam()},
+					"description": "Drops the edge. The tags it implied stay on the images unless propagate=true, which runs the web page's sweep of the rows no other parent still implies.",
+					"parameters":  []map[string]any{pathParam("id", "Parent tag ID"), pathParam("impliedID", "Implied tag ID"), galleryParam(), propagateParam()},
 					"responses": map[string]any{
+						"202": resp("propagate=true: the edge is removed and the sweep job started", "#/components/schemas/ImplicationJob"),
 						"204": map[string]any{"description": "Removed"},
 						"404": resp("Edge not found", "#/components/schemas/Error"),
+						"409": resp("propagate=true while another job runs (nothing is removed)", "#/components/schemas/Error"),
 					},
 				},
 			},
@@ -863,12 +927,41 @@ func buildSpec(baseURL string) map[string]any {
 						"500": resp("The pairing could not be removed (remove_failed)", "#/components/schemas/Error"),
 					}),
 			},
+			"/collections": map[string]any{
+				"get": op("List collections", "listCollections",
+					[]map[string]any{
+						galleryParam(),
+						queryParam("q", "Substring of the label, case-insensitive"),
+						queryParam("sort", "size (default; most members first) or name (case-insensitive)"),
+						queryParam("page", "Page number"),
+						queryParam("limit", "Results per page (default 100, max 500)"),
+						queryParam("page_size", "Synonym for limit"),
+					},
+					map[string]any{
+						"200": resp("Paginated collection list; a label whose every member is missing is left out", "#/components/schemas/PaginatedCollections"),
+						"500": resp("Database read failed", "#/components/schemas/Error"),
+					}),
+			},
 			"/galleries": map[string]any{
 				"get": op("List configured galleries", "listGalleries",
 					nil,
 					map[string]any{
 						"200": map[string]any{"description": "Galleries with counts and the active flag", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Gallery"}}}}},
 						"500": resp("A gallery's counts could not be read", "#/components/schemas/Error"),
+					}),
+			},
+			"/jobs/current": map[string]any{
+				"get": op("Read the background job state", "currentJob",
+					nil,
+					map[string]any{
+						"200": resp("The job slot, the current or last job while the status bar still shows it, and the auto-tag queue", "#/components/schemas/CurrentJob"),
+					}),
+			},
+			"/taggers": map[string]any{
+				"get": op("List the auto-taggers", "listTaggers",
+					[]map[string]any{galleryParam()},
+					map[string]any{
+						"200": map[string]any{"description": "Every tagger found under paths.model_path or configured, in the Settings order", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Tagger"}}}}},
 					}),
 			},
 		},
@@ -948,6 +1041,19 @@ func op(summary, id string, params []map[string]any, responses map[string]any) m
 	return m
 }
 
+func propagateParam() map[string]any {
+	return queryParam("propagate", "true runs the fan-out across the images already carrying the parent as a background job")
+}
+
+func autotagResponses(notFound string) map[string]any {
+	return map[string]any{
+		"202": resp("Queued; GET /jobs/current follows the run", "#/components/schemas/AutotagResponse"),
+		"400": resp("Invalid ids, or no enabled tagger (or not the named one) applies to the gallery", "#/components/schemas/Error"),
+		"404": resp(notFound, "#/components/schemas/Error"),
+		"503": resp("No tagger can run in this build or configuration (tagger_unavailable)", "#/components/schemas/Error"),
+	}
+}
+
 func resp(desc, ref string) map[string]any {
 	return map[string]any{"description": desc, "content": jsonContent(ref)}
 }
@@ -1015,9 +1121,7 @@ func (h *Handler) openAPIJSON(w http.ResponseWriter, r *http.Request) {
 	if !CORSOK(w, r, cfg) {
 		return
 	}
-	spec := buildSpec(cfg.Server.BaseURL)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(spec)
+	contract.WriteJSON(w, http.StatusOK, buildSpec(cfg.Server.BaseURL))
 }
 
 // No external assets, so the page works offline.

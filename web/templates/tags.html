@@ -8,7 +8,7 @@
 {{$usedBy := .UsedBy}}
 {{$type := .Type}}
 {{$created := .CreatedAfter}}
-{{$conflicts := ""}}{{if .Conflicts}}{{$conflicts = "1"}}{{end}}
+{{$conflicts := .Conflicts}}
 {{$stale := .Stale}}
 {{$folded := ""}}{{if .Folded}}{{$folded = "1"}}{{end}}
 {{$zero := "0"}}{{if .ZeroOnly}}{{$zero = "only"}}{{else if .ShowZero}}{{$zero = "1"}}{{end}}
@@ -61,7 +61,7 @@
     </div>
 
     <div class="filter-group">
-      <span class="filter-label" title="Sources that currently apply the tag to at least one image">Used by</span>
+      <span class="filter-label" title="Sources that currently apply the tag to at least one image">Applied by</span>
       <a class="filter-btn{{if eq $usedBy ""}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by=&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
       {{range .UsedByLabels}}
@@ -72,7 +72,7 @@
     </div>
 
     <div class="filter-group">
-      <span class="filter-label" title="The source that first created the tag, whether or not it still uses it">Origin</span>
+      <span class="filter-label" title="The source that first created the tag, whether or not it still uses it">Created by</span>
       <a class="filter-btn{{if eq $origin ""}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin=&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
       {{range .OriginCounts}}
@@ -103,29 +103,38 @@
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero=only">Only</a>
     </div>
 
+    {{if or .StaleTotal .FullyStaleTotal $stale}}
     <div class="filter-group">
-      <span class="filter-label">Stale</span>
+      <span class="filter-label" title="A stale tag is one its source stopped listing for an image">Stale</span>
       <a class="filter-btn{{if eq $stale "has"}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "has"}}{{else}}has{{end}}&folded={{$folded}}&show_zero={{$zero}}"
-         title="Tags with at least one usage a source dropped">Has stale <span class="count-badge">{{.StaleTotal}}</span></a>
+         title="Tags a source stopped listing on at least one image">Has stale <span class="count-badge">{{.StaleTotal}}</span></a>
       <a class="filter-btn{{if eq $stale "full"}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "full"}}{{else}}full{{end}}&folded={{$folded}}&show_zero={{$zero}}"
-         title="Tags whose every usage is stale (safe to remove)">Fully stale <span class="count-badge">{{.FullyStaleTotal}}</span></a>
+         title="Tags no source lists any more (safe to remove)">Fully stale <span class="count-badge">{{.FullyStaleTotal}}</span></a>
     </div>
+    {{end}}
 
+    {{if or .ConflictsTotal .DistinctTotal $conflicts}}
     <div class="filter-group">
       <span class="filter-label">Conflicts</span>
-      <a class="filter-btn{{if .Conflicts}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if .Conflicts}}{{else}}1{{end}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
-         title="Tag names living in more than one category">Only conflicts <span class="count-badge">{{.ConflictsTotal}}</span></a>
+      <a class="filter-btn{{if eq $conflicts "1"}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "1"}}{{else}}1{{end}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         title="Tag names living in more than one category, unless marked distinct">Only conflicts <span class="count-badge">{{.ConflictsTotal}}</span></a>
+      <a class="filter-btn{{if eq $conflicts "distinct"}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "distinct"}}{{else}}distinct{{end}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         title="Same-name tags marked as different things">Marked distinct <span class="count-badge">{{.DistinctTotal}}</span></a>
     </div>
+    {{end}}
 
+    {{if or .FoldedTotal .Folded}}
     <div class="filter-group">
-      <span class="filter-label">Folded duplicates</span>
+      <span class="filter-label">Old spellings</span>
       <a class="filter-btn{{if .Folded}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{if .Folded}}{{else}}1{{end}}&show_zero={{$zero}}"
-         title="Old folded spellings with a corrected counterpart present - merge them into the corrected tag">Only folded <span class="count-badge">{{.FoldedTotal}}</span></a>
+         title="Tags an older version saved simplified (fate_grand_order for fate/grand order) while the correct spelling also exists">Only old spellings <span class="count-badge">{{.FoldedTotal}}</span></a>
     </div>
+    {{end}}
   </div>
 </div>
 {{end}}
@@ -149,9 +158,12 @@
     <span class="tag-batch-spacer"></span>
     <button type="button" id="btn-batch-category" class="btn-sm">Change category…</button>
     <button type="button" id="btn-batch-merge" class="btn-sm">Merge…</button>
+    {{if eq $conflicts "1"}}<button type="button" id="btn-batch-distinct" class="btn-sm" title="Keep the selected same-name tags apart: they stop counting as conflicts">Mark distinct</button>
+    {{else if eq $conflicts "distinct"}}<button type="button" id="btn-batch-undistinct" class="btn-sm" title="Count the selected tags as conflicts again">Unmark distinct</button>{{end}}
     {{if .Folded}}<button type="button" id="btn-batch-merge-folded" class="btn-sm">Merge into corrected spelling</button>{{end}}
     <button type="button" id="btn-batch-alias" class="btn-sm">Alias to…</button>
     <button type="button" id="btn-batch-imply" class="btn-sm">Imply…</button>
+    <button type="button" id="btn-batch-clean" class="btn-sm">Clean names…</button>
     {{if .MonloaderPTRPresent}}<button type="button" id="btn-batch-ptr" class="btn-sm peer-accent"{{if not .MonloaderPTR}} disabled title="{{if .MonloaderPTRSyncing}}the Public Tag Repository index is still syncing{{else}}{{monloaderOffReason .MonloaderConn}}{{end}}"{{end}}>Find aliases and implications</button>{{end}}
     <button type="button" id="btn-batch-delete" class="btn-sm btn-danger">Delete</button>
   </div>
@@ -162,17 +174,18 @@
     {{$usageOrder := "desc"}}{{if and (eq $sort "usage") (eq $order "desc")}}{{$usageOrder = "asc"}}{{end}}
     {{$createdOrder := "desc"}}{{if and (eq $sort "created") (eq $order "desc")}}{{$createdOrder = "asc"}}{{end}}
     {{$lastOrder := "desc"}}{{if and (eq $sort "last_used") (eq $order "desc")}}{{$lastOrder = "asc"}}{{end}}
+    {{/* The conflict views list by name whatever the sort parameters say. */}}
+    {{$shownSort := $sort}}{{$shownOrder := $order}}{{if $conflicts}}{{$shownSort = "name"}}{{$shownOrder = "asc"}}{{end}}
     <thead hx-boost="true" hx-target="#tags-page" hx-select="#tags-page" hx-swap="outerHTML" hx-select-oob="#sidebar-inner" hx-push-url="true">
       <tr>
         <th class="tag-select-col"><input type="checkbox" id="tag-select-page" aria-label="Select page"></th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=name&order={{$nameOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Name{{if eq $sort "name"}}<span class="sort-arrow">{{if eq $order "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
-        <th>Implied</th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=name&order={{$nameOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Name{{if eq $shownSort "name"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th>Implies</th>
         <th>Category</th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=usage&order={{$usageOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Usage{{if eq $sort "usage"}}<span class="sort-arrow">{{if eq $order "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
-        <th>Origin</th>
-        <th>Used by</th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=created&order={{$createdOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Created{{if eq $sort "created"}}<span class="sort-arrow">{{if eq $order "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=last_used&order={{$lastOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Last used{{if eq $sort "last_used"}}<span class="sort-arrow">{{if eq $order "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=usage&order={{$usageOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Usage{{if eq $shownSort "usage"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th>Applied by</th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=created&order={{$createdOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Created{{if eq $shownSort "created"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=last_used&order={{$lastOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Last used{{if eq $shownSort "last_used"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
         <th>Action</th>
       </tr>
     </thead>
@@ -182,27 +195,32 @@
       {{range .Tags}}
       {{$tag := .}}
       <tr class="tag-row" id="tag-row-{{.ID}}">
-        <td class="tag-select-col"><input type="checkbox" class="tag-select" value="{{.ID}}" data-name="{{.Name}}" data-color="{{catColor .CategoryColor}}" data-category="{{.CategoryName}}" aria-label="Select {{.Name}}"></td>
+        <td class="tag-select-col"><input type="checkbox" class="tag-select" value="{{.ID}}" data-name="{{.Name}}" data-color="{{catColor .CategoryColor}}" data-category="{{.CategoryName}}"{{with index $.DistinctOf .ID}} data-distinct="{{range $i, $p := .}}{{if $i}} {{end}}{{$p.ID}}{{end}}"{{end}} aria-label="Select {{.Name}}"></td>
         <td class="tag-name-cell{{if and (not .IsAlias) (eq .CategoryName "rating")}} tag-name-builtin{{end}}"
             title="{{.Name}}{{if .IsAlias}} → {{.CanonicalName}}{{end}}">
           {{if .IsAlias}}
-          <span style="color:{{catColor .CategoryColor}}">{{.Name}}</span>
+          <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
           <span class="merge-arrow">→</span>
-          <a href="/?q={{.CanonicalCategoryName}}:{{.CanonicalName}}" style="color:{{catColor .CanonicalCategoryColor}}">{{.CanonicalName}}</a>
+          <a href="/tags/{{.CanonicalTagID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CanonicalCategoryColor}}">{{.CanonicalName}}</a>
           <span class="alias-badge">alias</span>
           {{else}}
-          <a href="/?q={{.CategoryName}}:{{.Name}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
+          <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
+          {{with index $.DistinctOf .ID}}<span class="alias-badge" title="Marked distinct from {{range $i, $p := .}}{{if $i}}, {{end}}{{$p.Category}}:{{$tag.Name}}{{end}}">distinct</span>{{end}}
           {{if .FoldedInto}}<span class="merge-arrow">→</span> <span class="field-hint">{{.FoldedInto}}</span>{{end}}
           {{if eq .CategoryName "rating"}}<span class="field-hint">(built-in)</span>{{end}}
           {{end}}
         </td>
         <td class="tag-implied-cell"
-            {{with index $imps .ID}}title="{{range $i, $im := .}}{{if $i}} {{end}}{{$im.ImpliedName}}{{end}}"{{end}}>
-          {{with index $imps .ID}}
+            {{with index $imps .ID}}{{if le (len .) 5}}title="{{range $i, $im := .}}{{if $i}} {{end}}{{$im.ImpliedName}}{{end}}"{{end}}{{end}}>
+          <div class="tag-overflow">
+            {{if not .IsAlias}}<a class="tag-implied-edit" href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" title="Edit what this tag implies, here">[edit]</a>{{end}}
+            {{with index $imps .ID}}
             {{$n := len .}}
-            {{range $i, $im := .}}{{if lt $i 5}}{{if $i}} {{end}}<a href="/?q={{$im.ImpliedCategoryName}}:{{$im.ImpliedName}}" style="color:{{catColor $im.ImpliedCategoryColor}}">{{$im.ImpliedName}}</a>{{end}}{{end}}
-            {{if gt $n 5}} <a class="tag-implied-more" href="/tags/{{$tag.ID}}">+{{sub $n 5}}</a>{{end}}
-          {{end}}
+            <span class="tag-overflow-names">{{range $i, $im := .}}{{if lt $i 5}}{{if $i}} {{end}}<a href="/?q={{$im.ImpliedCategoryName}}:{{$im.ImpliedName}}" style="color:{{catColor $im.ImpliedCategoryColor}}">{{$im.ImpliedName}}</a>{{end}}{{end}}</span>
+            {{if gt $n 5}}<a class="tag-implied-more" href="/tags/{{$tag.ID}}?back={{urlQ $.BackQS}}">+{{sub $n 5}}</a>
+            <span class="tag-implied-all" hidden>{{range .}}<a href="/?q={{.ImpliedCategoryName}}:{{.ImpliedName}}" style="color:{{catColor .ImpliedCategoryColor}}">{{.ImpliedName}}</a> {{end}}</span>{{end}}
+            {{end}}
+          </div>
         </td>
         <td>
           {{if eq .CategoryName "rating"}}
@@ -224,24 +242,25 @@
         </td>
         <td class="tag-usage-cell"
             {{if .StaleUsage}}title="{{.UsageCount}} {{plural .UsageCount "image" "images"}}, {{.StaleUsage}} stale"{{end}}>{{.UsageCount}}</td>
-        <td class="tag-origin-cell">
-          {{if .Origin}}
-          {{$kind := index $.OriginKinds .Origin}}
-          {{if eq $kind "user"}}<span class="origin-user">user</span>
-          {{else}}<span class="origin-chip origin-{{$kind}}" title="{{.Origin}}">{{.Origin}}</span>{{end}}
-          {{else}}<span class="origin-none">—</span>{{end}}
-        </td>
         <td class="tag-usedby-cell"
             {{with index $.UsedBySources .ID}}title="{{range $i, $l := .}}{{if $i}} {{end}}{{$l}}{{end}}"{{end}}>
           {{with index $.UsedBySources .ID}}
-            {{range $i, $l := .}}{{if $i}} {{end}}<span class="origin-chip origin-{{index $.OriginKinds $l}}">{{$l}}</span>{{end}}
+            {{$n := len .}}
+            <div class="tag-overflow"><span class="tag-overflow-names">{{range $i, $l := .}}{{if lt $i 2}}{{if $i}} {{end}}<span class="origin-chip origin-{{index $.OriginKinds $l}}">{{$l}}</span>{{end}}{{end}}</span>
+            {{if gt $n 2}}<a class="tag-implied-more" href="/tags/{{$tag.ID}}?back={{urlQ $.BackQS}}">+{{sub $n 2}}</a>{{end}}</div>
           {{else}}<span class="origin-none">—</span>{{end}}
         </td>
-        <td class="tag-date">{{.CreatedAt.Format "2006-01-02"}}</td>
+        <td class="tag-date tag-created-cell">{{.CreatedAt.Format "2006-01-02"}}
+          {{- with .Origin}}
+          {{$kind := index $.OriginKinds .}}
+          {{if eq $kind "user"}}<span class="origin-user">user</span>
+          {{else}}<span class="origin-chip origin-{{$kind}}" title="{{.}}">{{.}}</span>{{end}}
+          {{end}}
+        </td>
         <td class="tag-date">{{if .LastUsedAt.IsZero}}<span class="origin-none">—</span>{{else}}{{.LastUsedAt.Format "2006-01-02"}}{{end}}</td>
         <td>
           <div class="tag-actions">
-            <a class="btn-sm btn-see-detail" href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" title="Tag details">See detail</a>
+            <a class="btn-sm btn-tag-search" href="/?q={{.CategoryName}}:{{.Name}}" title="Search the gallery for this tag">Search</a>
             {{if ne .CategoryName "rating"}}
             <button class="btn-sm btn-rename-trigger"
                     title="Rename this tag"
@@ -250,13 +269,13 @@
             <button class="btn-sm tag-action-spacer" tabindex="-1" aria-hidden="true">Rename</button>
             {{end}}
             <button class="btn-sm btn-danger btn-delete-tag"
-                    title="{{if eq .CategoryName "rating"}}Strip this rating from every image (the catalog row stays){{else}}Delete this tag from every image{{end}}"
-                    data-id="{{.ID}}" data-name="{{.Name}}" data-category="{{.CategoryName}}">{{if eq .CategoryName "rating"}}Strip{{else}}Delete{{end}}</button>
+                    title="{{if eq .CategoryName "rating"}}Remove this rating from every image. The rating itself stays.{{else}}Delete this tag from every image{{end}}"
+                    data-id="{{.ID}}" data-name="{{.Name}}" data-category="{{.CategoryName}}">{{if eq .CategoryName "rating"}}Clear{{else}}Delete{{end}}</button>
           </div>
         </td>
       </tr>
       {{else}}
-      <tr><td colspan="10" class="no-results">No tags found.</td></tr>
+      <tr><td colspan="9" class="no-results">No tags found.</td></tr>
       {{end}}
     </tbody>
   </table>
@@ -272,8 +291,10 @@
 
 {{template "partials/tag_rename_dialog.html" (dict "KeepAlias" true)}}
 
+<div id="tag-implied-pop" class="tag-implied-pop" hidden></div>
+
 <dialog id="batch-category-dialog">
-  <p id="batch-category-scope"></p>
+  <p class="dlg-title"><span id="batch-category-scope"></span>{{template "webui/dialog_x"}}</p>
   <div class="field">
     <label>Target category</label>
     {{template "partials/category_select.html" dict "ID" "batch-category-select" "Categories" .Categories}}
@@ -281,6 +302,10 @@
   <label style="display:block;font-size:12px">
     <input type="checkbox" id="batch-category-merge">
     Merge into the existing tag when the name already lives in the target category
+  </label>
+  <label style="display:block;font-size:12px">
+    <input type="checkbox" id="batch-category-keep">
+    Keep each old name as an alias in its old category
   </label>
   <div id="batch-category-flash"></div>
   <div class="dialog-actions">
@@ -290,13 +315,13 @@
 </dialog>
 
 <dialog id="batch-alias-dialog">
-  <p id="batch-alias-scope"></p>
+  <p class="dlg-title"><span id="batch-alias-scope"></span>{{template "webui/dialog_x"}}</p>
   <div class="field">
-    <label>Alias to (canonical tag)</label>
+    <label>Make them aliases of</label>
     {{template "tag_suggest_input" dict "Name" "canonical_id" "InputID" "batch-alias-canon" "SuggestID" "batch-alias-suggest"}}
   </div>
-  <p style="color:var(--error);font-size:12px">Each tag's images move onto the canonical and its implications go with it; the name stays as a zero-usage alias. This cannot be undone.</p>
-  <p style="color:var(--fg-dim);font-size:12px">The canonical is created if it doesn't exist yet.</p>
+  <p style="color:var(--error);font-size:12px">Their images get the target tag instead, and their implications move with them. The old names keep working as aliases. This cannot be undone.</p>
+  <p style="color:var(--fg-dim);font-size:12px">The target is created if it does not exist.</p>
   <div id="batch-alias-flash"></div>
   <div class="dialog-actions">
     <button type="button" class="btn-danger" onclick="confirmBatchAlias()">Alias</button>
@@ -305,10 +330,11 @@
 </dialog>
 
 <dialog id="batch-merge-dialog">
-  <p id="batch-merge-scope"></p>
+  <p class="dlg-title"><span id="batch-merge-scope"></span>{{template "webui/dialog_x"}}</p>
   <p class="field-hint">Which tag do the others merge into?</p>
   <ul id="batch-merge-choices" class="merge-dup-choices"></ul>
-  <p style="color:var(--error);font-size:12px">The other tags' images move onto the chosen tag and their names stay as zero-usage aliases. This cannot be undone.</p>
+  <p style="color:var(--error);font-size:12px">The other tags' images get the chosen tag, and their names keep working as aliases. This cannot be undone.</p>
+  <p id="batch-merge-distinct" style="color:var(--warning);font-size:12px" hidden>Some of these tags are marked distinct; merging drops the mark.</p>
   <div id="batch-merge-flash"></div>
   <div class="dialog-actions">
     <button type="button" class="btn-danger" onclick="confirmBatchMerge()">Merge</button>
@@ -317,17 +343,17 @@
 </dialog>
 
 <dialog id="batch-imply-dialog">
-  <p id="batch-imply-scope"></p>
+  <p class="dlg-title"><span id="batch-imply-scope"></span>{{template "webui/dialog_x"}}</p>
   <div class="field">
     <label>Mode</label>
     <label style="font-size:12px"><input type="radio" name="imply_mode" value="add" checked> Add</label>
     <label style="font-size:12px"><input type="radio" name="imply_mode" value="remove"> Remove</label>
   </div>
-  <div class="field">
-    <label>Implied tag</label>
-    {{template "tag_suggest_input" dict "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest"}}
+  <div class="field" style="position:relative">
+    <label for="batch-imply-target">Implied tags</label>
+    {{template "multi_tag_suggest_input" dict "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest" "Placeholder" "tag names, category:name, or IDs" "ValsKey" "target"}}
   </div>
-  <p style="color:var(--fg-dim);font-size:12px">Add also applies the implication to images already carrying each tag; Remove sweeps implied rows the edge no longer justifies. Cycles and aliases are skipped and reported.</p>
+  <p style="color:var(--fg-dim);font-size:12px">Every image with these tags also gets the implied tags. Add applies them to images already tagged; Remove takes back what they added.</p>
   <div id="batch-imply-flash"></div>
   <div class="dialog-actions">
     <button type="button" onclick="confirmBatchImply()">Run</button>
@@ -335,16 +361,37 @@
   </div>
 </dialog>
 
+<dialog id="batch-clean-dialog">
+  <p class="dlg-title"><span id="batch-clean-scope"></span>{{template "webui/dialog_x"}}</p>
+  <div class="field">
+    <label for="batch-clean-chars">Characters to remove</label>
+    <input type="text" id="batch-clean-chars" autocomplete="off"
+           hx-post="/tags/batch-clean"
+           hx-trigger="input changed delay:300ms, preview"
+           hx-sync="this:replace"
+           hx-target="#batch-clean-preview"
+           hx-vals='js:{...cleanPreviewVals()}'>
+  </div>
+  <p style="color:var(--fg-dim);font-size:12px">A tag whose cleaned name already exists merges into it. Every old name stays as an alias, so a source still sending it lands on the cleaned tag.</p>
+  <div id="batch-clean-preview"></div>
+  <div id="batch-clean-flash"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn-danger" onclick="confirmBatchClean()">Clean</button>
+    <button type="button" onclick="document.getElementById('batch-clean-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+
 <dialog id="tag-create-dialog">
   <form hx-post="/tags/new"
         hx-target="#tag-create-error">
-    <p>Create a new tag.</p>
-    <div class="field">
-      <label>Tag name</label>
-      <input type="text" name="name" id="tag-create-name" required autocomplete="off">
+    <p>Create tags. Separate names with spaces; a name may start with its category.</p>
+    <div class="field" style="position:relative">
+      <label for="tag-create-name">Tag names</label>
+      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-create-name" "SuggestID" "tag-create-suggest" "ValsKey" "name" "Required" true}}
+      <div id="tag-create-preview" class="field-hint" data-cats="{{range .Categories}}{{.Name}}={{catColor .Color}} {{end}}"></div>
     </div>
     <div class="field">
-      <label>Category</label>
+      <label for="tag-create-cat">Category for names without one</label>
       {{template "partials/category_select.html" dict "ID" "tag-create-cat" "Name" "category_id" "Categories" .Categories}}
     </div>
     <div id="tag-create-error"></div>
@@ -355,7 +402,7 @@
 <dialog id="alias-create-dialog">
   <form hx-post="/tags/aliases"
         hx-target="#alias-create-error">
-    <p>Create an alias resolving to another tag.<br>The canonical tag is created if it doesn't exist yet.</p>
+    <p>An alias is another name for a tag. The target is created if it does not exist.</p>
     <div class="field">
       <label>Alias name</label>
       <input type="text" name="name" id="alias-create-name" required autocomplete="off">
@@ -365,7 +412,7 @@
       {{template "partials/category_select.html" dict "ID" "alias-create-cat" "Name" "category_id" "Categories" .Categories}}
     </div>
     <div class="field">
-      <label>Resolves to (canonical tag)</label>
+      <label>Target tag</label>
       {{template "tag_suggest_input" dict "Name" "canonical_id" "InputID" "alias-create-canon" "SuggestID" "alias-create-suggest" "Required" true}}
     </div>
     <div id="alias-create-error"></div>
@@ -374,8 +421,8 @@
 </dialog>
 
 <dialog id="delete-tags-search-dialog">
-  <p id="delete-tags-scope-line"></p>
-  <p style="color:var(--error);font-size:12px">Tags are removed from every image they touch. This cannot be undone. Built-in rating tags are usage-stripped (the catalog row stays).</p>
+  <p class="dlg-title"><span id="delete-tags-scope-line"></span>{{template "webui/dialog_x"}}</p>
+  <p style="color:var(--error);font-size:12px">Tags are removed from every image they touch. This cannot be undone. Built-in ratings are only removed from images.</p>
   <div id="delete-tags-search-flash"></div>
   <div class="dialog-actions">
     <button type="button" class="btn-danger" onclick="confirmDeleteTagsSearch()">Delete</button>
@@ -385,7 +432,7 @@
 
 {{if .MonloaderPTRPresent}}
 <dialog id="ptr-lookup-search-dialog">
-  <p id="ptr-lookup-scope-line"></p>
+  <p class="dlg-title"><span id="ptr-lookup-scope-line"></span>{{template "webui/dialog_x"}}</p>
   <p style="color:var(--fg-dim);font-size:12px">Aliases and implications the Public Tag Repository declares are added to the catalog.</p>
   <div id="ptr-lookup-search-flash"></div>
   <div class="dialog-actions">
@@ -506,6 +553,8 @@ var tagClickRoutes = [
     document.getElementById('ptr-lookup-scope-line').textContent = 'Find aliases and implications for ' + tagScopeLabel() + '?';
     document.getElementById('ptr-lookup-search-dialog').showModal();
   }],
+  ['#btn-batch-distinct', function() { postBatchDistinct(''); }],
+  ['#btn-batch-undistinct', function() { postBatchDistinct('remove'); }],
   ['#btn-batch-merge-folded', function() {
     showConfirm('Merge ' + tagScopeLabel() + ' into corrected spellings?', function() {
       postForm('/tags/merge-folded', tagScopeParams(), {
@@ -514,7 +563,7 @@ var tagClickRoutes = [
         catchMsg: 'Merge request failed.',
         onOK: tagBatchDone
       });
-    }, "Each old spelling's images move onto its corrected tag and the old name stays as a zero-usage alias. This cannot be undone.", 'Merge');
+    }, "Each old spelling's images get its corrected tag, and the old name keeps working as an alias. This cannot be undone.", 'Merge');
   }],
   ['#btn-create-alias', function() {
     document.getElementById('alias-create-name').value = '';
@@ -523,9 +572,26 @@ var tagClickRoutes = [
     document.getElementById('alias-create-dialog').showModal();
     document.getElementById('alias-create-name').focus();
   }],
+  ['#btn-batch-clean', function() {
+    clearSlots('batch-clean-flash', 'batch-clean-preview');
+    var chars = document.getElementById('batch-clean-chars');
+    chars.value = readCleanChars();
+    document.getElementById('batch-clean-scope').textContent = 'Clean the names of ' + tagScopeLabel() + '.';
+    document.getElementById('batch-clean-dialog').showModal();
+    chars.focus();
+    htmx.trigger(chars, 'preview');
+  }],
+  ['.tag-implied-edit', function(el, e) {
+    e.preventDefault();
+    toggleImplicationsEditor(el);
+  }],
+  ['.tag-implications-close', function(el, e) {
+    e.preventDefault();
+    closeImplicationsEditor();
+  }],
   ['#btn-create-tag', function() {
     document.getElementById('tag-create-name').value = '';
-    clearSlots('tag-create-error');
+    clearSlots('tag-create-error', 'tag-create-preview', 'tag-create-suggest');
     document.getElementById('tag-create-dialog').showModal();
     document.getElementById('tag-create-name').focus();
   }]
@@ -553,7 +619,21 @@ if (!window.tagsPageWired) {
     handleTagSelectClick(cb, e);
   });
 
+  document.addEventListener('input', function(e) {
+    if (e.target && e.target.id === 'tag-create-name') previewTagCreate();
+  });
+
+  document.body.addEventListener('htmx:afterRequest', function(e) {
+    var row = e.detail.elt && e.detail.elt.closest && e.detail.elt.closest('tr.tag-implications-row');
+    if (row && e.detail.successful && e.detail.requestConfig.verb !== 'get') row.dataset.changed = '1';
+  });
+
+  document.addEventListener('mouseover', function(e) { showImpliedPop(e.target); });
+  document.addEventListener('focusin', function(e) { showImpliedPop(e.target); });
+  window.addEventListener('scroll', function() { showImpliedPop(null); }, true);
+
   document.addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'tag-create-cat') previewTagCreate();
     if (e.target && e.target.id === 'tag-select-page') {
       tagSelectAllMatching = false;
       document.querySelectorAll('.tag-select').forEach(function(b) { b.checked = e.target.checked; });
@@ -567,6 +647,108 @@ if (!window.tagsPageWired) {
       tagSelectAllMatching = false;
       _lastTagCheckbox = null;
     }
+  });
+}
+
+// One editor at a time, in a row of its own: the Implies cell is too
+// narrow to hold it. Closing it after a change reloads the listing in
+// place, filter kept.
+function toggleImplicationsEditor(link) {
+  var row = link.closest('tr');
+  var open = document.querySelector('tr.tag-implications-row');
+  var same = open && open.previousElementSibling === row;
+  closeImplicationsEditor();
+  if (same) return;
+  var tr = document.createElement('tr');
+  tr.className = 'tag-implications-row';
+  var td = document.createElement('td');
+  td.colSpan = row.children.length;
+  var head = document.createElement('div');
+  head.className = 'tag-implications-head';
+  var name = document.createElement('strong');
+  name.textContent = row.querySelector('.tag-select').dataset.name;
+  var close = document.createElement('a');
+  close.href = '#';
+  close.className = 'btn-link-accent tag-implications-close';
+  close.textContent = '[close]';
+  head.append(name, ' ', close);
+  var editor = document.createElement('div');
+  editor.id = 'implications-editor';
+  editor.dataset.tagId = row.id.replace('tag-row-', '');
+  td.append(head, editor);
+  tr.appendChild(td);
+  row.after(tr);
+  link.textContent = '[close]';
+  htmx.ajax('GET', '/tags/' + editor.dataset.tagId + '/implications', {target: '#implications-editor', swap: 'innerHTML'});
+}
+
+function closeImplicationsEditor() {
+  var tr = document.querySelector('tr.tag-implications-row');
+  if (!tr) return;
+  var link = tr.previousElementSibling && tr.previousElementSibling.querySelector('.tag-implied-edit');
+  if (link) link.textContent = '[edit]';
+  tr.remove();
+  if (tr.dataset.changed) {
+    htmx.ajax('GET', location.pathname + location.search, {target: '#tags-page', select: '#tags-page', swap: 'outerHTML'});
+  }
+}
+
+function showImpliedPop(target) {
+  var pop = document.getElementById('tag-implied-pop');
+  if (!pop || (target && target.closest && target.closest('#tag-implied-pop'))) return;
+  var more = target && target.closest ? target.closest('.tag-implied-cell .tag-implied-more') : null;
+  if (!more) {
+    pop.hidden = true;
+    pop.dataset.for = '';
+    return;
+  }
+  var row = more.closest('tr');
+  if (pop.dataset.for === row.id && !pop.hidden) return;
+  pop.dataset.for = row.id;
+  pop.textContent = '';
+  var title = document.createElement('span');
+  title.className = 'tag-implied-pop-title';
+  title.textContent = row.querySelector('.tag-select').dataset.name + ' implies';
+  pop.appendChild(title);
+  pop.appendChild(more.parentNode.querySelector('.tag-implied-all').cloneNode(true));
+  pop.lastChild.hidden = false;
+  pop.hidden = false;
+  var r = more.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = (r.bottom - 1) + 'px';
+}
+
+// Reads a token the way the server's tokenizer does: a prefix only
+// counts when it names a category.
+function previewTagCreate() {
+  var out = document.getElementById('tag-create-preview');
+  var sel = document.getElementById('tag-create-cat');
+  var cats = {};
+  out.dataset.cats.trim().split(/\s+/).forEach(function(pair) {
+    var at = pair.indexOf('=');
+    if (at > 0) cats[pair.slice(0, at)] = pair.slice(at + 1);
+  });
+  var fallback = sel.options[sel.selectedIndex].textContent.trim();
+  var groups = {}, order = [];
+  (document.getElementById('tag-create-name').value.match(/(?:[^\s"]+|"[^"]*"?)+/g) || []).forEach(function(token) {
+    var at = token.indexOf(':');
+    var prefix = token.slice(0, at).toLowerCase();
+    var known = at > 0 && at < token.length - 1 && cats[prefix] !== undefined;
+    var cat = known ? prefix : fallback;
+    var name = (known ? token.slice(at + 1) : token)
+      .replace(/"/g, '').trim().replace(/\s+/g, '_').toLowerCase();
+    if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+    groups[cat].push(name);
+  });
+  out.textContent = '';
+  order.forEach(function(cat) {
+    var line = document.createElement('div');
+    var label = document.createElement('span');
+    label.style.color = cats[cat] || '';
+    label.textContent = cat;
+    line.appendChild(label);
+    line.appendChild(document.createTextNode(': ' + groups[cat].join(', ')));
+    out.appendChild(line);
   });
 }
 
@@ -607,10 +789,29 @@ function postTagBatch(prefix, url, params, failMsg, catchMsg, onOK) {
   });
 }
 
+function readCleanChars() {
+  try { return localStorage.getItem('monbooru_clean_chars') || ".,'"; } catch (e) { return ".,'"; }
+}
+
+function cleanPreviewVals() {
+  var vals = {check: '1', chars: document.getElementById('batch-clean-chars').value};
+  tagScopeParams().forEach(function(v, k) { vals[k] = v; });
+  return vals;
+}
+
+function confirmBatchClean() {
+  var chars = document.getElementById('batch-clean-chars').value;
+  try { localStorage.setItem('monbooru_clean_chars', chars); } catch (e) {}
+  var params = tagScopeParams();
+  params.set('chars', chars);
+  postTagBatch('batch-clean', '/tags/batch-clean', params, 'Name cleanup failed.', 'Name cleanup request failed.');
+}
+
 function confirmBatchCategory() {
   var params = tagScopeParams();
   params.set('category_id', document.getElementById('batch-category-select').value);
   if (document.getElementById('batch-category-merge').checked) params.set('merge', '1');
+  if (document.getElementById('batch-category-keep').checked) params.set('keep_alias', '1');
   postTagBatch('batch-category', '/tags/batch-category', params, 'Category move failed.', 'Category move request failed.');
 }
 
@@ -628,6 +829,10 @@ function openBatchMerge() {
   clearSlots('batch-merge-flash');
   var choices = document.getElementById('batch-merge-choices');
   choices.innerHTML = '';
+  var picked = Array.prototype.map.call(boxes, function(b) { return b.value; });
+  document.getElementById('batch-merge-distinct').hidden = !Array.prototype.some.call(boxes, function(b) {
+    return (b.dataset.distinct || '').split(' ').some(function(id) { return picked.indexOf(id) !== -1; });
+  });
   boxes.forEach(function(b, i) {
     choices.appendChild(mergeChoiceItem('merge_canon', b.value, i === 0, function(label) {
       var name = document.createElement('span');
@@ -641,6 +846,23 @@ function openBatchMerge() {
   });
   document.getElementById('batch-merge-scope').textContent = 'Merge ' + tagScopeLabel() + ' into:';
   document.getElementById('batch-merge-dialog').showModal();
+}
+
+function postBatchDistinct(mode) {
+  var params = tagScopeParams();
+  if (mode) params.set('mode', mode);
+  postForm('/tags/batch-distinct', params, {
+    hx: true,
+    flashId: 'tag-flash',
+    failMsg: 'Request failed.',
+    onOK: function(res) {
+      // A raw fetch does not process HX-Trigger, so the flash is stashed
+      // for the reload by hand.
+      var f = JSON.parse(res.headers.get('HX-Trigger') || '{}')['action-flash'];
+      if (f) stashActionFlash(f.text, f.kind);
+      window.location.reload();
+    }
+  });
 }
 
 function confirmBatchMerge() {
@@ -666,7 +888,7 @@ function confirmBatchImply() {
 }
 
 // The create dialogs need no after-request hook: success is an
-// HX-Redirect, which a reload would race.
+// HX-Redirect or an HX-Refresh, which a reload would race.
 
 // Seconds precision, the shape created_at is stored in.
 function markPTRReviewStart() {
@@ -707,10 +929,28 @@ function updateTagColor(sel) {
   var color = opt ? opt.dataset.color : '';
   var row = sel.closest('tr');
   if (!row || !color) return;
-  // On an alias row the alias is the span; the link is the canonical's,
-  // which keeps its own colour.
-  var target = row.querySelector('.tag-name-cell > span') || row.querySelector('.tag-name-cell a');
+  // The row's own name leads the cell; an alias row's canonical keeps its
+  // own colour.
+  var target = row.querySelector('.tag-name-cell').firstElementChild;
   if (target) target.style.color = color;
+}
+
+// The Merge dialog, the delete flow and the Search link read the row's
+// category, so a move rewrites every copy of it.
+function retagRowCategory(sel) {
+  var opt = sel.options[sel.selectedIndex];
+  var row = sel.closest('tr');
+  if (!row || !opt) return;
+  var cat = opt.textContent.trim();
+  var box = row.querySelector('.tag-select');
+  if (box) {
+    box.dataset.category = cat;
+    box.dataset.color = opt.dataset.color || '';
+  }
+  var del = row.querySelector('.btn-delete-tag');
+  if (del) del.dataset.category = cat;
+  var search = row.querySelector('.btn-tag-search');
+  if (search && box) search.setAttribute('href', '/?q=' + encodeURIComponent(cat + ':' + box.dataset.name));
 }
 
 // A collision answers 200 with a flash-err, and nothing moved. The saved
@@ -725,6 +965,7 @@ function onTagCategoryPatch(event, sel) {
       else o.removeAttribute('selected');
     });
     updateTagColor(sel);
+    retagRowCategory(sel);
     return;
   }
   var orig = sel.querySelector('option[selected]');

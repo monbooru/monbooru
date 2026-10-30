@@ -1,7 +1,6 @@
 package web
 
 import (
-	"mime"
 	"net/http"
 	"strings"
 )
@@ -47,9 +46,4 @@ func pluginMountOrigin(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func isMultipart(r *http.Request) bool {
-	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	return err == nil && strings.HasPrefix(mt, "multipart/")
 }

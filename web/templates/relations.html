@@ -8,13 +8,13 @@
   <div class="relations-hub-cols">
     <section id="find" class="settings-section">
       <h3>Find relations</h3>
-      <p class="field-hint">Walk a queue of candidate pairs surfaced by image similarity and, when enabled, rare tag similarity. Decide one pair at a time as same image, variant, newer revision, based on, or not related.</p>
+      <p class="field-hint">Monbooru lists pairs of images that look alike or share unusual tags. Go through them one pair at a time and say how they are related.</p>
       {{- $emptyQueue := and (eq .Counts.QueueOpen 0) (eq .Counts.QueueSkipped 0) -}}
       <div class="relations-header-row">
         <form hx-post="/relations/find-pairs" hx-target="#flash-relations" hx-swap="innerHTML"
               hx-on::after-request="if(event.detail.successful){refreshJobStatus()}"
               style="display:inline">
-          <button type="submit" class="btn-sm{{if $emptyQueue}} btn-success{{end}}">Find new pairs</button>
+          <button type="submit" class="btn-sm{{if $emptyQueue}} btn-success{{end}}" title="Look for pairs not in the list yet">Find new pairs</button>
         </form>
         {{if $emptyQueue}}
         <button type="button" class="btn-sm" disabled title="Empty queue - find pairs first">Start a session</button>
@@ -26,7 +26,7 @@
               hx-confirm="Move every skipped pair back to the unresolved queue?"
               data-confirm-ok="Reset"
               style="display:inline">
-          <button type="submit" class="btn-sm"{{if eq .Counts.QueueSkipped 0}} disabled title="No skipped pairs to reset"{{end}}>Reset skipped{{if gt .Counts.QueueSkipped 0}} ({{.Counts.QueueSkipped}}){{end}}</button>
+          <button type="submit" class="btn-sm"{{if eq .Counts.QueueSkipped 0}} disabled title="No skipped pairs to reset"{{else}} title="Put skipped pairs back in the list"{{end}}>Reset skipped{{if gt .Counts.QueueSkipped 0}} ({{.Counts.QueueSkipped}}){{end}}</button>
         </form>
         <form hx-post="/relations/find-pairs" hx-target="#flash-relations" hx-swap="innerHTML"
               hx-on::after-request="if(event.detail.successful){refreshJobStatus()}"
@@ -36,12 +36,12 @@
               style="display:inline">
           <input type="hidden" name="replace" value="true">
           <input type="hidden" name="confirm" value="REBUILD">
-          <button type="submit" class="btn-danger btn-sm"{{if $emptyQueue}} disabled title="Empty queue - nothing to rebuild"{{end}}>Rebuild queue</button>
+          <button type="submit" class="btn-danger btn-sm"{{if $emptyQueue}} disabled title="Empty queue - nothing to rebuild"{{else}} title="Start the list over, skipped pairs included"{{end}}>Rebuild queue</button>
         </form>
       </div>
       <p class="field-hint">
-        Queue: <strong>{{.Counts.QueueOpen}}</strong> unresolved, <strong>{{.Counts.QueueSkipped}}</strong> skipped
-        {{if gt .Counts.PhashMissing 0}}· <a href="/?q=-phash:" title="Search images without a phash"><strong>{{.Counts.PhashMissing}}</strong></a> {{plural .Counts.PhashMissing "image" "images"}} without a phash{{end}}
+        <strong>{{.Counts.QueueOpen}}</strong> {{plural .Counts.QueueOpen "pair" "pairs"}} to review · <strong>{{.Counts.QueueSkipped}}</strong> skipped
+        {{if gt .Counts.PhashMissing 0}}· <a href="/?q=-phash:" title="Search images without a perceptual hash"><strong>{{.Counts.PhashMissing}}</strong></a> {{plural .Counts.PhashMissing "image" "images"}} without a perceptual hash{{end}}
       </p>
       {{if .Counts.QueueBySource}}
       <p class="field-hint">
@@ -50,7 +50,7 @@
       </p>
       {{end}}
       {{if and (eq .Counts.QueueOpen 0) (eq .Counts.QueueSkipped 0)}}
-      <p class="field-hint">The queue is empty. Click <strong>Find new pairs</strong> to surface candidates with similar perceptual hashes.</p>
+      <p class="field-hint">The queue is empty. Click <strong>Find new pairs</strong> to find images that look alike.</p>
       {{end}}
     </section>
 
@@ -82,7 +82,7 @@
       </div>
       <div class="settings-sub">
         <h4>Duplicate images</h4>
-        <p class="field-hint">Images you marked as duplicates of each other. <strong>{{.Counts.DupGroups}}</strong> {{plural .Counts.DupGroups "group" "groups"}} declared via the Relations session or the detail-page panel.</p>
+        <p class="field-hint">Images you marked as duplicates of each other. <strong>{{.Counts.DupGroups}}</strong> {{plural .Counts.DupGroups "group" "groups"}}.</p>
         <div class="relations-header-row">
           <a class="btn-sm" href="/relations/duplicates/marked">Review duplicate images</a>
           {{template "bulk_delete_dup_images" "#flash-relations"}}

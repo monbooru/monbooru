@@ -45,16 +45,13 @@ func (b *whereBuilder) buildSimilarFilter(e FilterExpr) string {
 // threshold is -1 for the bare form.
 func parseSimilarValue(val string) (seedID int64, threshold float64, ok bool) {
 	val = strings.TrimSpace(val)
-	idPart, scorePart := val, ""
-	tilde := strings.IndexByte(val, '~')
-	if tilde >= 0 {
-		idPart, scorePart = val[:tilde], strings.TrimSpace(val[tilde+1:])
-	}
+	idPart, scorePart, scored := strings.Cut(val, "~")
+	scorePart = strings.TrimSpace(scorePart)
 	id, err := strconv.ParseInt(strings.TrimSpace(idPart), 10, 64)
 	if err != nil || id <= 0 {
 		return 0, 0, false
 	}
-	if tilde < 0 {
+	if !scored {
 		return id, -1, true
 	}
 	s, err := strconv.ParseFloat(scorePart, 64)
@@ -124,7 +121,7 @@ func HasSimilarTerm(expr Expr) bool {
 func similarityMatchIDs(ctx context.Context, src Source, q Query) []int64 {
 	database := src.DB
 	gen := src.Cache.gen()
-	key := q.listKey()
+	key := q.listKey(src)
 	seed, ok := similarityRankSeed(src, q.Expr)
 	if !ok {
 		return nil

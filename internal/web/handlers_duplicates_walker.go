@@ -94,7 +94,7 @@ func walkerPageOffset(r *http.Request, total int) (page, totalPages, offset int)
 }
 
 func (s *Server) sha256WalkerPage(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -132,7 +132,7 @@ func markedDuplicatesFrom(ceiling *Ceiling) (string, []any) {
 }
 
 func (s *Server) markedWalkerPage(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -243,7 +243,7 @@ func (s *Server) markedWalkerDeleteOnePost(w http.ResponseWriter, r *http.Reques
 		flashHeaderErr(w, http.StatusBadRequest, "Invalid image id.")
 		return
 	}
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -289,14 +289,14 @@ func (s *Server) markedWalkerDeleteAllPost(w http.ResponseWriter, r *http.Reques
 	if !parseFormOK(w, r) {
 		return
 	}
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
 	from, args := markedDuplicatesFrom(resolveCeiling(r, cx))
 	members, err := queryMarkedMembers(cx, `SELECT m.image_id, g.original_image_id, o.is_missing, o.canonical_path`+from, args...)
 	if err != nil {
-		flashStatus(w, http.StatusInternalServerError, err.Error())
+		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if len(members) == 0 {

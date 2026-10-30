@@ -132,7 +132,7 @@ func walkLightRows(read *sql.DB, sc exportScope, directOnly bool, emit func(id i
 		var missing bool
 		var tname, tcat, tagger sql.NullString
 		var isAuto sql.NullBool
-		var conf sql.NullFloat64
+		var conf *float64
 		if err := rows.Scan(&id, &sha, &folder, &canonical, &missing, &tname, &tcat, &isAuto, &tagger, &conf); err != nil {
 			return err
 		}
@@ -148,11 +148,7 @@ func walkLightRows(read *sql.DB, sc exportScope, directOnly bool, emit func(id i
 			tags = nil
 		}
 		if tname.Valid {
-			tg := lightTag{token: compatibility.TagToken(tcat.String, tname.String), isAuto: isAuto.Bool, taggerName: tagger.String}
-			if conf.Valid {
-				tg.confidence = &conf.Float64
-			}
-			tags = append(tags, tg)
+			tags = append(tags, lightTag{token: compatibility.TagToken(tcat.String, tname.String), isAuto: isAuto.Bool, taggerName: tagger.String, confidence: conf})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -481,7 +477,7 @@ func MergeGallery(ctx context.Context, cx *library.Gallery, format string, uploa
 	var mergeErr error
 	switch format {
 	case "db":
-		res, mergeErr = mergeFromDB(ctx, cx, tmpPath, maxFileSizeMB, progress)
+		res, mergeErr = mergeDBFile(ctx, cx, tmpPath, "uploaded file is not a valid monbooru database", nil, maxFileSizeMB, progress)
 	case "json":
 		isLight, err := isLightManifestJSON(tmpPath)
 		if err != nil {
@@ -491,7 +487,7 @@ func MergeGallery(ctx context.Context, cx *library.Gallery, format string, uploa
 		if isLight {
 			res, mergeErr = mergeFromLightJSON(ctx, cx, tmpPath, maxFileSizeMB, progress)
 		} else {
-			res, mergeErr = mergeFromJSON(ctx, cx, tmpPath, maxFileSizeMB, progress)
+			res, mergeErr = mergeJSONFile(ctx, cx, tmpPath, nil, maxFileSizeMB, progress)
 		}
 	case "zip":
 		res, mergeErr = mergeFromZip(ctx, cx, tmpPath, maxFileSizeMB, progress)
@@ -499,8 +495,8 @@ func MergeGallery(ctx context.Context, cx *library.Gallery, format string, uploa
 		mergeErr = fmt.Errorf("unknown merge format %q", format)
 	}
 	if mergeErr == nil {
-		logx.Infof("gallery: merged into %q (format=%s): +%d image(s), %d tagged, %d skipped",
-			cx.Name, format, res.Added, res.Tagged, res.Skipped)
+		logx.Infof("gallery: merged into %q (format=%s): +%d %s, %d tagged, %d skipped",
+			cx.Name, format, res.Added, models.Plural(res.Added, "image", "images"), res.Tagged, res.Skipped)
 	}
 	return res, mergeErr
 }
@@ -518,10 +514,6 @@ func (r MergeResult) Summary() string {
 	return strings.Join(parts, ", ")
 }
 
-func mergeFromDB(ctx context.Context, cx *library.Gallery, tmpPath string, maxFileSizeMB int, progress func(done, total int)) (MergeResult, error) {
-	return mergeDBFile(ctx, cx, tmpPath, "uploaded file is not a valid monbooru database", nil, maxFileSizeMB, progress)
-}
-
 func mergeDBFile(ctx context.Context, cx *library.Gallery, path, invalidMsg string, files map[string]*zip.File, maxFileSizeMB int, progress func(done, total int)) (MergeResult, error) {
 	if err := validateSQLiteFile(path); err != nil {
 		return MergeResult{}, fmt.Errorf("%s: %w", invalidMsg, err)
@@ -532,10 +524,6 @@ func mergeDBFile(ctx context.Context, cx *library.Gallery, path, invalidMsg stri
 	}
 	defer func() { _ = src.Close() }()
 	return mergeFromSourceDB(ctx, cx, src, files, maxFileSizeMB, progress)
-}
-
-func mergeFromJSON(ctx context.Context, cx *library.Gallery, tmpPath string, maxFileSizeMB int, progress func(done, total int)) (MergeResult, error) {
-	return mergeJSONFile(ctx, cx, tmpPath, nil, maxFileSizeMB, progress)
 }
 
 // The document is loaded into a temp db by the replace's loader, so the
@@ -608,6 +596,9 @@ func mergeFromSourceDB(ctx context.Context, cx *library.Gallery, src *db.DB, fil
 	if err := src.Read.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_xinfo('image_tags') WHERE name = 'is_implied'`).Scan(&hasImplied); err != nil {
 		return MergeResult{}, fmt.Errorf("probe image_tags: %w", err)
 	}
+	if err := createMissingCategories(src, cx); err != nil {
+		return MergeResult{}, err
+	}
 	m := newMerger(ctx, cx, ImportSourceNative, maxFileSizeMB)
 	done := 0
 	err := walkLightRows(src.Read, exportScope{}, hasImplied, func(_ int64, sha, relPath string, missing bool, tags []lightTag) error {
@@ -621,6 +612,27 @@ func mergeFromSourceDB(ctx context.Context, cx *library.Gallery, src *db.DB, fil
 		return m.apply(mergeRecord{SHA256: sha, SourcePath: relPath, groups: mergeTagGroups(tags), zipEntry: files[relPath]})
 	})
 	return m.res, err
+}
+
+func createMissingCategories(src *db.DB, cx *library.Gallery) error {
+	rows, err := src.Read.Query(`SELECT name, color FROM tag_categories ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("read categories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var name, color string
+		if err := rows.Scan(&name, &color); err != nil {
+			return fmt.Errorf("read categories: %w", err)
+		}
+		if LookupCategoryID(cx.DB, name) != 0 {
+			continue
+		}
+		if _, err := cx.TagSvc.CreateCategory(name, color); err != nil {
+			logx.Warnf("merge: create category %q: %v", name, err)
+		}
+	}
+	return rows.Err()
 }
 
 // Manual rows land as the import's; auto rows keep their tagger and score,

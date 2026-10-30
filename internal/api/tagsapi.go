@@ -21,8 +21,14 @@ type tagResponse struct {
 
 type tagDetailResponse struct {
 	tagResponse
-	Note  string   `json:"note"`
-	Links []string `json:"links"`
+	Note         string        `json:"note"`
+	Links        []string      `json:"links"`
+	DistinctFrom []distinctRef `json:"distinct_from"`
+}
+
+type distinctRef struct {
+	ID       int64  `json:"id"`
+	Category string `json:"category"`
 }
 
 func (h *Handler) getTag(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +48,15 @@ func (h *Handler) getTag(w http.ResponseWriter, r *http.Request) {
 	if note.Links == nil {
 		note.Links = []string{}
 	}
-	contract.WriteJSON(w, http.StatusOK, tagDetailResponse{tagResponse: toTagResponse(t), Note: note.Body, Links: note.Links})
+	partners, err := g.TagSvc.DistinctPartners([]int64{id})
+	if serverError(w, err) {
+		return
+	}
+	distinct := []distinctRef{}
+	for _, p := range partners[id] {
+		distinct = append(distinct, distinctRef{ID: p.ID, Category: p.Category})
+	}
+	contract.WriteJSON(w, http.StatusOK, tagDetailResponse{tagResponse: toTagResponse(t), Note: note.Body, Links: note.Links, DistinctFrom: distinct})
 }
 
 func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
@@ -60,9 +74,11 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 	filter := tags.TagFilter{
 		Prefix:    prefix,
 		Sort:      sortStr,
+		Order:     q.Get("order"),
 		PageIndex: offset / limit,
 		Limit:     limit,
 		Origin:    q.Get("origin"),
+		UsedBy:    q.Get("used_by"),
 		Type:      q.Get("type"),
 		ShowZero:  q.Get("show_zero") != "0",
 	}

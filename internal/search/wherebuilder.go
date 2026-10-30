@@ -229,6 +229,24 @@ func WalkAndedLeaves(expr Expr, visit func(Expr)) {
 	visit(expr)
 }
 
+// withoutAndedLeaves is nil when drop takes every leaf.
+func withoutAndedLeaves(expr Expr, drop func(Expr) bool) Expr {
+	if v, ok := expr.(AndExpr); ok {
+		left, right := withoutAndedLeaves(v.Left, drop), withoutAndedLeaves(v.Right, drop)
+		switch {
+		case left == nil:
+			return right
+		case right == nil:
+			return left
+		}
+		return AndExpr{Left: left, Right: right}
+	}
+	if expr == nil || drop(expr) {
+		return nil
+	}
+	return expr
+}
+
 // A wildcard's many canonicals or 3+ ANDed tags leave the cursor no seekable
 // leg, so it temp-sorts a broad match set; a lone exact tag keeps its seek.
 func expensiveAdjacencyTags(expr Expr) bool {
@@ -469,6 +487,8 @@ type whereBuilder struct {
 	relPresence         relationPresence
 	relPresenceResolved bool
 	similarSeeds        map[int64]tags.OverlapSeed
+	lookupBackends      []string
+	perRow              bool
 }
 
 func (b *whereBuilder) similaritySeed(imageID int64) (tags.OverlapSeed, bool) {
@@ -585,7 +605,26 @@ func buildWhereDBDriverFull(expr Expr, src Source, legs []andDriverLeg) (string,
 			leaves[l.leaf] = true
 		}
 	}
-	b := &whereBuilder{db: src.DB, tree: src.Tree, tallies: src.Tallies, driverLeaves: leaves}
+	b := newWhereBuilder(src)
+	b.driverLeaves = leaves
+	return b.build(expr)
+}
+
+// buildWherePerRow is for a caller testing a bounded set of rows: a
+// predicate that would materialise a set over the whole library first
+// tests each row on its own instead.
+func buildWherePerRow(expr Expr, src Source) (string, []any) {
+	b := newWhereBuilder(src)
+	b.perRow = true
+	where, args, hasMissingFilter, _ := b.build(expr)
+	return andDefaultVisible(where, hasMissingFilter), args
+}
+
+func newWhereBuilder(src Source) *whereBuilder {
+	return &whereBuilder{db: src.DB, tree: src.Tree, tallies: src.Tallies, lookupBackends: src.LookupBackends}
+}
+
+func (b *whereBuilder) build(expr Expr) (string, []any, bool, bool) {
 	expr = b.peelCeilingForColumnRewrite(expr)
 	if expr != nil {
 		part := b.buildExpr(expr)
@@ -752,7 +791,7 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"size":     comp("i.file_size %s ?", parseSizeValue),
 	"mime":     (*whereBuilder).buildMimeFilter,
 	"ratio":    comp("(CAST(i.width AS REAL) / NULLIF(i.height, 0)) %s ?", parseFloatValue),
-	"tagcount": comp("i.tag_count %s ?", parseIntValue),
+	"tagcount": (*whereBuilder).buildTagCountFilter,
 	// Not COALESCE like pages:, or a non-video would match duration:<5 as
 	// a 0-second clip.
 	"duration": comp("(i.duration_seconds IS NOT NULL AND i.duration_seconds %s ?)", parseFloatValue),
@@ -839,17 +878,43 @@ func boolColumnFilter(col, val string) string {
 	return col + " = 0"
 }
 
+func aiParts(val string) []string {
+	var parts []string
+	for _, p := range strings.Split(strings.ToLower(val), ",") {
+		p = strings.TrimSpace(p)
+		if p == "sd" {
+			p = "a1111"
+		}
+		if p != "" && !slices.Contains(parts, p) {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+func (b *whereBuilder) buildAIFilter(e FilterExpr) string {
+	parts := aiParts(e.Val)
+	switch len(parts) {
+	case 0:
+		return "1=0"
+	case 1:
+		return b.aiClause(parts[0])
+	}
+	clauses := make([]string, len(parts))
+	for i, p := range parts {
+		clauses[i] = b.aiClause(p)
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")"
+}
+
 // none never shares source_type with a tool, so it takes the equality that
 // can seek idx_images_source_type_visible; the four LIKEs can't use an index.
-func (b *whereBuilder) buildAIFilter(e FilterExpr) string {
-	// Lowercased so ai:NONE takes the branch the index hint assumes.
-	val := strings.ToLower(e.Val)
-	if val == "sd" {
-		val = "a1111"
-	}
+// val is lowercased so ai:NONE takes the branch the index hint assumes.
+func (b *whereBuilder) aiClause(val string) string {
 	if val == "any" {
 		// Literals so the seek keeps the index. A new models.SourceType*
-		// must be added here and in searchkw's ai entry by hand.
+		// must be added here, in aiValueMatches and in searchkw's ai entry
+		// by hand.
 		return "(i.source_type = 'a1111' OR i.source_type = 'comfyui' OR i.source_type = 'a1111,comfyui')"
 	}
 	if val == "none" {
@@ -858,6 +923,20 @@ func (b *whereBuilder) buildAIFilter(e FilterExpr) string {
 	esc := db.EscapeLike(val)
 	b.args = append(b.args, val, "%,"+esc, esc+",%", "%,"+esc+",%")
 	return `(i.source_type = ? OR i.source_type LIKE ? ESCAPE '\' OR i.source_type LIKE ? ESCAPE '\' OR i.source_type LIKE ? ESCAPE '\')`
+}
+
+// aiValueMatches must accept exactly what aiClause's SQL does.
+func aiValueMatches(sourceType, val string) bool {
+	switch val {
+	case "any":
+		return sourceType == "a1111" || sourceType == "comfyui" || sourceType == "a1111,comfyui"
+	case "none":
+		return sourceType == "none"
+	}
+	return sourceType == val ||
+		strings.HasPrefix(sourceType, val+",") ||
+		strings.HasSuffix(sourceType, ","+val) ||
+		strings.Contains(sourceType, ","+val+",")
 }
 
 // Uncorrelated on purpose: an EXISTS would probe image_sources once per
@@ -877,6 +956,103 @@ func (b *whereBuilder) buildSourceFilter(e FilterExpr) string {
 func (b *whereBuilder) buildCatFilter(e FilterExpr) string {
 	b.args = append(b.args, strings.ToLower(e.Val))
 	return b.imageIDExists("image_tags it JOIN tags t ON it.tag_id = t.id JOIN tag_categories tc ON tc.id = t.category_id", "it", "tc.name = ?", false)
+}
+
+// tagcount:<category><op>N counts one category's tags, a tag implied by
+// another of that category on the image counting with it, so a costume
+// variant and its base character are one character.
+func (b *whereBuilder) buildTagCountFilter(e FilterExpr) string {
+	category, comparison, ok := tagCountCategory(e.Val)
+	if !ok {
+		return b.buildCompFilter("i.tag_count %s ?", e.Val, parseIntValue)
+	}
+	count := "COUNT(*)"
+	if b.perRow {
+		count = tagCountPerRow
+	}
+	sub := &whereBuilder{}
+	compared := sub.buildCompFilter(count+" %s ?", comparison, parseIntValue)
+	if compared == "1=0" || !b.categoryExists(category) {
+		return "1=0"
+	}
+	if b.perRow {
+		b.args = append(b.args, category)
+		b.args = append(b.args, sub.args...)
+		return compared
+	}
+	b.args = append(b.args, category, category)
+	b.args = append(b.args, sub.args...)
+	// Grouped once, uncorrelated: a count per visible image walks every
+	// tag row of the library.
+	const counted = `SELECT it.image_id FROM image_tags it
+		WHERE it.tag_id IN (SELECT id FROM tags WHERE category_id = (SELECT id FROM tag_categories WHERE name = ?))
+		  AND NOT EXISTS (SELECT 1 FROM tag_implications ti
+			JOIN tags pt ON pt.id = ti.parent_tag_id
+			JOIN image_tags p ON p.tag_id = ti.parent_tag_id AND p.image_id = it.image_id
+			WHERE ti.implied_tag_id = it.tag_id
+			  AND pt.category_id = (SELECT id FROM tag_categories WHERE name = ?))
+		GROUP BY it.image_id HAVING `
+	// An image with no tag in the category has no group to match.
+	if zeroSatisfies(comparison) {
+		return "i.id NOT IN (" + counted + "NOT (" + compared + "))"
+	}
+	return "i.id IN (" + counted + compared + ")"
+}
+
+func tagCountCategory(val string) (category, comparison string, ok bool) {
+	i := strings.IndexAny(val, "=<>")
+	if i <= 0 {
+		return "", "", false
+	}
+	return strings.ToLower(val[:i]), strings.TrimPrefix(val[i:], "="), true
+}
+
+func isTagCountCategory(e Expr) bool {
+	f, ok := e.(FilterExpr)
+	if !ok || f.Key != "tagcount" {
+		return false
+	}
+	_, _, ok = tagCountCategory(f.Val)
+	return ok
+}
+
+// The category is bound through a subquery, not as an id: given a literal
+// the planner probes the implications of every tag on the image before
+// testing its category.
+const tagCountPerRow = `(SELECT COUNT(*) FROM image_tags it JOIN tags t ON t.id = it.tag_id
+	WHERE it.image_id = i.id
+	  AND t.category_id = (SELECT id FROM tag_categories WHERE name = ?)
+	  AND NOT EXISTS (SELECT 1 FROM tag_implications ti
+		JOIN tags pt ON pt.id = ti.parent_tag_id
+		JOIN image_tags p ON p.tag_id = ti.parent_tag_id AND p.image_id = i.id
+		WHERE ti.implied_tag_id = it.tag_id AND pt.category_id = t.category_id))`
+
+// comparison must already parse.
+func zeroSatisfies(comparison string) bool {
+	if lo, hi, ok := strings.Cut(comparison, ".."); ok {
+		return zeroHolds(">=", lo) && zeroHolds("<=", hi)
+	}
+	return zeroHolds(parseCompOp(comparison))
+}
+
+// An empty bound is a range's open end.
+func zeroHolds(op, raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	n, _ := strconv.ParseInt(raw, 10, 64)
+	switch op {
+	case ">=":
+		return 0 >= n
+	case "<=":
+		return 0 <= n
+	case ">":
+		return 0 > n
+	case "<":
+		return 0 < n
+	}
+	return n == 0
 }
 
 // The flag drops the default is_missing = 0, which would empty -missing:false.
@@ -939,22 +1115,12 @@ func (b *whereBuilder) buildNameFilter(e FilterExpr) string {
 		return `(i.id IN (SELECT rowid FROM image_basename_canonical_fts WHERE image_basename_canonical_fts MATCH ?) ` +
 			`OR i.id IN (SELECT image_id FROM image_paths WHERE id IN (SELECT rowid FROM image_basename_alias_fts WHERE image_basename_alias_fts MATCH ?)))`
 	}
-	pat := "%" + db.EscapeLike(asciiLower(e.Val)) + "%"
+	pat := "%" + db.EscapeLike(db.ASCIILower(e.Val)) + "%"
 	// Pinned to the partial alias index; unpinned, the planner takes
 	// idx_image_paths_image and tests is_canonical per row.
 	b.args = append(b.args, pat, pat)
 	return `(i.basename_lower LIKE ? ESCAPE '\' ` +
 		`OR EXISTS (SELECT 1 FROM image_paths ip INDEXED BY idx_image_paths_aliases WHERE ip.image_id = i.id AND ip.is_canonical = 0 AND ip.basename_lower LIKE ? ESCAPE '\'))`
-}
-
-// basename_lower is SQLite's lower(), which folds A-Z only, and so does LIKE.
-func asciiLower(s string) string {
-	return strings.Map(func(r rune) rune {
-		if 'A' <= r && r <= 'Z' {
-			return r + 'a' - 'A'
-		}
-		return r
-	}, s)
 }
 
 func (b *whereBuilder) buildMimeFilter(e FilterExpr) string {
@@ -1058,14 +1224,18 @@ func (b *whereBuilder) buildLookupFilter(e FilterExpr) string {
 	case "never":
 		return `NOT EXISTS (SELECT 1 FROM image_lookups l WHERE l.image_id = i.id)`
 	case "due":
-		ptr, ptrArgs := lookup.DueClause(lookup.BackendPTR, time.Now())
-		booru, booruArgs := lookup.DueClause(lookup.BackendBooru, time.Now())
-		b.args = append(b.args, ptrArgs...)
-		b.args = append(b.args, booruArgs...)
 		// The opt-in is per backend, so each half carries its own
 		// candidate clause.
-		return "((" + lookup.CandidateClause(lookup.BackendPTR) + " AND (" + ptr + "))" +
-			" OR (" + lookup.CandidateClause(lookup.BackendBooru) + " AND (" + booru + ")))"
+		var halves []string
+		for _, backend := range b.lookupBackends {
+			due, args := lookup.DueClause(backend, time.Now())
+			b.args = append(b.args, args...)
+			halves = append(halves, "("+lookup.CandidateClause(backend)+" AND ("+due+"))")
+		}
+		if len(halves) == 0 {
+			return "1=0"
+		}
+		return "(" + strings.Join(halves, " OR ") + ")"
 	case "missed":
 		return `EXISTS (SELECT 1 FROM image_lookups l WHERE l.image_id = i.id
 		          AND l.last_result = 'miss' AND l.next_due_at IS NOT NULL)`
@@ -1306,17 +1476,9 @@ func parseSizeValue(raw string) (any, bool) {
 	if raw == "" {
 		return nil, false
 	}
-	i := 0
-	for i < len(raw) {
-		c := raw[i]
-		if (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+' {
-			i++
-			continue
-		}
-		break
-	}
-	numStr := raw[:i]
-	unit := strings.TrimSpace(strings.ToLower(raw[i:]))
+	rest := strings.TrimLeft(raw, "0123456789.-+")
+	numStr := raw[:len(raw)-len(rest)]
+	unit := strings.TrimSpace(strings.ToLower(rest))
 	n, err := strconv.ParseFloat(numStr, 64)
 	if err != nil {
 		return nil, false
@@ -1348,12 +1510,11 @@ func parseSizeValue(raw string) (any, bool) {
 
 // ok reports that val is a range, even one that parses to 1=0.
 func (b *whereBuilder) tryRangeComp(template, val string, parseFrom, parseTo func(string) (any, bool)) (string, bool) {
-	idx := strings.Index(val, "..")
-	if idx < 0 {
+	fromS, toS, ok := strings.Cut(val, "..")
+	if !ok {
 		return "", false
 	}
-	fromS := strings.TrimSpace(val[:idx])
-	toS := strings.TrimSpace(val[idx+2:])
+	fromS, toS = strings.TrimSpace(fromS), strings.TrimSpace(toS)
 	if fromS == "" && toS == "" {
 		return "1=0", true
 	}

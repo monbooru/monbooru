@@ -108,6 +108,42 @@ func PlannedPath(database *db.DB, b *Boundary, id int64, folder, name *string, p
 	return resolved, resolved != path, nil
 }
 
+// Follows reports that the row already sits where folder and name put it.
+// A number a taken name earned counts as following, or every re-run would
+// renumber the row against its own file.
+func Follows(database *db.DB, b *Boundary, id int64, folder, name *string) (bool, error) {
+	p, err := plan(database, b, id, folder, name)
+	if err != nil || p.moved {
+		return false, err
+	}
+	if !p.renamed {
+		return true, nil
+	}
+	if !numberedFrom(filepath.Base(p.oldCanonical), p.base) {
+		return false, nil
+	}
+	// img2024.png reads as img.png numbered 2024 until img.png is there.
+	_, err = os.Stat(filepath.Join(p.destDir, p.base))
+	return err == nil, nil
+}
+
+func numberedFrom(base, want string) bool {
+	ext := filepath.Ext(want)
+	if filepath.Ext(base) != ext {
+		return false
+	}
+	n, ok := strings.CutPrefix(strings.TrimSuffix(base, ext), strings.TrimSuffix(want, ext))
+	if !ok {
+		return false
+	}
+	if moveN, isMove := strings.CutPrefix(n, "_"); isMove {
+		n = moveN
+	} else if len(n) < 2 {
+		return false
+	}
+	return n != "" && strings.Trim(n, "0123456789") == ""
+}
+
 // PlaceImage leaves alone whichever of folder and name is nil. Callers
 // holding a watcher must run it under a job type the watcher suppresses,
 // or its events race the DB update.

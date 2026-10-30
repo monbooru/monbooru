@@ -140,3 +140,14 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `_`, `\_`, `%`, `\%`)
 func EscapeLike(s string) string {
 	return likeEscaper.Replace(s)
 }
+
+// ASCIILower folds A-Z only, as SQLite's lower(), NOCASE and LIKE do, so a
+// bound folding "É" to "é" would miss the stored "É".
+func ASCIILower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
+}

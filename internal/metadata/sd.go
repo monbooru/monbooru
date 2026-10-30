@@ -2,11 +2,18 @@ package metadata
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/models"
 )
+
+// An infinite value would make every JSON export of the row fail.
+func parseFinite(s string) (float64, bool) {
+	f, err := strconv.ParseFloat(s, 64)
+	return f, err == nil && !math.IsInf(f, 0) && !math.IsNaN(f)
+}
 
 func sdFromEXIF(x *exifData) *models.SDMetadata {
 	if x == nil {
@@ -181,7 +188,7 @@ func parseA1111Params(paramLine string, sd *models.SDMetadata) {
 		case "Sampler":
 			sd.Sampler = val
 		case "CFG scale":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
+			if f, ok := parseFinite(val); ok {
 				sd.CFGScale = &f
 			}
 		case "Seed":

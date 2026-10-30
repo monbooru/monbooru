@@ -8,6 +8,7 @@ import (
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/lookup"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
@@ -35,6 +36,11 @@ type lookupBackendView struct {
 }
 
 func (v lookupBackendView) Tried() bool { return !v.LastAt.IsZero() || !v.QueuedAt.IsZero() }
+
+// NextDueAt outlives the schedule, gallery and image opt-outs.
+func (v lookupBackendView) Retrying() bool {
+	return v.ScheduleOn && !v.GalleryOff && v.Enabled && !v.NextDueAt.IsZero()
+}
 
 type lookupStatus struct {
 	Text string
@@ -87,8 +93,8 @@ func (s *Server) lookupViewFor(cx *library.Gallery, imageID int64) lookupView {
 		backend, label, action string
 		optedIn                bool
 	}{
-		{lookup.BackendPTR, "PTR", config.ActionLookupPTR, st.PTR},
-		{lookup.BackendBooru, "boorus", config.ActionLookupBooru, st.Booru},
+		{contract.LookupPTR, "PTR", config.ActionLookupPTR, st.PTR},
+		{contract.LookupBooru, "boorus", config.ActionLookupBooru, st.Booru},
 	} {
 		r := rows[b.backend]
 		on := sched.Enabled(b.action)
@@ -103,10 +109,10 @@ func (s *Server) lookupViewFor(cx *library.Gallery, imageID int64) lookupView {
 }
 
 func scheduledLookupBackend(r *http.Request) string {
-	if r.FormValue("backend") == lookup.BackendPTR {
-		return lookup.BackendPTR
+	if r.FormValue("backend") == contract.LookupPTR {
+		return contract.LookupPTR
 	}
-	return lookup.BackendBooru
+	return contract.LookupBooru
 }
 
 func (s *Server) scheduledLookupPost(w http.ResponseWriter, r *http.Request) {

@@ -18,18 +18,25 @@ const (
 	// spent, and at least the floor, raised with an exact total up to a
 	// cap: a query slow once repays its fan, a large match set gets the
 	// time its walk needs, and an overrun only leaves the entry unset.
-	adjacencyFanBudget    = 750 * time.Millisecond
-	adjacencyFanCostRatio = 2
-	adjacencyFanPerID     = 3 * time.Microsecond
-	adjacencyFanMaxFloor  = 2 * time.Second
+	adjacencyFanBudget            = 750 * time.Millisecond
+	adjacencyFanCostRatio         = 2
+	adjacencyFanPerID             = 3 * time.Microsecond
+	adjacencyFanMaxFloor          = 2 * time.Second
+	similarityFanBackgroundBudget = 10 * time.Second
 )
 
-func fanBudget(spent time.Duration, total int) time.Duration {
+var fanBudget = func(spent time.Duration, total int) time.Duration {
 	return max(adjacencyFanBudget, spent*adjacencyFanCostRatio, min(time.Duration(total)*adjacencyFanPerID, adjacencyFanMaxFloor))
 }
 
 type adjacencyCacheEntry struct {
 	ids       []int64
+	expiresAt time.Time
+}
+
+type hiddenCountEntry struct {
+	n         int
+	overran   bool
 	expiresAt time.Time
 }
 
@@ -41,6 +48,7 @@ type AdjacencyCache struct {
 	entries    map[string]adjacencyCacheEntry
 	order      []string
 	generation uint64
+	hidden     map[string]hiddenCountEntry
 
 	// One fan per key at a time: concurrent misses would each run the
 	// same full SELECT.
@@ -55,6 +63,7 @@ type AdjacencyCache struct {
 func NewAdjacencyCache() *AdjacencyCache {
 	return &AdjacencyCache{
 		entries:       map[string]adjacencyCacheEntry{},
+		hidden:        map[string]hiddenCountEntry{},
 		fanInFlight:   map[string]bool{},
 		fanOverBudget: map[string]time.Time{},
 	}
@@ -119,7 +128,7 @@ func (c *AdjacencyCache) get(key string) ([]int64, bool) {
 
 // Seed stores ids as q's list; it exists for other packages' tests.
 func (c *AdjacencyCache) Seed(q Query, ids []int64) {
-	c.set(q.listKey(), ids, c.gen())
+	c.set(q.listKey(Source{}), ids, c.gen())
 }
 
 // gen must be read before the query whose ids go to set.
@@ -160,6 +169,31 @@ func (c *AdjacencyCache) set(key string, ids []int64, gen uint64) {
 	}
 }
 
+func (c *AdjacencyCache) hiddenCount(key string) (hiddenCountEntry, bool) {
+	if c == nil {
+		return hiddenCountEntry{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.hidden[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return hiddenCountEntry{}, false
+	}
+	return entry, true
+}
+
+func (c *AdjacencyCache) setHiddenCount(key string, entry hiddenCountEntry, gen uint64) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen == c.generation {
+		entry.expiresAt = time.Now().Add(adjacencyCacheTTL)
+		c.hidden[key] = entry
+	}
+}
+
 func (c *AdjacencyCache) Drop() {
 	if c == nil {
 		return
@@ -167,6 +201,7 @@ func (c *AdjacencyCache) Drop() {
 	c.mu.Lock()
 	c.generation++
 	clear(c.entries)
+	clear(c.hidden)
 	c.order = nil
 	c.mu.Unlock()
 	c.dropFanHoldOffs(func(string, time.Time) bool { return true })
@@ -183,6 +218,11 @@ func (c *AdjacencyCache) Sweep() {
 	c.drop(func(_ string, entry adjacencyCacheEntry) bool {
 		return now.After(entry.expiresAt)
 	})
+	c.mu.Lock()
+	maps.DeleteFunc(c.hidden, func(_ string, entry hiddenCountEntry) bool {
+		return now.After(entry.expiresAt)
+	})
+	c.mu.Unlock()
 	c.dropFanHoldOffs(func(_ string, retryAt time.Time) bool {
 		return now.After(retryAt)
 	})
@@ -213,18 +253,18 @@ func (c *AdjacencyCache) removeFromOrder(key string) {
 // adjacencyKey joins on NUL so no component can run into the next. The
 // seed counts only under random sort, so a leftover seed param can't split
 // a newest or filesize entry.
-func adjacencyKey(query, sort, order string, seed int64, ceiling string) string {
+func adjacencyKey(query, sort, order string, seed int64, ceiling string, lookups []string) string {
 	seedStr := ""
 	if sort == "random" && seed != 0 {
 		seedStr = strconv.FormatInt(seed, 10)
 	}
-	return strings.Join([]string{query, sort, order, seedStr, ceiling}, "\x00")
+	return strings.Join([]string{query, sort, order, seedStr, ceiling, strings.Join(lookups, ",")}, "\x00")
 }
 
 // PageOf reads the page holding id off q's cached list: listed is false
 // when none is cached, and page is 0 when the list does not hold id.
 func PageOf(src Source, q Query, id int64, pageSize int) (page int, listed bool) {
-	ids, ok := src.Cache.get(q.listKey())
+	ids, ok := src.Cache.get(q.listKey(src))
 	if !ok {
 		return 0, false
 	}

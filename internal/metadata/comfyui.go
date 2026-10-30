@@ -153,6 +153,42 @@ func ReparseComfyWorkflow(raw string) *models.ComfyUIMetadata {
 	return parseComfyWorkflow(raw)
 }
 
+// ParseComfyTags reads a video's prompt and workflow container tags with
+// the precedence of the PNG chunks of the same names.
+func ParseComfyTags(prompt, workflow string) *models.ComfyUIMetadata {
+	if m := parseComfyPromptChunk(prompt); m != nil {
+		return m
+	}
+	return parseComfyWorkflow(workflow)
+}
+
+// ComfyUI's WebP savers write the prompt and workflow into these EXIF fields.
+var comfyEXIFFields = map[string]string{"Model": "prompt:", "Make": "workflow:"}
+
+func comfyEXIFText(x *exifData, name string) string {
+	prefix, ok := comfyEXIFFields[name]
+	if !ok {
+		return ""
+	}
+	tag, ok := x.tags[name]
+	if !ok {
+		return ""
+	}
+	s, _ := tag.stringVal()
+	text, found := strings.CutPrefix(s, prefix)
+	if !found {
+		return ""
+	}
+	return text
+}
+
+func comfyFromEXIF(x *exifData) *models.ComfyUIMetadata {
+	if x == nil {
+		return nil
+	}
+	return ParseComfyTags(comfyEXIFText(x, "Model"), comfyEXIFText(x, "Make"))
+}
+
 type comfyGraphNode struct {
 	Key       string
 	ClassType string

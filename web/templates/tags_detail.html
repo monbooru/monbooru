@@ -37,7 +37,7 @@
       {{end}}
       <button type="button" id="btn-detail-delete" class="btn-sm btn-danger" onclick="deleteThisTag(this)"
               data-name="{{.Tag.Name}}" data-category="{{.Tag.CategoryName}}"
-              title="{{if .IsRating}}Strip this rating from every image (the catalog row stays){{else}}Delete this tag from every image{{end}}">{{if .IsRating}}Strip{{else}}Delete{{end}}</button>
+              title="{{if .IsRating}}Remove this rating from every image. The rating itself stays.{{else}}Delete this tag from every image{{end}}">{{if .IsRating}}Clear{{else}}Delete{{end}}</button>
     </span>
   </h2>
 
@@ -54,6 +54,34 @@
 
   <div id="tag-flash" data-action-flash></div>
 
+  {{with .SameName}}
+  <section class="tag-detail-section" id="tag-same-name">
+    <h3>Same name</h3>
+    {{range .}}
+    <p class="tag-detail-meta tag-same-name-row">
+      <a href="/tags/{{.ID}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
+      <span class="field-hint">{{.CategoryName}}</span>
+      · usage <strong>{{.UsageCount}}</strong> ·
+      {{if index $.DistinctFrom .ID}}
+      <span class="alias-badge" title="Marked distinct: same name, different things">distinct</span>
+      <button type="button" class="btn-link-accent"
+              hx-delete="/tags/{{$.Tag.ID}}/distinct/{{.ID}}"
+              hx-confirm="Count {{$.Tag.CategoryName}}:{{$.Tag.Name}} and {{.CategoryName}}:{{.Name}} as a conflict again?"
+              data-confirm-ok="Unmark"
+              title="Count this pair as a conflict again">[×]</button>
+      {{else}}
+      <span class="tag-same-name-conflict">conflict</span>
+      <button type="button" class="btn-link-accent"
+              hx-post="/tags/batch-distinct" hx-vals='{"ids": "{{$.Tag.ID}},{{.ID}}"}'
+              title="Keep the two tags apart: they stop counting as a conflict">[mark distinct]</button>
+      <button type="button" class="btn-link-accent" onclick="openDetailAlias('{{.CategoryName}}:{{.Name}}')"
+              title="Alias this tag to it">[merge into it…]</button>
+      {{end}}
+    </p>
+    {{end}}
+  </section>
+  {{end}}
+
   {{if .Tag.IsAlias}}
   <section class="tag-detail-section">
     <h3>Resolves to</h3>
@@ -67,10 +95,10 @@
       · last used {{if .LastUsedAt.IsZero}}—{{else}}{{.LastUsedAt.Format "2006-01-02"}}{{end}}
       · <a href="/tags/{{.ID}}">details →</a>
     </div>
+    <p class="field-hint">This is another name for {{.Name}}: tagging or searching with it uses {{.Name}}.</p>
     {{else}}
-    <p class="field-hint">Canonical tag missing.</p>
+    <p class="field-hint">Its target tag no longer exists.</p>
     {{end}}
-    <p class="field-hint">Searches for {{.Tag.Name}} and new adds of it land on the canonical. An alias row never carries images itself.</p>
   </section>
   {{else}}
   <div class="tag-detail-cols">
@@ -90,7 +118,7 @@
                     title="Delete every alias in this group">[×]</button>{{end}}</p>
           <ul class="tag-list">
             {{range .Tags}}
-            <li class="tag-item">
+            <li class="tag-item" data-spelling="{{.CategoryName}}:{{.Name}}">
               <a href="/tags/{{.ID}}" style="color:{{catColor .CategoryColor}}" title="Alias details">{{.Name}}</a>
               <button class="tag-remove-btn"
                       hx-delete="/tags/{{.ID}}"
@@ -116,6 +144,7 @@
         <section class="tag-detail-section">
           <h3>Implied by</h3>
           {{if .ImpliedBy}}
+          <p class="field-hint">These tags add {{.Tag.Name}} automatically.</p>
           {{range groupImplicationsByOrigin .ImpliedBy}}
           {{template "partials/implication_group_header.html" (dict "Group" . "OriginKinds" $kinds "BaseURL" (printf "/tags/%d/implied-by/group" $.Tag.ID))}}
           <ul class="tag-list">
@@ -139,7 +168,7 @@
           <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/implied-by"
                 hx-target="#implied-by-add-flash" hx-swap="innerHTML">
             <div class="add-tag-input-wrap">
-              {{template "multi_tag_suggest_input" dict "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tag(s)..." "Required" true "ValsKey" "q"}}
+              {{template "multi_tag_suggest_input" dict "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tags..." "Required" true "ValsKey" "q"}}
             </div>
             <button type="submit" class="btn-sm">Add</button>
           </form>
@@ -200,7 +229,7 @@
           <a href="/images/{{.}}"><img src="/thumbnails/{{$.ActiveGallery}}/{{.}}.jpg" alt="image {{.}}" loading="lazy"></a>
           {{end}}
         </div>
-        <p><a href="/?q={{.Tag.CategoryName}}:{{.Tag.Name}}">all {{.Tag.UsageCount}} in gallery →</a></p>
+        <p><a id="tag-gallery-link" href="/?q={{.Tag.CategoryName}}:{{.Tag.Name}}">all {{.Tag.UsageCount}} in gallery →</a></p>
         {{else}}
         <p class="field-hint">No visible images carry this tag.</p>
         {{end}}
@@ -217,7 +246,7 @@
   <form hx-patch="/tags/{{.Tag.ID}}/category"
         hx-target="#tag-flash"
         hx-on::after-request="onDetailCategoryChanged(event)">
-    <p>Move <strong>{{.Tag.Name}}</strong> to:</p>
+    <p class="dlg-title">Move <strong>{{.Tag.Name}}</strong> to:{{template "webui/dialog_x"}}</p>
     <div class="field">
       <label>Target category</label>
       <select name="category_id" id="detail-category-select">
@@ -226,6 +255,12 @@
         {{end}}{{end}}
       </select>
     </div>
+    {{if not .Tag.IsAlias}}
+    <label style="display:block;font-size:12px">
+      <input type="checkbox" name="keep_alias" value="1">
+      Keep <span id="detail-keep-alias-name">{{.Tag.CategoryName}}:{{.Tag.Name}}</span> as an alias
+    </label>
+    {{end}}
     {{template "dialog_actions" dict "ID" "detail-category-dialog" "Submit" "Move"}}
   </form>
 </dialog>
@@ -233,15 +268,15 @@
 
 <dialog id="detail-alias-dialog">
   <form onsubmit="event.preventDefault(); confirmDetailAlias()">
-    <p>{{if .Tag.IsAlias}}Repoint{{else}}Alias{{end}} <strong>{{.Tag.Name}}</strong> to:</p>
+    <p class="dlg-title">{{if .Tag.IsAlias}}Repoint{{else}}Alias{{end}} <strong>{{.Tag.Name}}</strong> to:{{template "webui/dialog_x"}}</p>
     <div class="field">
-      <label>Canonical tag</label>
+      <label>Target tag</label>
       {{template "tag_suggest_input" dict "Name" "canonical_id" "InputID" "detail-alias-canon" "SuggestID" "detail-alias-suggest" "Required" true}}
     </div>
     {{if not .Tag.IsAlias}}
-    <p style="color:var(--error);font-size:12px">Every image tagged {{.Tag.Name}} moves to the canonical and its implications go with it; the name stays as a zero-usage alias. This cannot be undone.</p>
+    <p style="color:var(--error);font-size:12px">Every image tagged {{.Tag.Name}} gets the target tag instead, and its implications move with it. {{.Tag.Name}} keeps working as an alias. This cannot be undone.</p>
     {{end}}
-    <p style="color:var(--fg-dim);font-size:12px">The canonical is created if it doesn't exist yet.</p>
+    <p style="color:var(--fg-dim);font-size:12px">The target is created if it does not exist.</p>
     <div id="detail-alias-flash"></div>
     {{template "dialog_actions" dict "ID" "detail-alias-dialog" "Submit" (or (and .Tag.IsAlias "Repoint") "Alias") "Class" "btn-danger"}}
   </form>
@@ -252,7 +287,7 @@
   <form hx-post="/tags/{{.Tag.ID}}/note"
         hx-target="#tag-note-error"
         hx-on::after-request="onExternalEditResponse(event, 'tag-note-dialog')">
-    <p>Note on <strong style="color:{{catColor .Tag.CategoryColor}}">{{.Tag.Name}}</strong></p>
+    <p class="dlg-title">Note on <strong style="color:{{catColor .Tag.CategoryColor}}">{{.Tag.Name}}</strong>{{template "webui/dialog_x"}}</p>
     <div class="field">
       <label for="tag-note-body">Note (max 10000 chars)</label>
       <textarea id="tag-note-body" name="note" rows="6" maxlength="10000"></textarea>
@@ -288,16 +323,30 @@ function onDetailCategoryChanged(event) {
   document.getElementById('detail-category-dialog').close();
   if (!event.detail.successful) return;
   if (event.detail.xhr.responseText.indexOf('flash-err') !== -1) return;
+  var keep = event.target.querySelector('input[name=keep_alias]');
+  if (keep && keep.checked) {
+    // The kept alias joins Aliases pointing here, which only a load redraws.
+    stashActionFlash('Category updated.', 'ok');
+    location.reload();
+    return;
+  }
   var sel = document.getElementById('detail-category-select');
   updateDetailColor(sel);
   var cat = document.getElementById('tag-detail-cat');
   var opt = sel.options[sel.selectedIndex];
-  if (cat && opt) cat.textContent = opt.text;
+  if (!opt) return;
+  if (cat) cat.textContent = opt.text;
+  var link = document.getElementById('tag-gallery-link');
+  if (link) link.href = '/?q=' + encodeURIComponent(opt.text + ':' + TAG_NAME);
+  var keepName = document.getElementById('detail-keep-alias-name');
+  if (keepName) keepName.textContent = opt.text + ':' + TAG_NAME;
+  var own = document.querySelector('.tag-item[data-spelling="' + CSS.escape(opt.text + ':' + TAG_NAME) + '"] .tag-remove-btn');
+  if (own) pruneRelationRow(own);
 }
 
-function openDetailAlias() {
+function openDetailAlias(canon) {
   clearSlots('detail-alias-flash', 'detail-alias-suggest');
-  document.getElementById('detail-alias-canon').value = '';
+  document.getElementById('detail-alias-canon').value = canon || '';
   document.getElementById('detail-alias-dialog').showModal();
   document.getElementById('detail-alias-canon').focus();
 }
@@ -343,7 +392,7 @@ function pullTagPTRKeeping(spelling) {
   if (d) d.close();
   showConfirm('Pull and keep ' + spelling + '?', function() {
     postTagPTRPull({as: spelling, merge: '1'});
-  }, 'Every image tagged ' + TAG_NAME + ' moves to it and ' + TAG_NAME + ' stays as a zero-usage alias. This cannot be undone.', 'Pull and keep');
+  }, 'Every image tagged ' + TAG_NAME + ' gets it instead, and ' + TAG_NAME + ' keeps working as an alias. This cannot be undone.', 'Pull and keep');
 }
 
 function deleteThisTag(btn) {
@@ -356,15 +405,6 @@ function updateDetailColor(sel) {
   if (opt && name && opt.dataset.color) name.style.color = opt.dataset.color;
 }
 
-function handleImplicationAdded(event) {
-  var hdr = event.detail.xhr.getResponseHeader('HX-Trigger') || '';
-  if (hdr.indexOf('implication-added') !== -1) {
-    var input = document.getElementById('implication-add-input');
-    if (input) input.value = '';
-    clearSlots('implication-add-suggest');
-    htmx.ajax('GET', '/tags/' + TAG_ID + '/implications', {target: '#implications-editor', swap: 'innerHTML'});
-  }
-}
 </script>
 
 {{template "layout_end" .}}

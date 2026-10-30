@@ -2,14 +2,13 @@
 <div id="detail-danger-zone"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <div class="danger-zone">
     {{if .ImageTags}}
-    <button type="button" id="remove-tags-btn" class="btn-warning" onclick="openRemoveTagsDialog()">Remove tag(s)...</button>
+    <button type="button" id="remove-tags-btn" class="btn-warning" onclick="openRemoveTagsDialog()">Remove tags...</button>
     {{end}}
     {{if .CanTransfer}}
-    <button type="button" id="transfer-image-btn" class="danger-zone-trailing"
-            onclick="openTransferImageDialog()">Transfer to another gallery</button>
+    <button type="button" id="transfer-image-btn" title="Transfer to another gallery"
+            onclick="openTransferImageDialog()">Transfer...</button>
     {{end}}
-    <button type="button"{{if not .CanTransfer}} class="danger-zone-trailing"{{end}}
-            onclick="openPlaceImageDialog()">Rename / move...</button>
+    <button type="button" onclick="openPlaceImageDialog()">Rename / move...</button>
     <button class="btn-danger"
             id="delete-image-btn"
             hx-delete="/images/{{.ImageID}}?ref={{.Ref}}{{.BackKVQS}}"
@@ -21,11 +20,11 @@
 
   {{if .ImageTags}}
   <dialog id="remove-tags-dialog" data-image-id="{{.ImageID}}">
-    <p>Remove tags from this image:</p>
+    <p class="dlg-title">Remove tags from this image:{{template "webui/dialog_x"}}</p>
     <form id="remove-tags-form" onsubmit="event.preventDefault(); confirmRemoveTags();">
       <div class="field">
         {{if .ImageSources}}
-        <label><input type="radio" name="mode" value="source"> Tags from a source</label>
+        <label><input type="radio" name="mode" value="source"> Tags from one source</label>
         <div class="field" style="margin: 4px 0 8px 22px">
           <select id="remove-tags-source" class="upload-wide-input">
             {{range .ImageSources}}<option value="{{.}}">{{.}}</option>{{end}}
@@ -33,15 +32,15 @@
         </div>
         {{end}}
         {{if .ImageTaggers}}
-        <label><input type="radio" name="mode" value="tagger"> Tags from an auto-tagger</label>
+        <label><input type="radio" name="mode" value="tagger"> Tags from one auto-tagger</label>
         <div class="field" style="margin: 4px 0 8px 22px">
           <select id="remove-tags-tagger" class="upload-wide-input">
             {{range .ImageTaggers}}<option value="{{.}}">{{.}}</option>{{end}}
           </select>
         </div>
         {{end}}
-        {{if .HasUserTags}}<label><input type="radio" name="mode" value="user"> All user tags</label>{{end}}
-        {{if .HasStaleTags}}<label><input type="radio" name="mode" value="stale"> Stale tags</label>{{end}}
+        {{if .HasUserTags}}<label><input type="radio" name="mode" value="user"> All tags you added</label>{{end}}
+        {{if .HasStaleTags}}<label><input type="radio" name="mode" value="stale"> Stale tags (dropped by their source)</label>{{end}}
         <label><input type="radio" name="mode" value="all"> All tags</label>
       </div>
       {{template "dialog_actions" dict "ID" "remove-tags-dialog" "Submit" "Remove" "Class" "btn-warning"}}
@@ -50,7 +49,7 @@
   {{end}}
 
   <dialog id="place-image-dialog" data-filename="{{.Filename}}" data-current-folder="{{.CurrentFolder}}">
-    <p>Rename / move this image:</p>
+    <p class="dlg-title">Rename / move this image:{{template "webui/dialog_x"}}</p>
     <form id="place-image-form"
           hx-post="/images/{{.ImageID}}/place"
           hx-target="#place-image-error" hx-swap="innerHTML">

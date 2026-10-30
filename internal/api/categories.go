@@ -18,10 +18,11 @@ type categoryResponse struct {
 	Name      string `json:"name"`
 	Color     string `json:"color"`
 	IsBuiltin bool   `json:"is_builtin"`
+	Position  int    `json:"position"`
 }
 
 func toCategoryResponse(c models.TagCategory) categoryResponse {
-	return categoryResponse{ID: c.ID, Name: c.Name, Color: c.Color, IsBuiltin: c.IsBuiltin}
+	return categoryResponse{ID: c.ID, Name: c.Name, Color: c.Color, IsBuiltin: c.IsBuiltin, Position: c.Position}
 }
 
 // ErrCategoryNotFound is a 404 here but a 400 for a tag op, where the

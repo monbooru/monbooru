@@ -1,6 +1,6 @@
 {{define "partials/search_input.html"}}
 <div class="search-input-wrap">
-  <input type="text" name="q" id="search-input" value="{{.}}" placeholder="Search tags… (system: lists filters)" autocomplete="off"
+  <input type="text" name="q" id="search-input" value="{{.}}" placeholder="Search tags… (type system: for filters)" autocomplete="off"
          hx-get="/internal/search/suggest"
          hx-trigger="input changed delay:200ms"
          hx-target="#search-suggest"

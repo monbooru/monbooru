@@ -13,6 +13,7 @@
       {{if .Refused}}<span class="status-badge status-warn">refused - {{.Refused}}</span>{{end}}
     </div>
     {{if .Companion}}
+    <div class="peer-line field-hint">Downloads from boorus and other sites, and finds tags for your images.</div>
     <form id="monloader-urls" hx-post="/settings/monloader" hx-target="#flash-plugins" hx-swap="innerHTML">
       <div class="field">
         <label for="monloader_api_url">API URL</label>
@@ -73,7 +74,7 @@
   </div>
   {{end}}
   {{if le (len .Rows) 1}}
-  <p class="field-hint">Nothing installed. Drop a plugin folder there, or run a plugin on the LAN pointed at monbooru and approve its request above.</p>
+  <p class="field-hint">No other plugins. Put a plugin folder in the path above, or approve a plugin's request to pair.</p>
   {{end}}
 </div>
 {{end}}

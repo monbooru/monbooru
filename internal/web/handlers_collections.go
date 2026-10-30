@@ -12,6 +12,7 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
@@ -99,7 +100,7 @@ func (s *Server) renameCollectionPost(w http.ResponseWriter, r *http.Request) {
 		flashStatus(w, http.StatusBadRequest, "Both the current and the new collection name are required.")
 		return
 	}
-	if utf8.RuneCountInString(newName) > maxExternalSourceLen {
+	if utf8.RuneCountInString(newName) > contract.MaxCollection {
 		flashStatus(w, http.StatusBadRequest, "Collection label too long.")
 		return
 	}

@@ -16,9 +16,6 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
-// monloader's per-request cap for a batch lookup.
-const ptrLookupChunk = contract.MaxPTRHashes
-
 func LookupMD5(ctx context.Context, cx *library.Gallery, imageID int64, stored string) (string, error) {
 	if stored != "" {
 		return stored, nil
@@ -35,15 +32,15 @@ func (l *Link) runPTRLookupPhase(ctx context.Context, cx *library.Gallery) (chec
 	}
 	lookup.PTRCursor.Store(cursor)
 
-	ids, err := lookup.DueIDs(cx.DB, lookup.BackendPTR, time.Now())
+	ids, err := lookup.DueIDs(cx.DB, contract.LookupPTR, time.Now())
 	if err != nil {
 		return 0, 0, err
 	}
-	for start := 0; start < len(ids); start += ptrLookupChunk {
+	for start := 0; start < len(ids); start += contract.MaxPTRHashes {
 		if ctx.Err() != nil {
 			return checked, matched, nil
 		}
-		batch, berr := lookup.Due(cx.DB, lookup.BackendPTR, time.Now(), ids[start:min(start+ptrLookupChunk, len(ids))])
+		batch, berr := lookup.Due(cx.DB, contract.LookupPTR, time.Now(), ids[start:min(start+contract.MaxPTRHashes, len(ids))])
 		if berr != nil {
 			return checked, matched, berr
 		}
@@ -72,7 +69,7 @@ func (l *Link) runPTRLookupPhase(ctx context.Context, cx *library.Gallery) (chec
 		if aerr != nil {
 			return checked, matched, aerr
 		}
-		l.jobs.Update(min(start+ptrLookupChunk, len(ids)), len(ids), fmt.Sprintf("[%s] PTR lookup…", cx.Name))
+		l.jobs.Update(min(start+contract.MaxPTRHashes, len(ids)), len(ids), fmt.Sprintf("[%s] PTR lookup…", cx.Name))
 	}
 	return checked, matched, nil
 }
@@ -90,7 +87,7 @@ func applyPTRResults(cx *library.Gallery, byHash map[string]int64, results map[s
 			matched++
 		}
 		if rerr := cx.Edit(func(d *db.DB) error {
-			return lookup.Record(d, id, lookup.BackendPTR, result, cursor, time.Now())
+			return lookup.Record(d, id, contract.LookupPTR, result, cursor, time.Now())
 		}); rerr != nil {
 			logx.Warnf("ptr record for image %d: %v", id, rerr)
 			if err == nil {
@@ -125,12 +122,12 @@ type onlineLookupResult struct {
 func (l *Link) runOnlineLookupPhase(ctx context.Context, cx *library.Gallery) (onlineLookupResult, error) {
 	var res onlineLookupResult
 	res.resolved, res.inconclusive = l.reconcileLookups(ctx, cx)
-	ids, err := lookup.DueIDs(cx.DB, lookup.BackendBooru, time.Now())
+	ids, err := lookup.DueIDs(cx.DB, contract.LookupBooru, time.Now())
 	if err != nil {
 		return res, err
 	}
 	for start := 0; start < len(ids) && ctx.Err() == nil; start += onlineLookupChunk {
-		batch, err := lookup.Due(cx.DB, lookup.BackendBooru, time.Now(), ids[start:min(start+onlineLookupChunk, len(ids))])
+		batch, err := lookup.Due(cx.DB, contract.LookupBooru, time.Now(), ids[start:min(start+onlineLookupChunk, len(ids))])
 		if err != nil {
 			return res, err
 		}
@@ -144,11 +141,11 @@ func (l *Link) runOnlineLookupPhase(ctx context.Context, cx *library.Gallery) (o
 				res.skipped++
 				continue
 			}
-			eerr := l.EnqueueLookup(ctx, cx, c.ImageID, lookup.BackendBooru, md5, c.SHA256, true, true)
+			eerr := l.EnqueueLookup(ctx, cx, c.ImageID, contract.LookupBooru, md5, c.SHA256, true, true)
 			switch {
 			case errors.Is(eerr, errBudgetSpent):
 				res.budgetSpent = true
-				res.stillDue = dueLookupCount(cx, lookup.BackendBooru)
+				res.stillDue = dueLookupCount(cx, contract.LookupBooru)
 				return res, nil
 			case peer.IsStatusError(eerr):
 				res.skipped++
@@ -160,7 +157,7 @@ func (l *Link) runOnlineLookupPhase(ctx context.Context, cx *library.Gallery) (o
 			l.jobs.Update(start+i+1, len(ids), fmt.Sprintf("[%s] online lookup…", cx.Name))
 		}
 	}
-	res.stillDue = dueLookupCount(cx, lookup.BackendBooru)
+	res.stillDue = dueLookupCount(cx, contract.LookupBooru)
 	return res, nil
 }
 

@@ -7,8 +7,9 @@ import (
 )
 
 type Source struct {
-	DB      *db.DB
-	Tree    *relations.BKTree
-	Tallies *counts.Tallies
-	Cache   *AdjacencyCache
+	DB             *db.DB
+	Tree           *relations.BKTree
+	Tallies        *counts.Tallies
+	Cache          *AdjacencyCache
+	LookupBackends []string
 }

@@ -3,7 +3,6 @@ package web
 import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
-	"github.com/monbooru/monbooru/internal/monloader"
 )
 
 type schedHost struct{ s *Server }
@@ -14,7 +13,7 @@ func (h schedHost) View() (config.ScheduleConfig, []string) {
 	h.s.cfgMu.RLock()
 	defer h.s.cfgMu.RUnlock()
 	sched := h.s.cfg.Schedule
-	if h.s.cfg.Auth.Tokens.Paired(monloader.App) == nil {
+	if !h.s.cfg.MonloaderPaired() {
 		sched.LookupPTR, sched.LookupBooru = false, false
 	}
 	return sched, galleryNames(h.s.cfg.Galleries)

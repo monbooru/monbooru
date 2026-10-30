@@ -1,23 +1,24 @@
 {{define "partials/plugin_pairing.html"}}
-<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML">
   {{if .Pending}}
   <div class="pairing-pending">
   <p class="pairing-pending-msg">An app is requesting to pair. Approve or deny below. A <strong>re-pair</strong> replaces the credentials the app already holds here.</p>
   <div class="table-scroll">
-  <table class="data-table">
-    <thead><tr><th>App</th><th>Source</th><th>Scopes</th><th>Buttons</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>
+  <table class="data-table stack-table">
+    <thead><tr><th>App</th><th>Source</th><th>Scopes</th><th>Buttons</th><th>Expires</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>
     <tbody>
       {{range .Pending}}
       <tr>
-        <td><strong>{{.App}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}
+        <td class="stack-head"><strong>{{.App}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}
           {{if .Repair}}<span class="status-badge status-warn">re-pair</span>{{end}}</td>
-        <td>{{.Source}}</td>
-        <td>{{range $i, $s := .Scopes}}{{if $i}} {{end}}{{$s}}{{end}}</td>
-        <td>
+        <td data-label="Source">{{.Source}}</td>
+        <td data-label="Scopes">{{range $i, $s := .Scopes}}{{if $i}} {{end}}{{$s}}{{end}}</td>
+        <td data-label="Buttons">
           {{template "partials/plugin_button_decl.html" .Buttons}}
           {{if not .Buttons}}<span class="status-dim">none</span>{{end}}
           {{if .SessionNote}}<div class="field-hint">Its open pages run with your session and can do anything you can do here, whatever its scopes.</div>{{end}}
         </td>
+        <td data-label="Expires">{{minutesLeft .ExpiresAt}}</td>
         <td class="cell-action">
           <form hx-post="/settings/plugins/pair/{{.ID}}/approve" hx-target="#plugin-pairing" hx-swap="outerHTML" style="display:inline">
             <button type="submit" class="btn-sm btn-success">Approve</button>
@@ -35,7 +36,8 @@
   </div>
   </div>
   {{else}}
-  <p class="field-hint">No pending requests. An app offers to pair on its own; approve it here and its next poll collects its token.</p>
+  <p class="field-hint">No pending requests. When an app or plugin asks to connect, approve it here.</p>
   {{end}}
 </div>
+{{with .Notice}}{{template "webui/pair_notice" .}}<span id="settings-pair-count" class="nav-count" hx-swap-oob="true">{{with len .Items}} ({{.}}){{end}}</span>{{end}}
 {{end}}

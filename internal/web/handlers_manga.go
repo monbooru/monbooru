@@ -143,7 +143,7 @@ func (s *Server) pagesGridHandler(w http.ResponseWriter, r *http.Request) {
 		Filename:     filepath.Base(img.CanonicalPath),
 		PageCount:    *img.PageCount,
 		LastReadPage: resumePage(img),
-		TagSidebar:   s.buildTagSidebar(img.ID, readTagModeCookie(r), imageTags),
+		TagSidebar:   s.buildTagSidebar(img.ID, tagModePref.read(r), impliedModePref.read(r), imageTags),
 		BackQuery:    back.Q,
 		BackQS:       backQS,
 		BackKVQS:     backKVQS,

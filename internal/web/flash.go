@@ -5,8 +5,9 @@ import (
 	"net/http"
 )
 
-// flashStatus is for HTMX-only callers: it does not branch on the request mode.
-// htmx swaps a 2xx and main.js a 409; any other refusal is a 200 flash (hxErr) or, never with a 409, the flash header (flashHeaderErr).
+// A refusal follows the caller: an htmx call that swaps its reply gets a 200 inline flash (hxErr, externalErr) or a 409, which main.js swaps;
+// one that swaps nothing gets the flash header (flashHeaderErr, never with a 409); a native form or fetch gets plain text (http.Error, externalErr).
+// flashStatus does not branch on the request mode, so only htmx-only routes call it.
 func flashStatus(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)
 	writeInlineFlash(w, "err", msg)

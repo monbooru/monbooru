@@ -73,7 +73,7 @@ func (l *Link) enqueue(ctx context.Context, path string, payload any, onConflict
 	defer func() { _ = resp.Body.Close() }()
 	if onConflict != nil && resp.StatusCode == http.StatusConflict {
 		if setupRequired(resp) {
-			return 0, peer.StatusError{Peer: App, Status: resp.Status, Code: contract.CodeSetupRequired}
+			return 0, setupRefusal(resp)
 		}
 		return 0, onConflict
 	}
@@ -136,8 +136,13 @@ func (l *Link) Teardown(remove func()) error {
 	return err
 }
 
+// A hundred hashes read from a cold full-size index took nearly 30 s.
+const ptrBatchTimeout = 2 * time.Minute
+
 func (l *Link) ptrBatchLookup(ctx context.Context, gallery string, scheduled bool, images []contract.PTRLookupImage) (map[string][]string, uint64, error) {
-	resp, err := l.client.Post(ctx, "/api/v1/ptr/lookup", contract.PTRLookupRequest{
+	ctx, cancel := context.WithTimeout(ctx, ptrBatchTimeout)
+	defer cancel()
+	resp, err := l.client.PostSlow(ctx, "/api/v1/ptr/lookup", contract.PTRLookupRequest{
 		Images: images, Gallery: gallery, Scheduled: scheduled,
 	})
 	if err != nil {
@@ -145,6 +150,9 @@ func (l *Link) ptrBatchLookup(ctx context.Context, gallery string, scheduled boo
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusConflict {
+		if setupRequired(resp) {
+			return nil, 0, setupRefusal(resp)
+		}
 		return nil, 0, ErrPTRUnavailable
 	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
@@ -245,8 +253,7 @@ func (l *Link) jobOutcome(ctx context.Context, jobID int64) (string, bool) {
 }
 
 func postJSON[T any](l *Link, ctx context.Context, path string, payload any) (*T, error) {
-	body, _ := json.Marshal(payload)
-	resp, err := l.client.Do(ctx, http.MethodPost, path, body)
+	resp, err := l.client.Post(ctx, path, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +261,9 @@ func postJSON[T any](l *Link, ctx context.Context, path string, payload any) (*T
 	if resp.StatusCode == http.StatusConflict {
 		var refusal contract.Error
 		_ = json.NewDecoder(resp.Body).Decode(&refusal)
+		if refusal.Code == contract.CodeSetupRequired {
+			return nil, setupRefusal(resp)
+		}
 		return nil, conflict{refusal.Code}
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
@@ -266,10 +276,8 @@ func postJSON[T any](l *Link, ctx context.Context, path string, payload any) (*T
 	return &out, nil
 }
 
-type PTRTagInfo = contract.PTRTagInfo
-
 // The caller keeps a call's names under monloader's request limit.
-func (l *Link) PTRTagLookup(ctx context.Context, names []string) (map[string]PTRTagInfo, error) {
+func (l *Link) PTRTagLookup(ctx context.Context, names []string) (map[string]contract.PTRTagInfo, error) {
 	out, err := postJSON[contract.PTRTagsResponse](l, ctx, "/api/v1/ptr/tags", contract.PTRTagsRequest{Tags: names})
 	if err != nil {
 		return nil, err
@@ -277,9 +285,7 @@ func (l *Link) PTRTagLookup(ctx context.Context, names []string) (map[string]PTR
 	return out.Results, nil
 }
 
-type PTRCluster = contract.PTRCluster
-
-func (l *Link) PTRSpellingSearch(ctx context.Context, q, mode string, limit int) (clusters []PTRCluster, truncated bool, err error) {
+func (l *Link) PTRSpellingSearch(ctx context.Context, q, mode string, limit int) (clusters []contract.PTRCluster, truncated bool, err error) {
 	v := url.Values{"q": {q}, "limit": {strconv.Itoa(limit)}}
 	if mode != "" {
 		v.Set("mode", mode)
@@ -294,8 +300,14 @@ func (l *Link) PTRSpellingSearch(ctx context.Context, q, mode string, limit int)
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return nil, false, ErrNoSearch
 	case http.StatusBadRequest:
+		if e := refused(resp); e.Code != contract.CodeNamespaceRequired {
+			return nil, false, e
+		}
 		return nil, false, ErrSearchUnbounded
 	case http.StatusConflict:
+		if setupRequired(resp) {
+			return nil, false, setupRefusal(resp)
+		}
 		return nil, false, ErrPTRUnavailable
 	default:
 		return nil, false, refused(resp)
@@ -337,13 +349,9 @@ func (l *Link) previewContrib(ctx context.Context, sha256 string, tags, implied 
 		contract.ContribPreviewRequest{SHA256: sha256, Tags: tags, Implied: implied})
 }
 
-type ContribSendResult = contract.ContribResult
-
-type ContribSendResponse = contract.ContribResponse
-
-func (l *Link) SendContrib(ctx context.Context, origin string, items []contract.ContribItem) (*ContribSendResponse, error) {
+func (l *Link) SendContrib(ctx context.Context, origin string, items []contract.ContribItem) (*contract.ContribResponse, error) {
 	commit := true
-	out, err := postJSON[ContribSendResponse](l, ctx, "/api/v1/ptr/contrib",
+	out, err := postJSON[contract.ContribResponse](l, ctx, "/api/v1/ptr/contrib",
 		contract.ContribRequest{Commit: &commit, Origin: origin, Items: items})
 	var c conflict
 	if errors.As(err, &c) {

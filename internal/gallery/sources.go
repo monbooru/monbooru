@@ -8,16 +8,9 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
-	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
-const (
-	MaxSourceLabelLen    = contract.MaxSourceLabel
-	MaxSourceURLLen      = contract.MaxURL
-	MaxCommentaryLen     = contract.MaxCommentary
-	MaxOriginalLen       = contract.MaxOriginal
-	MaxAnnotationBodyLen = 4000
-)
+const MaxAnnotationBodyLen = 4000
 
 // ValidExternalURL accepts only http(s): html/template and the link
 // allowlist render anything else inert.
@@ -94,6 +87,14 @@ func ImageSHAAndType(q db.RowQuerier, id int64) (sha, fileType string, err error
 
 // FileTypes leaves out the ids with no row.
 func FileTypes(database *db.DB, ids []int64) (map[int64]string, error) {
+	return fileTypes(database, ids, "")
+}
+
+func PresentFileTypes(database *db.DB, ids []int64) (map[int64]string, error) {
+	return fileTypes(database, ids, "is_missing = 0 AND ")
+}
+
+func fileTypes(database *db.DB, ids []int64, filter string) (map[int64]string, error) {
 	type typeRow struct {
 		id       int64
 		fileType string
@@ -102,7 +103,7 @@ func FileTypes(database *db.DB, ids []int64) (map[int64]string, error) {
 	err := db.Chunked(ids, 500, func(chunk []int64) error {
 		in, args := db.InPlaceholders(chunk)
 		rows, err := db.QueryAll(database.Read, db.ScanRow(func(r *typeRow) []any { return []any{&r.id, &r.fileType} }),
-			`SELECT id, file_type FROM images WHERE id IN (`+in+`)`, args...)
+			`SELECT id, file_type FROM images WHERE `+filter+`id IN (`+in+`)`, args...)
 		if err != nil {
 			return err
 		}

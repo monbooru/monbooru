@@ -1,0 +1,12 @@
+{{define "partials/reset_tags.html"}}
+{{if .Err}}
+<div class="flash flash-err">{{.Err}}</div>
+{{else}}
+<p class="dlg-title">Reset all the tags of gallery <strong>{{.Gallery}}</strong>?{{template "webui/dialog_x"}}</p>
+<p class="field-hint">Deletes {{.Tags}} {{plural .Tags "tag" "tags"}}, {{.Aliases}} {{plural .Aliases "alias" "aliases"}} and {{.Implications}} {{plural .Implications "implication" "implications"}}, and takes the tags off every image. This cannot be undone; export the gallery first to keep a copy.</p>
+<div class="field">
+  <label for="reset-tags-confirm">Type <strong>{{.Gallery}}</strong> to confirm</label>
+  <input type="text" name="confirm_name" id="reset-tags-confirm" required autocomplete="off">
+</div>
+{{end}}
+{{end}}

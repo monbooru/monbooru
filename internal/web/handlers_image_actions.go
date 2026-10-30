@@ -80,16 +80,16 @@ func (s *Server) toggleBoolColumn(w http.ResponseWriter, r *http.Request, flag g
 // FE0E pins the heart to text style; bare U+2665 turns into an oversized emoji.
 func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 	s.toggleBoolColumn(w, r, gallery.FlagFavorited,
-		`<button type="submit" id="fav-btn" class="btn-fav active" title="Unfavorite">♥&#xFE0E;</button>`,
-		`<button type="submit" id="fav-btn" class="btn-fav" title="Favorite">♡</button>`,
+		`<button type="submit" id="fav-btn" class="btn-fav active fav-burst" title="Unfavorite (f)">♥&#xFE0E;</button>`,
+		`<button type="submit" id="fav-btn" class="btn-fav" title="Favorite (f)">♡</button>`,
 		nil,
 	)
 }
 
 func (s *Server) toggleInbox(w http.ResponseWriter, r *http.Request) {
 	s.toggleBoolColumn(w, r, gallery.FlagInbox,
-		`<button type="submit" id="inbox-btn" class="btn-inbox active" title="Archive (i)">In inbox</button>`,
-		`<button type="submit" id="inbox-btn" class="btn-inbox" title="Send to inbox (i)">Archived</button>`,
+		`<button type="submit" id="inbox-btn" class="btn-inbox active" title="Archive (i)">Archive</button>`,
+		`<button type="submit" id="inbox-btn" class="btn-inbox" title="Send to inbox (i)">Back to inbox</button>`,
 		inboxNavOOB,
 	)
 }
@@ -179,9 +179,17 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Not externalErr: the form is hx-swap="none", so htmx shows only the header.
+	refuse := func(code int, msg string) {
+		if isHTMXRequest(r) {
+			flashHeaderErr(w, code, msg)
+			return
+		}
+		http.Error(w, msg, code)
+	}
 	requested := r.FormValue("path")
 	if requested == "" {
-		flashHeaderErr(w, http.StatusBadRequest, "path required")
+		refuse(http.StatusBadRequest, "path required")
 		return
 	}
 
@@ -192,15 +200,15 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 		id, requested,
 	).Scan(&newCanonical)
 	if errors.Is(err, sql.ErrNoRows) {
-		flashHeaderErr(w, http.StatusBadRequest, "path is not an alias of this image")
+		refuse(http.StatusBadRequest, "path is not an alias of this image")
 		return
 	}
 	if err != nil {
-		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
+		refuse(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if _, statErr := os.Stat(newCanonical); statErr != nil {
-		flashHeaderErr(w, http.StatusBadRequest, "cannot set canonical: file is missing on disk")
+		refuse(http.StatusBadRequest, "cannot set canonical: file is missing on disk")
 		return
 	}
 
@@ -209,19 +217,15 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, new(gallery.Exclusion)) {
 			code = http.StatusBadRequest
 		}
-		flashHeaderErr(w, code, err.Error())
+		refuse(code, err.Error())
 		return
 	}
 	hxDone(w, r, "Canonical path updated.", "", fmt.Sprintf("/images/%d", id))
 }
 
 const (
-	maxExternalSourceLen  = gallery.MaxSourceLabelLen
-	maxExternalURLLen     = gallery.MaxSourceURLLen
-	maxImageCommentaryLen = gallery.MaxCommentaryLen
-	maxImageOriginalLen   = gallery.MaxOriginalLen
-	maxAnnotationBodyLen  = gallery.MaxAnnotationBodyLen
-	maxImageNoteLen       = 10000
+	maxAnnotationBodyLen = gallery.MaxAnnotationBodyLen
+	maxImageNoteLen      = 10000
 )
 
 func (s *Server) setSource(w http.ResponseWriter, r *http.Request) {
@@ -235,13 +239,13 @@ func (s *Server) setSource(w http.ResponseWriter, r *http.Request) {
 		externalErr(w, r, "source label or url required", http.StatusBadRequest)
 		return
 	}
-	if utf8.RuneCountInString(site) > maxExternalSourceLen {
-		externalErr(w, r, fmt.Sprintf("source too long (max %d chars)", maxExternalSourceLen), http.StatusBadRequest)
+	if utf8.RuneCountInString(site) > contract.MaxSourceLabel {
+		externalErr(w, r, fmt.Sprintf("source too long (max %d chars)", contract.MaxSourceLabel), http.StatusBadRequest)
 		return
 	}
 	if url != "" {
-		if utf8.RuneCountInString(url) > maxExternalURLLen {
-			externalErr(w, r, fmt.Sprintf("url too long (max %d chars)", maxExternalURLLen), http.StatusBadRequest)
+		if utf8.RuneCountInString(url) > contract.MaxURL {
+			externalErr(w, r, fmt.Sprintf("url too long (max %d chars)", contract.MaxURL), http.StatusBadRequest)
 			return
 		}
 		if !gallery.ValidExternalURL(url) {
@@ -270,25 +274,25 @@ func (s *Server) setSource(w http.ResponseWriter, r *http.Request) {
 	s.imageEditDone(w, r, id, "Source updated.")
 }
 
-func (s *Server) sourceMembershipAction(w http.ResponseWriter, r *http.Request, successMsg string, action func(id int64, site, postID string) error) {
+func (s *Server) sourceMembershipAction(w http.ResponseWriter, r *http.Request, successMsg string, action func(d *db.DB, id int64, site, postID string) error) {
 	id, ok := idAndForm(w, r)
 	if !ok {
 		return
 	}
 	site := strings.TrimSpace(r.FormValue("site"))
 	postID := strings.TrimSpace(r.FormValue("post_id"))
-	s.applyImageEdit(w, r, id, successMsg, func() error { return action(id, site, postID) })
+	s.applyImageEdit(w, r, id, successMsg, func(d *db.DB) error { return action(d, id, site, postID) })
 }
 
 func (s *Server) removeSource(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Source removed.", func(id int64, site, postID string) error {
-		return gallery.RemoveSourceMembership(s.db(), id, site, postID)
+	s.sourceMembershipAction(w, r, "Source removed.", func(d *db.DB, id int64, site, postID string) error {
+		return gallery.RemoveSourceMembership(d, id, site, postID)
 	})
 }
 
 func (s *Server) makeSourcePrimary(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Primary source updated.", func(id int64, site, postID string) error {
-		return gallery.MakeSourcePrimary(s.db(), id, site, postID)
+	s.sourceMembershipAction(w, r, "Primary source updated.", func(d *db.DB, id int64, site, postID string) error {
+		return gallery.MakeSourcePrimary(d, id, site, postID)
 	})
 }
 
@@ -298,8 +302,8 @@ func (s *Server) keepLocalFile(w http.ResponseWriter, r *http.Request) {
 	if kept {
 		msg = "Keeping the local file."
 	}
-	s.sourceMembershipAction(w, r, msg, func(id int64, site, postID string) error {
-		return gallery.SetSourceUpgradeKept(s.db(), id, site, postID, kept)
+	s.sourceMembershipAction(w, r, msg, func(d *db.DB, id int64, site, postID string) error {
+		return gallery.SetSourceUpgradeKept(d, id, site, postID, kept)
 	})
 }
 
@@ -424,12 +428,12 @@ func (s *Server) imageEditDone(w http.ResponseWriter, r *http.Request, id int64,
 	hxDone(w, r, msg, "", "/images/"+strconv.FormatInt(id, 10))
 }
 
-func (s *Server) applyImageEdit(w http.ResponseWriter, r *http.Request, id int64, msg string, edit func() error) {
+func (s *Server) applyImageEdit(w http.ResponseWriter, r *http.Request, id int64, msg string, edit func(*db.DB) error) {
 	if !s.imageExists(id) {
 		externalErr(w, r, "image not found", http.StatusNotFound)
 		return
 	}
-	if err := s.active().Edit(func(*db.DB) error { return edit() }); err != nil {
+	if err := s.active().Edit(edit); err != nil {
 		externalErr(w, r, err.Error(), imageEditStatus(err))
 		return
 	}
@@ -472,7 +476,7 @@ func (s *Server) setNote(w http.ResponseWriter, r *http.Request) {
 	hxDone(w, r, "Note updated.", "", "/images/"+strconv.FormatInt(id, 10))
 }
 
-func (s *Server) setSourceText(w http.ResponseWriter, r *http.Request, field, label string, maxLen int, successMsg string, setter func(id int64, site, postID, val string) error) {
+func (s *Server) setSourceText(w http.ResponseWriter, r *http.Request, field, label string, maxLen int, successMsg string, setter func(d *db.DB, id int64, site, postID, val string) error) {
 	id, ok := idAndForm(w, r)
 	if !ok {
 		return
@@ -487,46 +491,46 @@ func (s *Server) setSourceText(w http.ResponseWriter, r *http.Request, field, la
 		return
 	}
 	postID := strings.TrimSpace(r.FormValue("post_id"))
-	s.applyImageEdit(w, r, id, successMsg, func() error { return setter(id, site, postID, val) })
+	s.applyImageEdit(w, r, id, successMsg, func(d *db.DB) error { return setter(d, id, site, postID, val) })
 }
 
 func (s *Server) setSourceCommentary(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "commentary", "commentary", maxImageCommentaryLen, "Commentary updated.",
-		func(id int64, site, postID, val string) error {
-			return gallery.SetSourceCommentary(s.db(), id, site, postID, val)
+	s.setSourceText(w, r, "commentary", "commentary", contract.MaxCommentary, "Commentary updated.",
+		func(d *db.DB, id int64, site, postID, val string) error {
+			return gallery.SetSourceCommentary(d, id, site, postID, val)
 		})
 }
 
 func (s *Server) removeSourceCommentary(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Commentary removed.", func(id int64, site, postID string) error {
-		return gallery.SetSourceCommentary(s.db(), id, site, postID, "")
+	s.sourceMembershipAction(w, r, "Commentary removed.", func(d *db.DB, id int64, site, postID string) error {
+		return gallery.SetSourceCommentary(d, id, site, postID, "")
 	})
 }
 
 func (s *Server) setSourceTranslation(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "commentary_translated", "translation", maxImageCommentaryLen, "Translation updated.",
-		func(id int64, site, postID, val string) error {
-			return gallery.SetSourceCommentaryTranslated(s.db(), id, site, postID, val)
+	s.setSourceText(w, r, "commentary_translated", "translation", contract.MaxCommentary, "Translation updated.",
+		func(d *db.DB, id int64, site, postID, val string) error {
+			return gallery.SetSourceCommentaryTranslated(d, id, site, postID, val)
 		})
 }
 
 func (s *Server) removeSourceTranslation(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Translation removed.", func(id int64, site, postID string) error {
-		return gallery.SetSourceCommentaryTranslated(s.db(), id, site, postID, "")
+	s.sourceMembershipAction(w, r, "Translation removed.", func(d *db.DB, id int64, site, postID string) error {
+		return gallery.SetSourceCommentaryTranslated(d, id, site, postID, "")
 	})
 }
 
 // Freeform, no URL check: a booru declares it as lines of URLs or plain text.
 func (s *Server) setSourceOriginal(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "original", "original source", maxImageOriginalLen, "Original source updated.",
-		func(id int64, site, postID, val string) error {
-			return gallery.SetSourceOriginal(s.db(), id, site, postID, val)
+	s.setSourceText(w, r, "original", "original source", contract.MaxOriginal, "Original source updated.",
+		func(d *db.DB, id int64, site, postID, val string) error {
+			return gallery.SetSourceOriginal(d, id, site, postID, val)
 		})
 }
 
 func (s *Server) removeSourceOriginal(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Original source removed.", func(id int64, site, postID string) error {
-		return gallery.SetSourceOriginal(s.db(), id, site, postID, "")
+	s.sourceMembershipAction(w, r, "Original source removed.", func(d *db.DB, id int64, site, postID string) error {
+		return gallery.SetSourceOriginal(d, id, site, postID, "")
 	})
 }
 
@@ -593,7 +597,7 @@ func (s *Server) removeAnnotation(w http.ResponseWriter, r *http.Request) {
 		externalErr(w, r, "bad annotation id", http.StatusBadRequest)
 		return
 	}
-	s.applyImageEdit(w, r, id, "Annotation removed.", func() error { return gallery.DeleteAnnotation(s.db(), id, annID) })
+	s.applyImageEdit(w, r, id, "Annotation removed.", func(d *db.DB) error { return gallery.DeleteAnnotation(d, id, annID) })
 }
 
 func (s *Server) previewMarkup(w http.ResponseWriter, r *http.Request) {
@@ -620,8 +624,8 @@ func (s *Server) setCollection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if utf8.RuneCountInString(name) > maxExternalSourceLen {
-		externalErr(w, r, fmt.Sprintf("collection too long (max %d chars)", maxExternalSourceLen), http.StatusBadRequest)
+	if utf8.RuneCountInString(name) > contract.MaxCollection {
+		externalErr(w, r, fmt.Sprintf("collection too long (max %d chars)", contract.MaxCollection), http.StatusBadRequest)
 		return
 	}
 	var order *int
@@ -659,7 +663,7 @@ func (s *Server) removeCollection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.applyImageEdit(w, r, id, "Collection removed.", func() error { return gallery.RemoveCollectionMembership(s.db(), id, name) })
+	s.applyImageEdit(w, r, id, "Collection removed.", func(d *db.DB) error { return gallery.RemoveCollectionMembership(d, id, name) })
 }
 
 func (s *Server) deleteAlias(w http.ResponseWriter, r *http.Request) {
@@ -676,18 +680,18 @@ func (s *Server) deleteAlias(w http.ResponseWriter, r *http.Request) {
 	if err := s.db().Read.QueryRow(
 		`SELECT is_canonical FROM image_paths WHERE id = ? AND image_id = ?`, pathID, id,
 	).Scan(&isCanon); err != nil {
-		http.Error(w, "alias path not found", http.StatusNotFound)
+		flashHeaderErr(w, http.StatusNotFound, "That copy is no longer listed.")
 		return
 	}
 	if isCanon == 1 {
-		http.Error(w, "cannot delete canonical path", http.StatusBadRequest)
+		flashHeaderErr(w, http.StatusBadRequest, "The canonical path cannot be deleted.")
 		return
 	}
 
 	res, err := s.active().DeleteCopies(context.Background(), []int64{pathID}, nil)
 	if err != nil {
 		logx.Warnf("delete alias %d: %v", pathID, err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
+		flashHeaderErr(w, http.StatusInternalServerError, "Delete failed; check server log.")
 		return
 	}
 	if len(res.Kept) > 0 {
@@ -724,6 +728,7 @@ func (s *Server) singleImageMoveJob(w http.ResponseWriter, r *http.Request, op f
 	if !s.startJob(w, models.JobTypeMove) {
 		return
 	}
+	s.active().WaitIngests(s.jobs.Context())
 	summary, answered, err := op(id)
 	if err != nil {
 		s.jobs.Fail(err.Error())

@@ -64,7 +64,7 @@
     {{if $prefix}}
     <li class="no-results">No collections match "{{$prefix}}".</li>
     {{else}}
-    <li class="no-results">No collections yet. Add an image to a collection to create one.</li>
+    <li class="no-results">No collections yet. Use [+ add] next to Collections on an image, or the Collection button in Select mode.</li>
     {{end}}
     {{end}}
   </ul>
@@ -78,7 +78,7 @@
 <dialog id="collection-rename-dialog">
   <form id="collection-rename-form">
     <input type="hidden" id="collection-rename-prev" name="prev" value="">
-    <p>Rename <strong id="collection-rename-src"></strong></p>
+    <p class="dlg-title">Rename <strong id="collection-rename-src"></strong>{{template "webui/dialog_x"}}</p>
     <div class="field">
       <label>New name (renaming onto an existing collection merges them)</label>
       {{template "suggest_input" dict "Name" "name" "InputID" "collection-rename-input" "Endpoint" "/internal/collection/suggest" "SuggestID" "collection-rename-suggest" "Required" true}}

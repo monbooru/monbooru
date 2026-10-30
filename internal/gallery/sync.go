@@ -157,7 +157,7 @@ func Sync(ctx context.Context, h Handle, maxFileSizeMB int, naming Naming, progr
 	}
 
 	if adopting && !naming.Empty() && len(ingested) > 0 {
-		logx.Infof("sync: first sync of this library, %d file(s) left where they are", len(ingested))
+		logx.Infof("sync: first sync of this library, %d %s left where they are", len(ingested), models.Plural(len(ingested), "file", "files"))
 	} else {
 		nameIngested(ctx, database, bound, naming, ingested, foundPaths)
 	}
@@ -196,7 +196,7 @@ func nameIngested(ctx context.Context, database *db.DB, bound *Boundary, naming 
 		return
 	}
 	for _, id := range ids {
-		newPath, err := naming.Apply(ctx, database, bound, id, "", "")
+		newPath, err := naming.ApplyExisting(ctx, database, bound, id)
 		if err != nil {
 			logx.Warnf("sync: name image %d: %v", id, err)
 			continue

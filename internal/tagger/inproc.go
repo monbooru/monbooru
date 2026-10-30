@@ -22,6 +22,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -29,12 +30,9 @@ import (
 // loadedTagger joins a cached session with this run's config, so
 // threshold edits apply without a session rebuild.
 type loadedTagger struct {
+	*loadedSession
 	cfg        config.TaggerInstance
-	session    *ort.DynamicAdvancedSession
-	labels     []tagLabel
 	candidates []CandidateLabel
-	profile    Profile
-	inputSize  int
 	dispatch   *DispatchTable
 }
 
@@ -71,6 +69,7 @@ type inprocBackend struct {
 	inUse       bool
 	initialized bool
 	provider    string
+	workers     int
 	sessionOpts *ort.SessionOptions
 	epCleanup   func()
 	sessions    map[string]*loadedSession
@@ -92,11 +91,13 @@ func init() {
 	SetBackend(&ipcBackend{})
 }
 
-// Caller must hold b.mu.
-func (b *inprocBackend) satisfies(modelPath string, taggers []TaggerStatus, provider string) bool {
+// Caller must hold b.mu. The worker count joins the check since it also
+// sets the intra-op threads, which only a reload changes.
+func (b *inprocBackend) satisfies(modelPath string, taggers []TaggerStatus, provider string, sessionParallel int) bool {
 	if !b.initialized || b.provider != provider {
 		return false
 	}
+	maxInput := 0
 	for _, t := range taggers {
 		s, ok := b.sessions[t.Name]
 		if !ok {
@@ -117,8 +118,9 @@ func (b *inprocBackend) satisfies(modelPath string, taggers []TaggerStatus, prov
 		if profile.fingerprint() != s.profileFP {
 			return false
 		}
+		maxInput = max(maxInput, s.inputSize)
 	}
-	return true
+	return sessionWorkers(provider, max(1, sessionParallel), maxInput) == b.workers
 }
 
 // Caller must hold b.mu.
@@ -126,8 +128,8 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 	taggers := req.Taggers
 	// Before the signature check, so "" matches a warm "cpu" cache.
 	provider := cmp.Or(req.Provider, "cpu")
-	if b.satisfies(req.ModelPath, taggers, provider) {
-		logx.Infof("tagger: reusing warm cache (%d session(s))", len(b.sessions))
+	if b.satisfies(req.ModelPath, taggers, provider, req.SessionParallel) {
+		logx.Infof("tagger: reusing warm cache (%d %s)", len(b.sessions), models.Plural(len(b.sessions), "session", "sessions"))
 		return nil
 	}
 	if b.initialized {
@@ -135,7 +137,7 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 	}
 
 	mode := strings.ToUpper(provider)
-	logx.Infof("tagger: loading %d session(s) on %s", len(taggers), mode)
+	logx.Infof("tagger: loading %d %s on %s", len(taggers), models.Plural(len(taggers), "session", "sessions"), mode)
 	if provider == "directml" {
 		logx.Warnf("tagger: directml forces parallel=1 (EP is not thread-safe)")
 	}
@@ -162,48 +164,12 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 		}
 	}()
 
-	opts, err := ort.NewSessionOptions()
-	if err != nil {
-		return fmt.Errorf("ort session options: %w", err)
+	type pendingSession struct {
+		name, onnxPath, input, output string
+		loaded                        *loadedSession
 	}
-	b.sessionOpts = opts
-
-	// ORT gives each session every core by default; with parallel workers
-	// that oversubscribes the CPU, so the cores are split between them
-	// and inter-op stays at 1.
-	parallel := max(1, req.SessionParallel)
-	if provider == "directml" {
-		// Run serialises directml, so its one worker gets every core.
-		parallel = 1
-	}
-	intra := max(1, runtime.NumCPU()/parallel)
-	if err := opts.SetIntraOpNumThreads(intra); err != nil {
-		return fmt.Errorf("set intra-op threads: %w", err)
-	}
-	if err := opts.SetInterOpNumThreads(1); err != nil {
-		return fmt.Errorf("set inter-op threads: %w", err)
-	}
-
-	// Under the data path so the compiled-model cache survives a
-	// container restart.
-	epCacheDir := ""
-	if provider == "openvino" {
-		dir := filepath.Join(req.DataPath, ".openvino-cache")
-		if err := os.MkdirAll(dir, 0o755); err == nil {
-			epCacheDir = dir
-		}
-	}
-	cleanup, err := appendExecutionProvider(opts, provider, epCacheDir)
-	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
-		return fmt.Errorf("append execution provider %q: %w", provider, err)
-	}
-	b.epCleanup = cleanup
-	b.provider = provider
-
-	b.sessions = make(map[string]*loadedSession, len(taggers))
+	pending := make([]pendingSession, 0, len(taggers))
+	maxInput := 0
 	for _, t := range taggers {
 		onnxPath := filepath.Join(req.ModelPath, t.Name, t.ModelFile)
 		tagsPath := filepath.Join(req.ModelPath, t.Name, t.TagsFile)
@@ -239,22 +205,77 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 				return fmt.Errorf("ort model for %q: cannot infer input size from dimensions %v", t.Name, inputs[0].Dimensions)
 			}
 		}
-		session, err := ort.NewDynamicAdvancedSession(onnxPath,
-			[]string{inputs[0].Name}, []string{outputs[outIdx].Name}, b.sessionOpts)
+		maxInput = max(maxInput, inputSize)
+		pending = append(pending, pendingSession{
+			name:     t.Name,
+			onnxPath: onnxPath,
+			input:    inputs[0].Name,
+			output:   outputs[outIdx].Name,
+			loaded: &loadedSession{
+				modelFile:  t.ModelFile,
+				tagsFile:   t.TagsFile,
+				modelStamp: modelStamp,
+				tagsStamp:  tagsStamp,
+				profileFP:  profile.fingerprint(),
+				labels:     labels,
+				profile:    profile,
+				inputSize:  inputSize,
+			},
+		})
+	}
+
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return fmt.Errorf("ort session options: %w", err)
+	}
+	b.sessionOpts = opts
+
+	parallel := sessionWorkers(provider, max(1, req.SessionParallel), maxInput)
+	if provider != "directml" && parallel < req.SessionParallel {
+		logx.Infof("tagger: a %d px input runs %d %s", maxInput, parallel, models.Plural(parallel, "worker", "workers"))
+	}
+	b.workers = parallel
+	intra := max(1, runtime.NumCPU()/parallel)
+	if err := opts.SetIntraOpNumThreads(intra); err != nil {
+		return fmt.Errorf("set intra-op threads: %w", err)
+	}
+	if err := opts.SetInterOpNumThreads(1); err != nil {
+		return fmt.Errorf("set inter-op threads: %w", err)
+	}
+	// The arena keeps every concurrent Run's peak working set until the
+	// session is destroyed; plain malloc lets mallocTrim hand it back.
+	if err := opts.SetCpuMemArena(false); err != nil {
+		return fmt.Errorf("disable cpu mem arena: %w", err)
+	}
+
+	// Under the data path so the compiled-model cache survives a
+	// container restart.
+	epCacheDir := ""
+	if provider == "openvino" {
+		dir := filepath.Join(req.DataPath, ".openvino-cache")
+		if err := os.MkdirAll(dir, 0o755); err == nil {
+			epCacheDir = dir
+		}
+	}
+	cleanup, err := appendExecutionProvider(opts, provider, epCacheDir)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return fmt.Errorf("append execution provider %q: %w", provider, err)
+	}
+	b.epCleanup = cleanup
+	b.provider = provider
+
+	b.sessions = make(map[string]*loadedSession, len(pending))
+	for _, p := range pending {
+		session, err := ort.NewDynamicAdvancedSession(p.onnxPath,
+			[]string{p.input}, []string{p.output}, b.sessionOpts)
 		if err != nil {
-			return fmt.Errorf("create ort session for %q: %w", t.Name, err)
+			return fmt.Errorf("create ort session for %q: %w", p.name, err)
 		}
-		b.sessions[t.Name] = &loadedSession{
-			modelFile:  t.ModelFile,
-			tagsFile:   t.TagsFile,
-			modelStamp: modelStamp,
-			tagsStamp:  tagsStamp,
-			profileFP:  profile.fingerprint(),
-			session:    session,
-			labels:     labels,
-			profile:    profile,
-			inputSize:  inputSize,
-		}
+		p.loaded.session = session
+		b.sessions[p.name] = p.loaded
 	}
 	logx.Infof("tagger: cache ready in %s", time.Since(loadStart).Round(10*time.Millisecond))
 	return nil
@@ -316,6 +337,11 @@ func appendExecutionProvider(opts *ort.SessionOptions, provider, cacheDir string
 		// session's lifetime.
 		if err := opts.AddSessionConfigEntry("session.use_device_allocator_for_initializers", "1"); err != nil {
 			return nil, fmt.Errorf("ort session config: %w", err)
+		}
+		// The device arena never shrinks, and the pattern's block would sit
+		// in it beside the first run's chunks, doubling the VRAM held.
+		if err := opts.SetMemPattern(false); err != nil {
+			return nil, fmt.Errorf("set cuda mem pattern: %w", err)
 		}
 		cudaOpts, err := ort.NewCUDAProviderOptions()
 		if err != nil {
@@ -398,6 +424,23 @@ func appendExecutionProvider(opts *ort.SessionOptions, provider, cacheDir string
 	default:
 		return nil, fmt.Errorf("unsupported execution provider %q", provider)
 	}
+}
+
+// tagger.parallel is sized for the catalog's 448 px inputs. Activations
+// grow with the input's pixel count, so a larger input runs fewer workers:
+// on CPU the intra-op threads already fill the cores, and on a GPU every
+// worker's working set shares the device's memory.
+func sessionWorkers(provider string, parallel, inputSize int) int {
+	const refSize = 448
+	if provider == "directml" {
+		// Concurrent Run on one session crashes the EP's allocator
+		// (onnxruntime issue #22147), so its one worker gets every core.
+		return 1
+	}
+	if inputSize <= refSize {
+		return parallel
+	}
+	return max(1, parallel*refSize*refSize/(inputSize*inputSize))
 }
 
 func inferInputSize(dims ort.Shape, layout string) int {
@@ -499,16 +542,13 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 	}
 	loaded := make([]loadedTagger, len(req.Taggers))
 	for i, t := range req.Taggers {
-		s := b.sessions[t.Name]
 		loaded[i] = loadedTagger{
-			cfg:       t.TaggerInstance,
-			session:   s.session,
-			labels:    s.labels,
-			profile:   s.profile,
-			inputSize: s.inputSize,
-			dispatch:  LoadDispatch(req.ModelPath, t.Name, req.CatIDs),
+			loadedSession: b.sessions[t.Name],
+			cfg:           t.TaggerInstance,
+			dispatch:      LoadDispatch(req.ModelPath, t.Name, req.CatIDs),
 		}
 	}
+	workers := b.workers
 	b.inUse = true
 	b.mu.Unlock()
 
@@ -518,6 +558,8 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 		b.lastUsed = time.Now()
 		if req.IdleReleaseMinutes <= 0 {
 			b.teardownLocked()
+		} else {
+			mallocTrim()
 		}
 		b.mu.Unlock()
 	}()
@@ -560,13 +602,7 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 		lt.candidates = cands
 	}
 
-	parallel := max(1, req.Parallel)
-	if req.Provider == "directml" {
-		// Concurrent Run on one session crashes the EP's allocator
-		// (onnxruntime issue #22147).
-		parallel = 1
-	}
-	parallel = min(parallel, len(req.Images))
+	parallel := min(max(1, req.Parallel), workers, len(req.Images))
 
 	results := make([]BackendImageResult, len(req.Images))
 	for i, im := range req.Images {

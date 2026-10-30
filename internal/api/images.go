@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +105,7 @@ func (h *Handler) enrichImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sourceMD5 := strings.TrimSpace(body.SourceMD5)
-	if err := validateMaxLen("source_md5", sourceMD5, maxSourceMD5Len); badRequest(w, err) {
+	if err := validateMaxLen("source_md5", sourceMD5, contract.MaxMD5); badRequest(w, err) {
 		return
 	}
 	verified := true
@@ -224,9 +225,9 @@ func (h *Handler) fetchStatusReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func recordLookupHit(g *library.Gallery, imageID int64, source string) {
-	backend := lookup.BackendBooru
+	backend := contract.LookupBooru
 	if strings.EqualFold(strings.TrimSpace(source), contract.SourcePTR) {
-		backend = lookup.BackendPTR
+		backend = contract.LookupPTR
 	}
 	if err := g.Edit(func(d *db.DB) error { return lookup.RecordInFlight(d, imageID, backend, lookup.ResultHit, time.Now()) }); err != nil {
 		logx.Warnf("api: lookup hit for image %d: %v", imageID, err)
@@ -306,7 +307,7 @@ func (h *Handler) replaceImageFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claimedMD5 := strings.TrimSpace(r.FormValue(contract.FieldMD5))
-	if err := validateMaxLen("md5", claimedMD5, maxSourceMD5Len); badRequest(w, err) {
+	if err := validateMaxLen("md5", claimedMD5, contract.MaxMD5); badRequest(w, err) {
 		return
 	}
 	var tags []string
@@ -591,19 +592,20 @@ func (h *Handler) buildImageResponse(g *library.Gallery, imageID int64) (*imageR
 			resp.Annotations = append(resp.Annotations, aj)
 		}
 	}
-	addLookupState(g, imageID, &resp)
+	addLookupState(g, h.cfg().LookupBackends(g.Name), imageID, &resp)
 	return &resp, nil
 }
 
-func addLookupState(g *library.Gallery, imageID int64, resp *imageResponse) {
-	var on, ptrOn bool
-	if err := g.DB.Read.QueryRow(
-		`SELECT scheduled_lookup, scheduled_lookup_ptr FROM images WHERE id = ?`, imageID,
-	).Scan(&on, &ptrOn); err != nil {
+// The stored next_due_at outlives the phase, the gallery list, the opt-in
+// and the pairing, so it is served only while a run will keep it.
+func addLookupState(g *library.Gallery, scheduled []string, imageID int64, resp *imageResponse) {
+	st, err := lookup.StandingOf(g.DB, imageID)
+	if err != nil {
 		logx.Warnf("buildImageResponse scheduled_lookup: %v", err)
 		return
 	}
-	resp.ScheduledLookup, resp.ScheduledLookupPTR = &on, &ptrOn
+	resp.ScheduledLookup, resp.ScheduledLookupPTR = &st.Booru, &st.PTR
+	optedIn := map[string]bool{contract.LookupPTR: st.PTR, contract.LookupBooru: st.Booru}
 	rows, err := lookup.ForImage(g.DB, imageID)
 	if err != nil {
 		logx.Warnf("buildImageResponse lookup history: %v", err)
@@ -614,7 +616,7 @@ func addLookupState(g *library.Gallery, imageID int64, resp *imageResponse) {
 		if !r.LastAt.IsZero() {
 			entry.LastAt = r.LastAt.Format(time.RFC3339)
 		}
-		if !r.NextDueAt.IsZero() {
+		if st.Candidate && optedIn[backend] && slices.Contains(scheduled, backend) && !r.NextDueAt.IsZero() {
 			entry.NextDueAt = r.NextDueAt.Format(time.RFC3339)
 		}
 		if resp.Lookup == nil {
@@ -718,7 +720,7 @@ func (h *Handler) patchImage(w http.ResponseWriter, r *http.Request) {
 		setHome = true
 	}
 	flags := map[gallery.ImageFlag]*bool{gallery.FlagFavorited: body.IsFavorited, gallery.FlagInbox: body.IsInbox}
-	lookups := map[string]*bool{lookup.BackendBooru: body.ScheduledLookup, lookup.BackendPTR: body.ScheduledLookupPTR}
+	lookups := map[string]*bool{contract.LookupBooru: body.ScheduledLookup, contract.LookupPTR: body.ScheduledLookupPTR}
 	if body.IsFavorited == nil && body.IsInbox == nil && body.ScheduledLookup == nil && body.ScheduledLookupPTR == nil && !setHome && !setSrc {
 		contract.WriteError(w, http.StatusBadRequest, "invalid_request", "no editable fields supplied")
 		return
@@ -780,7 +782,7 @@ func checkCreateProvenance(w http.ResponseWriter, in *createInput, p provenanceJ
 		return false
 	}
 	in.provenance = prov
-	if err := validateMaxLen("md5", in.md5, maxSourceMD5Len); badRequest(w, err) {
+	if err := validateMaxLen("md5", in.md5, contract.MaxMD5); badRequest(w, err) {
 		return false
 	}
 	return !badRequest(w, validateCollection(in.collection, in.collectionOrder))
@@ -1118,28 +1120,10 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		cfg := h.cfg()
 		if !tagger.IsAvailable(cfg) {
 			autotagNote = "autotag skipped: tagger not available"
+		} else if _, selErr := tagger.SelectForGallery(cfg, g.Name, in.taggerName); selErr != nil {
+			autotagNote = "autotag skipped: " + selErr.Error()
 		} else {
-			selected, selErr := tagger.SelectForGallery(h.cfg(), g.Name, in.taggerName)
-			if selErr != nil {
-				autotagNote = "autotag skipped: " + selErr.Error()
-			} else if err := h.jobs.Start(models.JobTypeAutotag); err != nil {
-				autotagNote = "autotag skipped: a job is already running"
-			} else {
-				h.jobs.Update(0, 1, "starting (loading model may take a few seconds)…")
-				imgID := img.ID
-				peak := func(string) {}
-				if h.memoryMark != nil {
-					peak = h.memoryMark()
-				}
-				go func() {
-					ctx := h.jobs.Context()
-					skipped, err := tagger.RunWithTaggers(ctx, g.Handle, cfg, []int64{imgID}, selected, h.jobs, cfg.Tagger.ExecutionProvider)
-					if finished, _ := tagger.SettleImage(ctx, h.jobs, imgID, skipped, err); finished {
-						peak(fmt.Sprintf("image #%d", imgID))
-					}
-				}()
-				autotagNote = "autotag job started"
-			}
+			autotagNote = h.queueAutotag(g.Name, in.taggerName, img.ID)
 		}
 	}
 
@@ -1233,7 +1217,9 @@ func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
 		sq.OrderCollection = search.PinnedCollectionName(expr)
 	}
 
-	result, err := search.Execute(context.Background(), g.Source(), sq)
+	src := g.Source()
+	src.LookupBackends = h.cfg().LookupBackends(g.Name)
+	result, err := search.Execute(context.Background(), src, sq)
 	if serverError(w, err) {
 		return
 	}

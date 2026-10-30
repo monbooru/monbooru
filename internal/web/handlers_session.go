@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"math"
 	"net/http"
 	"net/url"
@@ -55,7 +56,7 @@ type sessionImageView struct {
 }
 
 func (s *Server) sessionPage(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -222,16 +223,10 @@ func loadCompareFacts(cx *library.Gallery, leftID, rightID int64) (relationCompa
 	if err := scanCompareFacts(cx, rightID, &right); err != nil {
 		return left, right, err
 	}
-	leftUnique, rightUnique, err := loadTagDelta(cx, leftID, rightID)
-	if err != nil {
-		return left, right, err
-	}
 	const shown = 5
-	left.UniqueTagsTotal = len(leftUnique)
-	right.UniqueTagsTotal = len(rightUnique)
-	left.UniqueTags = leftUnique[:min(shown, len(leftUnique))]
-	right.UniqueTags = rightUnique[:min(shown, len(rightUnique))]
-	return left, right, nil
+	var err error
+	left.UniqueTags, right.UniqueTags, left.UniqueTagsTotal, right.UniqueTagsTotal, err = loadTagDelta(cx, leftID, rightID, shown)
+	return left, right, err
 }
 
 func scanCompareFacts(cx *library.Gallery, id int64, dst *relationCompareFacts) error {
@@ -250,13 +245,15 @@ func scanCompareFacts(cx *library.Gallery, id int64, dst *relationCompareFacts) 
 	return nil
 }
 
-func loadTagDelta(cx *library.Gallery, leftID, rightID int64) (left []compareTag, right []compareTag, err error) {
+// limit caps each side's list; the totals count every tag the side holds alone.
+func loadTagDelta(cx *library.Gallery, leftID, rightID int64, limit int) (left, right []compareTag, leftTotal, rightTotal int, err error) {
 	type deltaRow struct {
 		owner int64
+		total int
 		compareTag
 	}
 	rows, err := db.QueryAll(cx.DB.Read, db.ScanRow(func(r *deltaRow) []any {
-		return []any{&r.owner, &r.Name, &r.Category, &r.Color}
+		return []any{&r.owner, &r.total, &r.Name, &r.Category, &r.Color}
 	}), `
 		WITH delta AS (
 			SELECT it.tag_id, MAX(it.image_id) AS owner_id
@@ -267,26 +264,33 @@ func loadTagDelta(cx *library.Gallery, leftID, rightID int64) (left []compareTag
 			  AND (tc.name IS NULL OR tc.name != 'rating')
 			GROUP BY it.tag_id
 			HAVING COUNT(*) = 1
+		), ranked AS (
+			SELECT delta.owner_id, t.name, COALESCE(tc.name, '') AS category, COALESCE(tc.color, '') AS color,
+			       ROW_NUMBER() OVER (PARTITION BY delta.owner_id ORDER BY t.name) AS rn,
+			       COUNT(*) OVER (PARTITION BY delta.owner_id) AS total
+			FROM delta
+			JOIN tags t ON t.id = delta.tag_id
+			LEFT JOIN tag_categories tc ON tc.id = t.category_id
 		)
-		SELECT delta.owner_id, t.name, COALESCE(tc.name, ''), COALESCE(tc.color, '')
-		FROM delta
-		JOIN tags t ON t.id = delta.tag_id
-		LEFT JOIN tag_categories tc ON tc.id = t.category_id
-		ORDER BY t.name
-		LIMIT 200`, leftID, rightID)
+		SELECT owner_id, total, name, category, color
+		FROM ranked
+		WHERE rn <= ?
+		ORDER BY owner_id, rn`, leftID, rightID, limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	for _, r := range rows {
 		r.Color = tags.SafeCategoryColor(r.Color)
 		switch r.owner {
 		case leftID:
 			left = append(left, r.compareTag)
+			leftTotal = r.total
 		case rightID:
 			right = append(right, r.compareTag)
+			rightTotal = r.total
 		}
 	}
-	return left, right, nil
+	return left, right, leftTotal, rightTotal, nil
 }
 
 func countTags(cx *library.Gallery, id int64) int {
@@ -333,15 +337,17 @@ func (s *Server) sessionDecidePost(w http.ResponseWriter, r *http.Request) {
 
 	// Left is the original, the parent or the source; the symmetric kinds
 	// ignore the order.
-	add, known := relationAdders[decision]
-	if !known {
+	var err error
+	if decision == "duplicate" {
+		err = cx.RelationsSvc.AddDuplicateOf(left, right)
+	} else {
+		err = cx.RelationsSvc.Add(decision, left, right)
+	}
+	if errors.Is(err, relations.ErrUnknownKind) {
 		flashStatus(w, http.StatusBadRequest, "Unknown decision.")
 		return
 	}
-	if decision == "duplicate" {
-		add = (*relations.Service).AddDuplicateOf
-	}
-	if err := add(cx.RelationsSvc, left, right); err != nil {
+	if err != nil {
 		writeRelationError(w, err)
 		return
 	}

@@ -278,25 +278,30 @@ func (w *Watcher) linkWorthFollowing(dir string) bool {
 	return !PathInside(root, target) && !PathInside(target, root) && !w.boundary().leadsOut(target)
 }
 
-// These jobs write image_paths and image_tags in their own transactions; an
-// ingest beside them would race their UNIQUE constraints. A timer checks
-// again on firing, as it may have been armed before the job started.
+// SuppressesIngest names the jobs the watcher pauses for. They write
+// image_paths and image_tags in their own transactions; an ingest beside them
+// would race their UNIQUE constraints. prune-dirs: every directory it unlinks
+// fires a Remove with no row behind it.
+func SuppressesIngest(jobType string) bool {
+	switch jobType {
+	case models.JobTypeSync, models.JobTypeMove, models.JobTypeTransfer, models.JobTypeMerge,
+		models.JobTypeDelete, models.JobTypeTag, models.JobTypePruneDirs:
+		return true
+	}
+	return false
+}
+
+// A timer checks again on firing, as it may have been armed before the job
+// started.
 func (w *Watcher) jobSuppressesIngest() bool {
 	if w.jobs == nil {
 		return false
 	}
 	st := w.jobs.Get()
-	if st == nil || !st.Running {
+	if st == nil || !st.Running || !SuppressesIngest(st.JobType) {
 		return false
 	}
-	// prune-dirs: every directory it unlinks fires a Remove with no row
-	// behind it.
-	switch st.JobType {
-	case models.JobTypeSync, models.JobTypeMove, models.JobTypeTransfer, models.JobTypeMerge,
-		models.JobTypeDelete, models.JobTypeTag, models.JobTypePruneDirs:
-		return len(st.Galleries) == 0 || slices.Contains(st.Galleries, w.galleryName)
-	}
-	return false
+	return len(st.Galleries) == 0 || slices.Contains(st.Galleries, w.galleryName)
 }
 
 // shutdown waits out fired ingests so the caller can close the DB once
@@ -455,6 +460,24 @@ func (w *Watcher) reconcileVanished(path string) {
 	w.markFolderMissing(path)
 }
 
+func (w *Watcher) WaitIngests(ctx context.Context) error {
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		w.mu.Lock()
+		n := w.ingesting
+		w.mu.Unlock()
+		if n == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
 func (w *Watcher) ingestsDue() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -547,7 +570,7 @@ func (w *Watcher) renameIngested(naming Naming, id int64, path string) string {
 	w.claimSelfMove(path)
 	// Not cancellable, like the ingest before it: a rename cut short at
 	// shutdown would strand the file half-filed.
-	newPath, err := naming.Apply(context.Background(), w.db, w.boundary(), id, "", "")
+	newPath, err := naming.ApplyExisting(context.Background(), w.db, w.boundary(), id)
 	if err != nil {
 		logx.Warnf("watcher: name %q: %v", path, err)
 		return path
@@ -651,7 +674,7 @@ func (w *Watcher) markFolderMissing(dir string) {
 		logx.Warnf("watcher: mark missing under %q: %v", dir, err)
 		return
 	}
-	logx.Infof("watcher: %q left, marked %d image(s) missing", dir, marked)
+	logx.Infof("watcher: %q left, marked %d %s missing", dir, marked, models.Plural(marked, "image", "images"))
 	if marked > 0 {
 		w.event(fmt.Sprintf("removed %d %s in %s", marked, models.Plural(marked, "image", "images"), filepath.Base(dir)))
 	}

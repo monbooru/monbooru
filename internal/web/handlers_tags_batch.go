@@ -1,6 +1,7 @@
 package web
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/tags"
 )
 
 // Capped at three: the job summary is one line and the only place they show.
@@ -130,10 +133,11 @@ func (s *Server) batchTagCategoryPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	merge := r.FormValue("merge") == "1"
-	s.startTagScopeRun(w, r, func(ids []int64) { s.runBatchTagCategory(ids, catID, merge) })
+	keep := r.FormValue("keep_alias") == "1"
+	s.startTagScopeRun(w, r, func(ids []int64) { s.runBatchTagCategory(ids, catID, merge, keep) })
 }
 
-func (s *Server) runBatchTagCategory(ids []int64, catID int64, merge bool) {
+func (s *Server) runBatchTagCategory(ids []int64, catID int64, merge, keep bool) {
 	mergedCount := 0
 	changed, skipped, reasons, cancelled := s.runTagScopeLoop(ids, "moving tags…", 50, func(id int64) (bool, error) {
 		var current int64
@@ -141,13 +145,17 @@ func (s *Server) runBatchTagCategory(ids []int64, catID int64, merge bool) {
 			return false, nil
 		}
 		if !merge {
-			if err := s.tagSvc().ChangeTagCategory(id, catID); err != nil {
+			move := s.tagSvc().ChangeTagCategory
+			if keep {
+				move = s.tagSvc().ChangeTagCategoryKeepAlias
+			}
+			if err := move(id, catID); err != nil {
 				logx.Warnf("batch category tag %d: %v", id, err)
 				return false, err
 			}
 			return true, nil
 		}
-		didMerge, err := s.tagSvc().ChangeTagCategoryMerge(id, catID)
+		didMerge, err := s.tagSvc().ChangeTagCategoryMerge(id, catID, keep)
 		if err != nil {
 			logx.Warnf("batch category tag %d: %v", id, err)
 			return false, err
@@ -185,11 +193,8 @@ func (s *Server) batchTagAliasPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runBatchTagAlias(ids []int64, canonID int64) {
+	ids = slices.DeleteFunc(ids, func(id int64) bool { return id == canonID })
 	aliased, skipped, reasons, cancelled := s.runTagScopeLoop(ids, "aliasing tags…", 50, func(id int64) (bool, error) {
-		if id == canonID {
-			// The canonical is in the scope too; skip it without a refusal.
-			return false, nil
-		}
 		if err := s.tagSvc().MergeTags(id, canonID); err != nil {
 			logx.Warnf("batch alias tag %d: %v", id, err)
 			return false, err
@@ -225,22 +230,46 @@ func (s *Server) batchTagImplyPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	remove := r.FormValue("mode") == "remove"
-	target, msg := s.resolveCanonicalTagInput(r.FormValue("target"), !remove)
-	if msg != "" {
-		flashStatus(w, http.StatusBadRequest, msg)
+	tokens, err := splitTagTokens(r.FormValue("target"))
+	if err != nil {
+		flashStatus(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.startTagScopeRun(w, r, func(ids []int64) {
-		targetID, err := s.canonicalID(target)
-		if err != nil {
-			s.jobs.Fail(err.Error())
+	if len(tokens) == 0 {
+		flashStatus(w, http.StatusBadRequest, "Tag name is required.")
+		return
+	}
+	// Every token resolves before the job starts: one bad token refuses the
+	// run rather than leaving it half applied.
+	targets := make([]canonicalRef, 0, len(tokens))
+	for _, token := range tokens {
+		ref, msg := s.resolveCanonicalTagInput(token, !remove)
+		if msg != "" {
+			if len(tokens) > 1 {
+				msg = token + ": " + msg
+			}
+			flashStatus(w, http.StatusBadRequest, msg)
 			return
 		}
-		s.runBatchTagImply(ids, targetID, remove)
+		targets = append(targets, ref)
+	}
+	s.startTagScopeRun(w, r, func(ids []int64) {
+		var targetIDs []int64
+		for _, ref := range targets {
+			id, err := s.canonicalID(ref)
+			if err != nil {
+				s.jobs.Fail(err.Error())
+				return
+			}
+			if !slices.Contains(targetIDs, id) {
+				targetIDs = append(targetIDs, id)
+			}
+		}
+		s.runBatchTagImply(ids, targetIDs, remove)
 	})
 }
 
-func (s *Server) runBatchTagImply(ids []int64, targetID int64, remove bool) {
+func (s *Server) runBatchTagImply(ids, targetIDs []int64, remove bool) {
 	ctx := s.jobs.Context()
 	verb := "declaring implications…"
 	if remove {
@@ -249,50 +278,321 @@ func (s *Server) runBatchTagImply(ids []int64, targetID int64, remove bool) {
 
 	var removeClosure []int64
 	if remove {
-		var err error
-		removeClosure, err = s.tagSvc().ImplicationClosure(targetID)
-		if err != nil {
-			s.jobs.Fail(err.Error())
-			return
+		for _, targetID := range targetIDs {
+			closure, err := s.tagSvc().ImplicationClosure(targetID)
+			if err != nil {
+				s.jobs.Fail(err.Error())
+				return
+			}
+			for _, id := range closure {
+				if !slices.Contains(removeClosure, id) {
+					removeClosure = append(removeClosure, id)
+				}
+			}
 		}
 	}
 
-	reapplied := 0
+	edges, reapplied := 0, 0
+	var partial skipReasons
 	changed, skipped, reasons, cancelled := s.runTagScopeLoop(ids, verb, 10, func(parentID int64) (bool, error) {
-		if parentID == targetID {
-			return false, nil
-		}
-		if remove {
-			if err := s.tagSvc().RemoveImplication(parentID, targetID); err != nil {
-				return false, err
+		touched := 0
+		var refusal error
+		for _, targetID := range targetIDs {
+			if targetID == parentID {
+				continue
 			}
-			if _, err := s.tagSvc().SweepImplicationRemoval(ctx, parentID, removeClosure, nil); err != nil {
-				logx.Warnf("batch imply sweep parent %d: %v", parentID, err)
+			var err error
+			if remove {
+				err = s.tagSvc().RemoveImplication(parentID, targetID)
+			} else {
+				var created bool
+				if created, err = s.tagSvc().AddImplicationFrom(parentID, targetID, "user"); err == nil && !created {
+					reapplied++
+				}
 			}
-			return true, nil
+			if err != nil {
+				logx.Warnf("batch imply parent %d -> %d: %v", parentID, targetID, err)
+				if refusal == nil {
+					refusal = err
+				}
+				continue
+			}
+			touched++
 		}
-		created, err := s.tagSvc().AddImplicationFrom(parentID, targetID, "user")
-		if err != nil {
-			logx.Warnf("batch imply parent %d: %v", parentID, err)
-			return false, err
+		edges += touched
+		if touched > 0 {
+			var err error
+			if remove {
+				_, err = s.tagSvc().SweepImplicationRemoval(ctx, parentID, removeClosure, nil)
+			} else {
+				_, err = s.tagSvc().PropagateImplication(ctx, parentID, nil)
+			}
+			if err != nil {
+				logx.Warnf("batch imply walk parent %d: %v", parentID, err)
+			}
 		}
-		if !created {
-			reapplied++
+		if refusal != nil && touched == 0 {
+			return false, refusal
 		}
-		if _, err := s.tagSvc().PropagateImplication(ctx, parentID, nil); err != nil {
-			logx.Warnf("batch imply fan-out parent %d: %v", parentID, err)
+		if refusal != nil {
+			partial.add(refusal)
 		}
-		return true, nil
+		return touched > 0, nil
 	})
+	for _, msg := range partial.seen {
+		reasons.add(errors.New(msg))
+	}
 
+	names := make([]string, len(targetIDs))
+	for i, id := range targetIDs {
+		names[i] = s.qualifiedTagName(id)
+	}
 	noun := "declared"
 	if remove {
 		noun = "removed"
 	}
-	summary := fmt.Sprintf("%s %d implication%s of %s", noun, changed-reapplied, plural(changed-reapplied), s.qualifiedTagName(targetID))
+	summary := fmt.Sprintf("%s %d implication%s of %s", noun, edges-reapplied, plural(edges-reapplied), strings.Join(names, ", "))
 	if reapplied > 0 {
 		summary += fmt.Sprintf(", re-applied %d", reapplied)
 	}
 	summary = skippedSuffix(summary, skipped)
 	s.finishTagScopeJob(changed, reasons, cancelled, "implication batch", summary)
+}
+
+func cleanTagName(name, chars string) string {
+	return strings.Map(func(r rune) rune {
+		if strings.ContainsRune(chars, r) {
+			return -1
+		}
+		return r
+	}, name)
+}
+
+type cleanStep struct {
+	ID      int64
+	Name    string
+	Cleaned string
+	// rename, merge or skip; empty when the name holds none of the characters.
+	Action string
+	Into   int64
+	// The merge target's name, or why the tag is skipped.
+	Note string
+}
+
+// planClean decides one tag's fate against the catalog as it stands, plus
+// planned, the names earlier steps of a dry run would have taken.
+func (s *Server) planClean(t *models.Tag, chars string, planned map[string]int64) cleanStep {
+	step := cleanStep{ID: t.ID, Name: t.Name}
+	cleaned := cleanTagName(t.Name, chars)
+	if cleaned == t.Name {
+		return step
+	}
+	step.Action = "skip"
+	switch {
+	case t.IsAlias:
+		step.Note = "an alias"
+		return step
+	case t.CategoryID == s.tagSvc().RatingCategoryID():
+		step.Note = "a rating"
+		return step
+	}
+	normalized, err := tags.ValidateTagName(cleaned)
+	if err != nil {
+		step.Note = err.Error()
+		return step
+	}
+	step.Cleaned = normalized
+	key := strconv.FormatInt(t.CategoryID, 10) + ":" + normalized
+	into, ok := planned[key]
+	if !ok {
+		var clash int64
+		switch err := s.db().Read.QueryRow(
+			`SELECT id, COALESCE(canonical_tag_id, id) FROM tags WHERE name = ? AND category_id = ? AND id != ?`,
+			normalized, t.CategoryID, t.ID,
+		).Scan(&clash, &into); {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			step.Note = err.Error()
+			return step
+		}
+	}
+	switch into {
+	case 0:
+		step.Action = "rename"
+		if planned != nil {
+			planned[key] = t.ID
+		}
+	case t.ID:
+		step.Note = "its own alias holds " + normalized
+	default:
+		step.Action, step.Into = "merge", into
+		step.Note = s.qualifiedTagName(into)
+		if ok {
+			step.Note = t.CategoryName + ":" + normalized
+		}
+	}
+	return step
+}
+
+const cleanPreviewRows = 50
+
+func (s *Server) batchTagCleanPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	chars := r.FormValue("chars")
+	if strings.TrimSpace(chars) == "" {
+		if r.FormValue("check") == "1" {
+			return
+		}
+		flashStatus(w, http.StatusBadRequest, "Type the characters to remove.")
+		return
+	}
+	if r.FormValue("check") == "1" {
+		s.batchTagCleanPreview(w, r, chars)
+		return
+	}
+	s.startTagScopeRun(w, r, func(ids []int64) { s.runBatchTagClean(ids, chars) })
+}
+
+func (s *Server) batchTagCleanPreview(w http.ResponseWriter, r *http.Request, chars string) {
+	ids, err := s.resolveTagScope(r)
+	if err != nil {
+		writeInlineFlash(w, "err", err.Error())
+		return
+	}
+	data := struct {
+		Steps                                   []cleanStep
+		Renames, Merges, Skips, Unchanged, More int
+	}{}
+	planned := map[string]int64{}
+	err = db.Chunked(ids, 500, func(chunk []int64) error {
+		if err := r.Context().Err(); err != nil {
+			return err
+		}
+		found, err := s.tagSvc().GetTags(chunk)
+		if err != nil {
+			return err
+		}
+		for _, id := range chunk {
+			t := found[id]
+			if t == nil {
+				continue
+			}
+			step := s.planClean(t, chars, planned)
+			switch step.Action {
+			case "":
+				data.Unchanged++
+				continue
+			case "rename":
+				data.Renames++
+			case "merge":
+				data.Merges++
+			default:
+				data.Skips++
+			}
+			if len(data.Steps) == cleanPreviewRows {
+				data.More++
+				continue
+			}
+			data.Steps = append(data.Steps, step)
+		}
+		return nil
+	})
+	if r.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		writeInlineFlash(w, "err", err.Error())
+		return
+	}
+	s.renderTemplate(w, "partials/tag_clean_preview.html", data)
+}
+
+// A merge leaves the old name behind as an alias, and a rename keeps it
+// as one, so a source still sending the old spelling lands on the
+// cleaned tag.
+func (s *Server) runBatchTagClean(ids []int64, chars string) {
+	renamed, merged := 0, 0
+	changed, skipped, reasons, cancelled := s.runTagScopeLoop(ids, "cleaning names…", 20, func(id int64) (bool, error) {
+		t, err := s.tagSvc().GetTag(id)
+		if err != nil {
+			return false, err
+		}
+		switch step := s.planClean(t, chars, nil); step.Action {
+		case "rename":
+			if err := s.tagSvc().RenameTagKeepAlias(id, step.Cleaned); err != nil {
+				return false, err
+			}
+			renamed++
+		case "merge":
+			if err := s.tagSvc().MergeTags(id, step.Into); err != nil {
+				return false, err
+			}
+			merged++
+		default:
+			return false, nil
+		}
+		return true, nil
+	})
+	summary := fmt.Sprintf("renamed %d tag%s, merged %d", renamed, plural(renamed), merged)
+	s.finishTagScopeJob(changed, reasons, cancelled, "name cleanup", skippedSuffix(summary, skipped))
+}
+
+func (s *Server) batchTagDistinctPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	ids, err := s.resolveTagScope(r)
+	if err != nil {
+		flashHeaderErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if r.FormValue("mode") == "remove" {
+		n, err := s.tagSvc().UnmarkDistinct(ids)
+		if err != nil {
+			flashHeaderErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if n == 0 {
+			flashHeaderErr(w, http.StatusBadRequest, "None of the selected tags is marked distinct.")
+			return
+		}
+		hxDone(w, r, fmt.Sprintf("Unmarked %d distinct pair%s.", n, plural(n)), "", "/tags")
+		return
+	}
+	marked, skipped, err := s.tagSvc().MarkDistinct(ids)
+	if err != nil {
+		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if marked == 0 {
+		msg := "The selected tags are already marked distinct."
+		if len(ids)-skipped < 2 {
+			msg = "Select two or more tags that share a name."
+		}
+		flashHeaderErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	msg := fmt.Sprintf("Marked %d pair%s distinct.", marked, plural(marked))
+	if skipped > 0 {
+		msg += fmt.Sprintf(" Skipped %d tag%s with no same-name tag selected.", skipped, plural(skipped))
+	}
+	hxDone(w, r, msg, "", "/tags")
+}
+
+func (s *Server) unmarkTagDistinctDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt64(w, r, "id")
+	if !ok {
+		return
+	}
+	otherID, ok := pathInt64(w, r, "otherID")
+	if !ok {
+		return
+	}
+	if _, err := s.tagSvc().UnmarkDistinctPair(id, otherID); err != nil {
+		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	hxDone(w, r, "Unmarked: the pair counts as a conflict again.", "", fmt.Sprintf("/tags/%d", id))
 }

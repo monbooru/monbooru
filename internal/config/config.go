@@ -425,6 +425,24 @@ func (sc ScheduleConfig) RunsOn(action, gallery string) bool {
 	return !listed || slices.Contains(names, gallery)
 }
 
+func (cfg *Config) MonloaderPaired() bool {
+	return cfg.Auth.Tokens.Paired(contract.AppMonloader) != nil
+}
+
+func (cfg *Config) LookupBackends(gallery string) []string {
+	if !cfg.MonloaderPaired() {
+		return nil
+	}
+	var out []string
+	if cfg.Schedule.RunsOn(ActionLookupPTR, gallery) {
+		out = append(out, contract.LookupPTR)
+	}
+	if cfg.Schedule.RunsOn(ActionLookupBooru, gallery) {
+		out = append(out, contract.LookupBooru)
+	}
+	return out
+}
+
 var defaultIgnore = []string{
 	"@eaDir", "#recycle", "#snapshot", "@Recycle", ".@__thumb", "$RECYCLE.BIN",
 	".Trash-*", ".Trashes", ".zfs", ".snapshots", ".stversions", ".thumbnails", "._*",
@@ -538,7 +556,7 @@ func load(path, base string, seed func(*Config)) (*Config, error) {
 			return nil, fmt.Errorf("parsing config file %q: %w", path, err)
 		}
 		if keys := md.Undecoded(); len(keys) > 0 {
-			logx.Warnf("config: ignoring unknown key(s) in %s: %v", path, keys)
+			logx.Warnf("config: ignoring unknown %s in %s: %v", models.Plural(len(keys), "key", "keys"), path, keys)
 		}
 		if base != "" && len(cfg.Galleries) == 0 {
 			cfg.Galleries = Default().Galleries
@@ -760,6 +778,13 @@ func parseString(v string) (string, error) { return v, nil }
 
 func parseList(v string) ([]string, error) { return strings.Split(v, ","), nil }
 
+func parseProvider(v string) (string, error) {
+	if !IsValidExecutionProvider(v) {
+		return "", fmt.Errorf("must be one of %v", ValidExecutionProviders)
+	}
+	return v, nil
+}
+
 func applyEnvOverrides(cfg *Config) {
 	envOverride(cfg, "server.bind_address", func(c *Config) *string { return &c.Server.BindAddress }, parseString)
 	envOverride(cfg, "server.base_url", func(c *Config) *string { return &c.Server.BaseURL }, parseString)
@@ -771,7 +796,7 @@ func applyEnvOverrides(cfg *Config) {
 	envOverride(cfg, "gallery.max_file_size_mb", func(c *Config) *int { return &c.Gallery.MaxFileSizeMB }, strconv.Atoi)
 	envOverride(cfg, "gallery.auto_meta_tags", func(c *Config) *bool { return &c.Gallery.AutoMetaTags }, strconv.ParseBool)
 	provider := func(c *Config) *string { return &c.Tagger.ExecutionProvider }
-	envOverride(cfg, "tagger.execution_provider", provider, parseString)
+	envOverride(cfg, "tagger.execution_provider", provider, parseProvider)
 	// Deployments that still export the old MONBOORU_TAGGER_USE_CUDA keep
 	// the GPU.
 	if raw := os.Getenv("MONBOORU_TAGGER_USE_CUDA"); raw != "" && os.Getenv("MONBOORU_TAGGER_EXECUTION_PROVIDER") == "" {
@@ -868,13 +893,15 @@ func validate(cfg *Config) error {
 	if cfg.Schedule.Time == "" {
 		cfg.Schedule.Time = defaultScheduleTime
 	} else if err := ValidateScheduleTime(cfg.Schedule.Time); err != nil {
-		return err
+		logx.Warnf("config: %v; using %s", err, defaultScheduleTime)
+		cfg.Schedule.Time = defaultScheduleTime
 	}
 	cfg.Schedule.Mode = cfg.Schedule.EffectiveMode()
 	if cfg.Tagger.ExecutionProvider == "" {
 		cfg.Tagger.ExecutionProvider = defaultExecutionProvider
 	} else if !IsValidExecutionProvider(cfg.Tagger.ExecutionProvider) {
-		return fmt.Errorf("tagger.execution_provider %q must be one of %v", cfg.Tagger.ExecutionProvider, ValidExecutionProviders)
+		logx.Warnf("config: tagger.execution_provider %q must be one of %v; using %s", cfg.Tagger.ExecutionProvider, ValidExecutionProviders, defaultExecutionProvider)
+		cfg.Tagger.ExecutionProvider = defaultExecutionProvider
 	}
 	// The API divides by it, so zero would panic.
 	if cfg.UI.PageSize <= 0 {

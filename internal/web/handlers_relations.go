@@ -14,9 +14,11 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/db"
+	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/relations"
+	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/session"
 )
@@ -43,18 +45,17 @@ func (s *Server) relatedEntriesGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load relations", http.StatusInternalServerError)
 		return
 	}
-	siblings, sErr := loadCollectionSiblings(cx, id)
-	if sErr != nil {
-		logx.Warnf("collection siblings load %d: %v", id, sErr)
+	navs, nErr := gallery.CollectionNavs(cx.DB, id, resolveCeiling(r, cx).RankFilter(), relatedPanelCap)
+	if nErr != nil {
+		logx.Warnf("collection navs load %d: %v", id, nErr)
 	}
-	siblings = siblings[:min(len(siblings), relatedPanelCap)]
 	tiles := flattenRelationsForPanel(rels, id)
 	paths := loadImagePaths(r.Context(), cx.DB, cx.Boundary(), id)
 	back := parseBackContext(r)
 	s.renderTemplate(w, "partials/related_entries.html", map[string]any{
 		"ImageID":       id,
 		"Tiles":         tiles,
-		"Collection":    siblings,
+		"Collections":   collectionNavViews(navs, id, s.pageSize(r)),
 		"ImagePaths":    paths,
 		"CSRFToken":     s.sessions.CSRFToken(session.FromContext(r.Context())),
 		"ActiveGallery": s.activeGallery(),
@@ -65,23 +66,72 @@ func (s *Server) relatedEntriesGet(w http.ResponseWriter, r *http.Request) {
 
 const relatedPanelCap = 6
 
+type collectionNavView struct {
+	Name, Query      string
+	Rank, Total      int
+	PrevURL, NextURL string
+	Tiles            []collectionTileView
+}
+
+type collectionTileView struct {
+	ID    int64
+	Order *int
+	URL   string
+}
+
+// Every link opens in the collection's own search, placed on the gallery
+// page that holds it, so prev / next then walk the collection.
+func collectionNavViews(navs []gallery.CollectionNav, self int64, pageSize int) []collectionNavView {
+	var views []collectionNavView
+	for _, nav := range navs {
+		if nav.Total < 2 {
+			continue
+		}
+		q := `collection:"` + search.QuoteValue(nav.Name) + `"`
+		selfAt := slices.IndexFunc(nav.Window, func(m gallery.CollectionSample) bool { return m.ID == self })
+		v := collectionNavView{Name: nav.Name, Query: q, Rank: nav.Rank, Total: nav.Total}
+		for i, m := range nav.Window {
+			u := collectionStepURL(m.ID, q, nav.Rank-selfAt+i, pageSize)
+			v.Tiles = append(v.Tiles, collectionTileView{ID: m.ID, Order: m.Order, URL: u})
+			switch i {
+			case selfAt - 1:
+				v.PrevURL = u
+			case selfAt + 1:
+				v.NextURL = u
+			}
+		}
+		views = append(views, v)
+	}
+	return views
+}
+
+func collectionStepURL(id int64, q string, rank, pageSize int) string {
+	v := backContext{Q: q, Sort: "order", Order: "asc", Page: strconv.Itoa((rank-1)/pageSize + 1)}.URLValues()
+	v.Set("back_idx", strconv.Itoa((rank-1)%pageSize))
+	return fmt.Sprintf("/images/%d?%s", id, v.Encode())
+}
+
 type collectionSibling struct {
 	ID     int64
 	Series string
 	Order  *int64
 }
 
-func loadCollectionSiblings(cx *library.Gallery, imageID int64) ([]collectionSibling, error) {
+func loadCollectionSiblings(cx *library.Gallery, imageID int64, ceiling *Ceiling) ([]collectionSibling, error) {
+	under, args := "", []any{imageID, imageID}
+	if rank, active := ceiling.RankCeiling(); active {
+		under, args = " AND i.rating_rank <= ?", append(args, rank)
+	}
 	return db.QueryAll(cx.DB.Read, db.ScanRow(func(sib *collectionSibling) []any {
 		return []any{&sib.ID, &sib.Series, &sib.Order}
 	}), `SELECT jc.image_id, jc.name, jc.position
 		 FROM image_collections self
 		 JOIN image_collections jc ON jc.name = self.name
 		 JOIN images i ON i.id = jc.image_id
-		 WHERE self.image_id = ? AND jc.image_id != ? AND i.is_missing = 0
+		 WHERE self.image_id = ? AND jc.image_id != ? AND i.is_missing = 0`+under+`
 		 ORDER BY jc.name, jc.position IS NULL, jc.position, jc.image_id
 		 LIMIT 200`,
-		imageID, imageID)
+		args...)
 }
 
 func flattenRelationsForPanel(rels *relations.ImageRelations, self int64) []relatedTile {
@@ -132,7 +182,7 @@ func (s *Server) imageRelationsPage(w http.ResponseWriter, r *http.Request) {
 		s.notFoundHandler(w, r)
 		return
 	}
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -147,7 +197,7 @@ func (s *Server) imageRelationsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load relations", http.StatusInternalServerError)
 		return
 	}
-	siblings, sErr := loadCollectionSiblings(cx, id)
+	siblings, sErr := loadCollectionSiblings(cx, id, resolveCeiling(r, cx))
 	if sErr != nil {
 		logx.Warnf("relations page collection siblings %d: %v", id, sErr)
 	}
@@ -325,13 +375,12 @@ func (s *Server) recomputePhashPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
 	if _, err := cx.RecomputePhash(r.Context(), id); err != nil {
 		logx.Warnf("recompute phash %d: %v", id, err)
-		// No refresh here, or the reload would wipe the flash.
 		setFlashHeader(w, "phash recompute failed (is the thumbnail present?)", "err", nil)
 		return
 	}
@@ -363,16 +412,15 @@ func (s *Server) addRelationPost(w http.ResponseWriter, r *http.Request) {
 		a, b = b, a
 	}
 	relType := r.FormValue("type")
-	add, known := relationAdders[relType]
-	if !known {
-		flashStatus(w, http.StatusBadRequest, "Unknown relation type.")
-		return
-	}
 	var err error
 	if r.FormValue("force") == "true" {
 		err = cx.RelationsSvc.Overwrite(relType, a, b)
 	} else {
-		err = add(cx.RelationsSvc, a, b)
+		err = cx.RelationsSvc.Add(relType, a, b)
+	}
+	if errors.Is(err, relations.ErrUnknownKind) {
+		flashStatus(w, http.StatusBadRequest, "Unknown relation type.")
+		return
 	}
 	if err != nil {
 		writeRelationError(w, err)
@@ -380,14 +428,6 @@ func (s *Server) addRelationPost(w http.ResponseWriter, r *http.Request) {
 	}
 	setFlashHeader(w, "Relation added.", "ok", nil)
 	writeInlineFlash(w, "ok", "Relation added.")
-}
-
-var relationAdders = map[string]func(svc *relations.Service, a, b int64) error{
-	"duplicate":   (*relations.Service).AddDuplicate,
-	"alternate":   (*relations.Service).AddAlternate,
-	"version":     (*relations.Service).AddVersionEdge,
-	"derivative":  (*relations.Service).AddDerivativeEdge,
-	"not_related": (*relations.Service).AddNotRelated,
 }
 
 type relationRemoveOp struct {
@@ -463,12 +503,6 @@ func (s *Server) removeRelationPost(w http.ResponseWriter, r *http.Request) {
 	writeInlineFlash(w, "ok", msg)
 }
 
-var reviewAgainRemovers = map[string]func(*relations.Service, int64, int64) error{
-	"version":     (*relations.Service).RemoveVersionEdge,
-	"derivative":  (*relations.Service).RemoveDerivativeEdge,
-	"not_related": (*relations.Service).RemoveNotRelated,
-}
-
 func reviewAgainPost(w http.ResponseWriter, r *http.Request, cx *library.Gallery) {
 	subkind := r.FormValue("kind")
 	var a, b int64
@@ -507,7 +541,7 @@ func reviewAgainPost(w http.ResponseWriter, r *http.Request, cx *library.Gallery
 		if !ok {
 			return
 		}
-		if err := reviewAgainRemovers[subkind](cx.RelationsSvc, ar, br); err != nil {
+		if err := relationRemoveOps[subkind].run(cx.RelationsSvc, ar, br); err != nil {
 			writeRelationError(w, err)
 			return
 		}
@@ -538,7 +572,7 @@ type copyTagsPreviewGroup struct {
 }
 
 func (s *Server) copyTagsToOriginalPreview(w http.ResponseWriter, r *http.Request) {
-	cx, ok := s.requireActive(w)
+	cx, ok := s.requireActive(w, r)
 	if !ok {
 		return
 	}
@@ -571,7 +605,7 @@ func (s *Server) copyTagsToOriginalPreview(w http.ResponseWriter, r *http.Reques
 			FROM tags t
 			LEFT JOIN tag_categories c ON c.id = t.category_id
 			WHERE t.id IN (`+placeholders+`)
-			ORDER BY c.name, t.name`, args...)
+			ORDER BY c.position, c.name, t.name`, args...)
 		if err != nil {
 			http.Error(w, "load preview", http.StatusInternalServerError)
 			return

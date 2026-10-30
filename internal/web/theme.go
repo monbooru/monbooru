@@ -13,8 +13,6 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/webui"
 )
 
-type themeEntry = webui.Theme
-
 const builtinLightDir = registry.LightThemeDir
 
 // themeVars are the custom properties a theme sets: the stable surface
@@ -27,21 +25,45 @@ var themeVars = append(slices.Clone(webui.ThemeVars),
 	"--nav-collections", "--nav-relations", "--nav-settings",
 )
 
-var builtinThemes = []themeEntry{
+var builtinThemes = []webui.Theme{
 	{Name: "dark", Builtin: true},
+	{Name: "light", Builtin: true, Path: builtinLightDir + "/theme.css"},
 	{
-		Name: "light", Builtin: true,
-		Path:    builtinLightDir + "/theme.css",
-		Logo:    builtinLightDir + "/logo.png",
-		Favicon: builtinLightDir + "/favicon.png",
+		Name: "legacy-dark", Builtin: true,
+		Path:    registry.LegacyDarkThemeDir + "/theme.css",
+		Logo:    registry.LegacyDarkThemeDir + "/logo.png",
+		Favicon: registry.LegacyDarkThemeDir + "/favicon.png",
 	},
+	{
+		Name: "legacy-light", Builtin: true,
+		Path:    registry.LegacyLightThemeDir + "/theme.css",
+		Logo:    registry.LegacyLightThemeDir + "/logo.png",
+		Favicon: registry.LegacyLightThemeDir + "/favicon.png",
+	},
+}
+
+var builtinArt = map[string]string{"dark": "/static/", "light": "/static/light/"}
+
+var mascotFaces = []string{"hello", "lost", "sleep", "panic", "sparkle-head"}
+
+func themeMascots(e webui.Theme) map[string]string {
+	out := map[string]string{}
+	for _, face := range mascotFaces {
+		switch {
+		case e.Mascots[face] != "":
+			out[face] = "/theme.mascot/" + face
+		case builtinArt[e.Name] != "":
+			out[face] = builtinArt[e.Name] + "mascot-" + face + ".png"
+		}
+	}
+	return out
 }
 
 func (s *Server) themesDir() string { return s.configSubdir("themes") }
 
 // A deleted copy is not rebuilt.
 func (s *Server) seedThemesDir() {
-	logNotes(webui.SeedTheme(registry.FS, builtinLightDir, []string{"theme.css", "logo.png", "favicon.png"}, s.themesDir(), "light"))
+	logNotes(webui.SeedTheme(registry.FS, builtinLightDir, []string{"theme.css"}, s.themesDir(), "light"))
 }
 
 func logNotes(notes []webui.Note) {
@@ -54,21 +76,21 @@ func logNotes(notes []webui.Note) {
 	}
 }
 
-func (s *Server) listThemes() []themeEntry {
+func (s *Server) listThemes() []webui.Theme {
 	themes, notes := webui.ListThemes(builtinThemes, s.themesDir())
 	s.themeWarn.notesOnce(notes)
 	return themes
 }
 
 // server.theme is only matched against the listing, never used as a path.
-func (s *Server) activeTheme() themeEntry {
+func (s *Server) activeTheme() webui.Theme {
 	if s.themeName() == "" {
 		return builtinThemes[0]
 	}
 	return s.activeThemeIn(s.listThemes())
 }
 
-func (s *Server) activeThemeIn(entries []themeEntry) themeEntry {
+func (s *Server) activeThemeIn(entries []webui.Theme) webui.Theme {
 	name := s.themeName()
 	e, found := webui.FindTheme(entries, name)
 	if !found {
@@ -130,7 +152,13 @@ func (s *Server) serveThemeFavicon(w http.ResponseWriter, r *http.Request) {
 	s.serveThemeFile(w, r, e, e.Favicon, "themefavicon")
 }
 
-func (s *Server) serveThemeFile(w http.ResponseWriter, r *http.Request, e themeEntry, path, kind string) {
+func (s *Server) serveThemeMascot(w http.ResponseWriter, r *http.Request) {
+	e := s.activeTheme()
+	face := r.PathValue("face")
+	s.serveThemeFile(w, r, e, e.Mascots[face], "thememascot-"+face)
+}
+
+func (s *Server) serveThemeFile(w http.ResponseWriter, r *http.Request, e webui.Theme, path, kind string) {
 	if path != "" && !e.Builtin {
 		// An archive gives every theme it unpacks one mtime.
 		setGalleryScopedCache(w, "custom", kind+"-"+url.PathEscape(e.Name), path)
@@ -157,7 +185,7 @@ func (s *Server) settingsThemePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("theme"))
-	if name != "" && !slices.ContainsFunc(s.listThemes(), func(e themeEntry) bool { return e.Name == name }) {
+	if name != "" && !slices.ContainsFunc(s.listThemes(), func(e webui.Theme) bool { return e.Name == name }) {
 		themeRefused(w, "No theme named "+name+".")
 		return
 	}

@@ -56,7 +56,7 @@
   {{end}}
 </div>
 
-{{if .Collection}}
+{{if .Collections}}
 <div class="related-images same-collection">
   <div class="related-entries-header">
     <h3>Same collection</h3>
@@ -64,19 +64,28 @@
       <a class="btn-link-accent" href="/images/{{.ImageID}}/relations{{.BackQS}}">[See all]</a>
     </div>
   </div>
-  <div class="related-mini-grid">
-    {{range .Collection}}
-    <a href="/images/{{.ID}}?ref={{$.ImageID}}{{$.BackKVQS}}"
-       class="related-mini-card related-entry-card" title="Collection {{.Series}}: image {{.ID}}">
-      <img src="/thumbnails/{{$.ActiveGallery}}/{{.ID}}.jpg" alt="image {{.ID}}" loading="lazy"
-           onerror="this.parentElement.innerHTML='<span class=thumb-fail title=&quot;preview unavailable&quot;>?</span>'">
-      <span class="series-pill" title="Collection: {{.Series}}{{if .Order}} #{{deref64 .Order}}{{end}}">
-        <span class="series-pill-name">{{.Series}}</span>
-        {{if .Order}}<span class="series-pill-order">#{{deref64 .Order}}</span>{{end}}
+  {{range $i, $c := .Collections}}
+  <div class="coll-block">
+    <div class="coll-nav{{if eq $i 0}} coll-nav-keyed{{end}}">
+      <a class="coll-nav-name" href="/?q={{urlQ .Query}}" title="Open {{.Name}} in the gallery">{{.Name}}</a>
+      <span class="coll-nav-steps">
+        {{if .PrevURL}}<a class="btn-link-accent coll-step" data-dir="prev" href="{{.PrevURL}}" title="Previous in {{.Name}}{{if eq $i 0}} ([){{end}}">[&lsaquo; prev]</a>{{else}}<span class="coll-step-off" aria-disabled="true">[&lsaquo; prev]</span>{{end}}
+        <span class="coll-nav-count">{{.Rank}} / {{.Total}}</span>
+        {{if .NextURL}}<a class="btn-link-accent coll-step" data-dir="next" href="{{.NextURL}}" title="Next in {{.Name}}{{if eq $i 0}} (]){{end}}">[next &rsaquo;]</a>{{else}}<span class="coll-step-off" aria-disabled="true">[next &rsaquo;]</span>{{end}}
       </span>
-    </a>
-    {{end}}
+    </div>
+    <div class="related-mini-grid">
+      {{range .Tiles}}
+      <a href="{{.URL}}"
+         class="related-mini-card related-entry-card{{if eq .ID $.ImageID}} relations-tree-current{{end}}" title="{{if eq .ID $.ImageID}}This image{{else}}{{$c.Name}}: image {{.ID}}{{end}}">
+        <img src="/thumbnails/{{$.ActiveGallery}}/{{.ID}}.jpg" alt="image {{.ID}}" loading="lazy"
+             onerror="this.parentElement.innerHTML='<span class=thumb-fail title=&quot;preview unavailable&quot;>?</span>'">
+        {{if .Order}}<span class="series-pill" title="{{$c.Name}} #{{deref .Order}}"><span class="series-pill-order">#{{deref .Order}}</span></span>{{end}}
+      </a>
+      {{end}}
+    </div>
   </div>
+  {{end}}
 </div>
 {{end}}
 {{end}}

@@ -16,7 +16,6 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
-	meta "github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
@@ -111,6 +110,7 @@ func (s *Server) emptyFoldersRemovePost(w http.ResponseWriter, r *http.Request) 
 	if !s.startJob(w, models.JobTypePruneDirs) {
 		return
 	}
+	s.active().WaitIngests(s.jobs.Context())
 	removed := gallery.RemoveEmptyDirs(s.boundary(), paths)
 	s.jobs.Complete(fmt.Sprintf("Removed %d empty folder%s.", removed, plural(removed)))
 	kept := ""
@@ -130,20 +130,108 @@ func (s *Server) recalcTagsPost(w http.ResponseWriter, r *http.Request) {
 	writeInlineFlash(w, "ok", fmt.Sprintf("Recalculated %d tag count%s.", updated, plural(int(updated))))
 }
 
+func (s *Server) unusedTagsGet(w http.ResponseWriter, r *http.Request) {
+	if !isHTMXRequest(r) {
+		http.Redirect(w, r, "/settings#maintenance", http.StatusSeeOther)
+		return
+	}
+	plain, kept, err := s.tagSvc().UnusedTags()
+	data := map[string]any{"Unused": len(plain), "Kept": len(kept), "All": len(plain) + len(kept)}
+	if err != nil {
+		data["Err"] = "Error: " + err.Error()
+	}
+	s.renderTemplate(w, "partials/unused_tags.html", data)
+}
+
+func (s *Server) unusedTagsPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	ids, kept, err := s.tagSvc().UnusedTags()
+	if err != nil {
+		writeInlineFlash(w, "err", "Error: "+err.Error())
+		return
+	}
+	if r.FormValue("include_kept") == "1" {
+		ids = append(ids, kept...)
+	}
+	if len(ids) == 0 {
+		writeInlineFlash(w, "ok", "No unused tags to delete.")
+		return
+	}
+	s.goJob(w, models.JobTypeTag, fmt.Sprintf("Deleting %d unused tag%s.", len(ids), plural(len(ids))), func(context.Context) {
+		s.runDeleteTagsByIDs(ids)
+	})
+}
+
+func (s *Server) resetTagsGet(w http.ResponseWriter, r *http.Request) {
+	if !isHTMXRequest(r) {
+		http.Redirect(w, r, "/settings#maintenance", http.StatusSeeOther)
+		return
+	}
+	_, ids, aliases, implications, err := s.tagSvc().TagResetScope()
+	data := map[string]any{"Gallery": s.active().Name, "Tags": len(ids), "Aliases": aliases, "Implications": implications}
+	if err != nil {
+		data["Err"] = "Error: " + err.Error()
+	}
+	s.renderTemplate(w, "partials/reset_tags.html", data)
+}
+
+func (s *Server) resetTagsPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirm_name")) != s.active().Name {
+		writeInlineFlash(w, "err", "type-to-confirm name does not match")
+		return
+	}
+	ratingAliases, ids, _, _, err := s.tagSvc().TagResetScope()
+	if err != nil {
+		writeInlineFlash(w, "err", "Error: "+err.Error())
+		return
+	}
+	if len(ids) == 0 && len(ratingAliases) == 0 {
+		writeInlineFlash(w, "ok", "No tags to reset.")
+		return
+	}
+	s.goJob(w, models.JobTypeTag, fmt.Sprintf("Resetting the tags: deleting %d tag%s.", len(ids), plural(len(ids))), func(context.Context) {
+		for _, id := range ratingAliases {
+			if err := s.tagSvc().DeleteTag(id); err != nil {
+				logx.Warnf("delete tag %d: %v", id, err)
+			}
+		}
+		s.runDeleteTagsByIDs(ids)
+	})
+}
+
 func (s *Server) tagCategoryConflictsPost(w http.ResponseWriter, r *http.Request) {
 	n, err := s.tagSvc().ConflictsCount()
 	if err != nil {
 		writeInlineFlash(w, "err", "Error: "+err.Error())
 		return
 	}
-	if n == 0 {
-		writeInlineFlash(w, "ok", "No tags share a name across categories.")
+	settled, err := s.tagSvc().DistinctSettledCount()
+	if err != nil {
+		writeInlineFlash(w, "err", "Error: "+err.Error())
 		return
 	}
+	more := ""
+	if settled > 0 {
+		word := "more"
+		if n == 0 {
+			word = models.Plural(settled, "tag", "tags")
+		}
+		more = fmt.Sprintf(` <strong>%d</strong> %s %s <a href="/tags?conflicts=distinct">marked distinct</a> and not counted.`,
+			settled, word, models.Plural(settled, "is", "are"))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if n == 0 {
+		_, _ = fmt.Fprintf(w, `<div class="flash flash-ok">No tags share a name across categories.%s</div>`, more)
+		return
+	}
 	_, _ = fmt.Fprintf(w,
-		`<div class="flash flash-ok"><strong>%d</strong> tag%s share a name across categories - <a href="/tags?conflicts=1">review them on the Tags page</a>.</div>`,
-		n, plural(n))
+		`<div class="flash flash-ok"><strong>%d</strong> tag%s share a name across categories - <a href="/tags?conflicts=1">review them on the Tags page</a>.%s</div>`,
+		n, plural(n), more)
 }
 
 func plural(n int) string {
@@ -471,16 +559,7 @@ func (s *Server) reExtractMetadataPost(w http.ResponseWriter, r *http.Request) {
 			if _, err := active.RecomputePhash(ctx, img.ID); err != nil {
 				logx.Debugf("re-extract phash %d: %v", img.ID, err)
 			}
-			sdMeta, comfyMeta := meta.Extract(img.Path, img.FileType)
-
-			sourceType := models.SourceTypeNone
-			if sdMeta != nil && comfyMeta != nil {
-				sourceType = models.SourceTypeBoth
-			} else if sdMeta != nil {
-				sourceType = models.SourceTypeA1111
-			} else if comfyMeta != nil {
-				sourceType = models.SourceTypeComfyUI
-			}
+			sdMeta, comfyMeta, sourceType := gallery.ExtractGenerationMeta(img.Path, img.FileType)
 
 			newSDHash := ""
 			var newSDSeed *int64

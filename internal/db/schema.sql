@@ -319,6 +319,15 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+-- Canonicalised a < b. Two same-name tags the operator ruled are
+-- different things, so the pair stops counting as a category conflict.
+CREATE TABLE IF NOT EXISTS tag_distinct_pairs (
+    a_tag_id   INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    b_tag_id   INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (a_tag_id, b_tag_id)
+);
+
 -- old_id (a pre-widening fold) -> new_id (the richer spelling that
 -- superseded it); ambiguous = 1 when old_id has several candidates.
 CREATE TABLE IF NOT EXISTS folded_tag_pairs (
@@ -350,6 +359,7 @@ CREATE INDEX IF NOT EXISTS idx_tags_category     ON tags(category_id);
 CREATE INDEX IF NOT EXISTS idx_tags_usage        ON tags(usage_count DESC);
 CREATE INDEX IF NOT EXISTS idx_tags_active_usage ON tags(usage_count DESC, name) WHERE is_alias = 0;
 CREATE INDEX IF NOT EXISTS idx_tags_alias_canonical ON tags(canonical_tag_id, name) WHERE is_alias = 1;
+-- Not a duplicate of the alias index: every tag delete's self-FK check seeks it.
 CREATE INDEX IF NOT EXISTS idx_tags_canonical ON tags(canonical_tag_id) WHERE canonical_tag_id IS NOT NULL;
 -- image_id makes tag seeks covering, and tag_id = ? AND image_id >= ? a range.
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag_image ON image_tags(tag_id, image_id);
@@ -386,6 +396,7 @@ CREATE INDEX IF NOT EXISTS idx_dup_group_members_group ON dup_group_members(grou
 CREATE INDEX IF NOT EXISTS idx_alt_group_members_group ON alt_group_members(group_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_derivative_edges_source ON derivative_edges(source_image_id);
 CREATE INDEX IF NOT EXISTS idx_not_related_b           ON not_related_pairs(b_image_id, a_image_id);
+CREATE INDEX IF NOT EXISTS idx_tag_distinct_pairs_b    ON tag_distinct_pairs(b_tag_id, a_tag_id);
 CREATE INDEX IF NOT EXISTS idx_potential_pairs_distance ON potential_relation_pairs(skipped_at, distance, a_image_id);
 -- b-side seek for the resweep triggers; the a side rides the primary key.
 CREATE INDEX IF NOT EXISTS idx_potential_pairs_b        ON potential_relation_pairs(b_image_id);

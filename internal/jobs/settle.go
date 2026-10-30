@@ -8,6 +8,14 @@ import (
 // Settle ends a job from its worker's error. A cancel outranks the error:
 // a cancelled worker returns context.Canceled, which is not a failure.
 func (m *Manager) Settle(ctx context.Context, err error, cancelMsg, doneMsg string) error {
+	return m.settle(ctx, err, cancelMsg, doneMsg, m.Complete)
+}
+
+func (m *Manager) SettlePartial(ctx context.Context, err error, cancelMsg, doneMsg string) error {
+	return m.settle(ctx, err, cancelMsg, doneMsg, m.CompletePartial)
+}
+
+func (m *Manager) settle(ctx context.Context, err error, cancelMsg, doneMsg string, complete func(string)) error {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		m.Complete(cancelMsg)
 		return nil
@@ -16,7 +24,7 @@ func (m *Manager) Settle(ctx context.Context, err error, cancelMsg, doneMsg stri
 		m.Fail(err.Error())
 		return err
 	}
-	m.Complete(doneMsg)
+	complete(doneMsg)
 	return nil
 }
 

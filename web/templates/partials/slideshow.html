@@ -1,0 +1,38 @@
+{{define "partials/slideshow.html"}}
+<dialog id="slideshow-dialog" class="slideshow-dialog" aria-label="Slideshow">
+  <div class="slideshow-stage">
+    <div class="slideshow-slot"></div>
+    <div class="slideshow-slot"></div>
+    <div id="slideshow-message" class="slideshow-message" aria-live="polite"></div>
+    <button type="button" class="reader-side reader-side-prev" data-slideshow="previous" title="Previous (&larr;)" aria-label="Previous">&lsaquo;</button>
+    <button type="button" class="reader-side reader-side-next" data-slideshow="next" title="Next (&rarr;)" aria-label="Next">&rsaquo;</button>
+  </div>
+  <nav class="reader-bar slideshow-bar">
+    <span class="slideshow-bar-group">
+      <button type="button" class="reader-back" data-slideshow="exit" title="Exit (Esc)">&larr; Exit</button>
+      <button type="button" data-slideshow="play" title="Play / pause (Space)" autofocus><span class="slideshow-play-label">Play</span> <span class="btn-key-hint">(Space)</span></button>
+    </span>
+    <span class="slideshow-bar-group">
+      <button type="button" class="reader-nav" data-slideshow="first" title="First (Home)">|&lt;</button>
+      <button type="button" class="reader-nav" data-slideshow="previous" title="Previous (&larr;)">&lt;</button>
+      <span id="slideshow-position" class="reader-counter"></span>
+      <button type="button" class="reader-nav" data-slideshow="next" title="Next (&rarr;)">&gt;</button>
+      <button type="button" class="reader-nav" data-slideshow="last" title="Last (End)">&gt;|</button>
+    </span>
+    <span class="slideshow-bar-group">
+      <select id="slideshow-duration" title="Seconds per image">
+        <option value="2">2 s</option>
+        <option value="3">3 s</option>
+        <option value="5">5 s</option>
+        <option value="10">10 s</option>
+        <option value="15">15 s</option>
+        <option value="30">30 s</option>
+      </select>
+      <button type="button" data-slideshow="restart" title="Restart video (r)">Restart</button>
+      <button type="button" data-slideshow="loop" aria-pressed="false" title="Loop videos (l)">Loop: off</button>
+      <button type="button" data-slideshow="mute" aria-pressed="false" title="Sound on / off (m)">Sound: off</button>
+      <button type="button" data-slideshow="fullscreen" title="Fullscreen (f)">&#x26F6; Fullscreen</button>
+    </span>
+  </nav>
+</dialog>
+{{end}}

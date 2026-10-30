@@ -31,18 +31,18 @@ type Query struct {
 	OrderCollection string
 }
 
-func (q Query) listKey() string {
+func (q Query) listKey(src Source) string {
 	if !q.Cached {
 		return ""
 	}
-	return adjacencyKey(q.Text, q.Sort, q.Order, q.RandomSeed, q.CeilingLevel)
+	return adjacencyKey(q.Text, q.Sort, q.Order, q.RandomSeed, q.CeilingLevel, src.LookupBackends)
 }
 
 func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, error) {
 	database := src.DB
 	started := time.Now()
 	gen := src.Cache.gen()
-	key := q.listKey()
+	key := q.listKey(src)
 	page := max(q.Page, 1)
 	limit := q.Limit
 	if limit < 1 {
@@ -106,18 +106,26 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 
 	// Similarity has no key column: COUNT and the scored ORDER BY would each
 	// walk the whole match set for one page, so the fan runs first, on any
-	// page. An empty or capped fan falls through rather than guess a total.
+	// page. An empty or capped fan falls through rather than guess a total;
+	// one that overran falls through too, and finishes in the background
+	// under the fan lock so the next visit reads it from the cache.
 	if q.Sort == "similarity" && hasRankSeed && key != "" &&
 		!q.SkipCount && q.PresetTotal == nil && src.Cache.tryAcquireFan(key) {
 		fanCtx, cancel := context.WithTimeout(context.Background(), fanBudget(time.Since(started), 0))
 		ids := fanSimilarityIDs(fanCtx, src, rankSeed, q.Order, where, args)
+		overran := fanCtx.Err() != nil
 		cancel()
-		src.Cache.releaseFan(key)
-		if len(ids) > 0 && len(ids) < adjacencyCacheMaxIDs {
+		switch {
+		case len(ids) > 0 && len(ids) < adjacencyCacheMaxIDs:
+			src.Cache.releaseFan(key)
 			src.Cache.set(key, ids, gen)
 			return executeFromCachedIDs(ctx, database, ids, page, limit)
+		case overran:
+			go finishSimilarityFan(src, key, gen, rankSeed, q.Order, where, slices.Clone(args))
+		default:
+			src.Cache.releaseFan(key)
+			src.Cache.markFanOverBudget(key)
 		}
-		src.Cache.markFanOverBudget(key)
 	}
 
 	offset := (page - 1) * limit
@@ -335,38 +343,42 @@ func orderCursor(series string, order sql.NullInt64, id int64, desc bool) (befor
 	return
 }
 
-// The query must JOIN image_collections AS pc, and the order must match
-// collectionOrderClause.
-func collectionCursor(pos sql.NullInt64, id int64, desc bool) (before, after, fwd, rev string, beforeArgs, afterArgs []any) {
+type collectionLeg struct {
+	cmp  string
+	sort string
+	args []any
+}
+
+const (
+	positionedGroup = "(pc.position IS NULL) = 0"
+	// The second term pins the position column, so the reading index seeks pc.image_id.
+	unpositionedGroup = "(pc.position IS NULL) = 1 AND pc.position IS NULL"
+)
+
+// The legs run nearest group first and must match collectionOrderClause. Each
+// group seeks on its own: a desc walk mixes directions one index scan can't follow.
+func collectionCursor(pos sql.NullInt64, id int64, desc bool) (prev, next []collectionLeg) {
+	fwd, rev, after, before := "ASC", "DESC", ">", "<"
 	if desc {
-		fwd = "ORDER BY pc.position IS NULL, pc.position DESC, i.id DESC"
-		rev = "ORDER BY pc.position IS NULL DESC, pc.position ASC, i.id ASC"
-		if pos.Valid {
-			before = "(pc.position IS NOT NULL AND (pc.position, i.id) > (?, ?))"
-			after = "(pc.position IS NULL OR (pc.position, i.id) < (?, ?))"
-		} else {
-			before = "(pc.position IS NOT NULL OR (pc.position IS NULL AND i.id > ?))"
-			after = "(pc.position IS NULL AND i.id < ?)"
-		}
-	} else {
-		fwd = "ORDER BY pc.position IS NULL, pc.position ASC, i.id ASC"
-		rev = "ORDER BY pc.position IS NULL DESC, pc.position DESC, i.id DESC"
-		if pos.Valid {
-			before = "(pc.position IS NOT NULL AND (pc.position, i.id) < (?, ?))"
-			after = "(pc.position IS NULL OR (pc.position, i.id) > (?, ?))"
-		} else {
-			before = "(pc.position IS NOT NULL OR (pc.position IS NULL AND i.id < ?))"
-			after = "(pc.position IS NULL AND i.id > ?)"
-		}
+		fwd, rev, after, before = rev, fwd, before, after
 	}
+	byPosition := func(dir string) string { return "ORDER BY pc.position " + dir + ", pc.image_id " + dir }
+	byID := func(dir string) string { return "ORDER BY pc.image_id " + dir }
 	if pos.Valid {
-		beforeArgs = []any{pos.Int64, id}
-		afterArgs = []any{pos.Int64, id}
-	} else {
-		beforeArgs = []any{id}
-		afterArgs = []any{id}
+		args := []any{pos.Int64, id}
+		prev = []collectionLeg{{positionedGroup + " AND (pc.position, pc.image_id) " + before + " (?, ?)", byPosition(rev), args}}
+		next = []collectionLeg{
+			{positionedGroup + " AND (pc.position, pc.image_id) " + after + " (?, ?)", byPosition(fwd), args},
+			{unpositionedGroup, byID(fwd), nil},
+		}
+		return prev, next
 	}
-	return
+	prev = []collectionLeg{
+		{unpositionedGroup + " AND pc.image_id " + before + " ?", byID(rev), []any{id}},
+		{positionedGroup, byPosition(rev), nil},
+	}
+	next = []collectionLeg{{unpositionedGroup + " AND pc.image_id " + after + " ?", byID(fwd), []any{id}}}
+	return prev, next
 }
 
 type adjacencyPlan struct {
@@ -379,6 +391,9 @@ type adjacencyPlan struct {
 	folderLo     string
 	folderHi     string
 	collOrder    bool
+	collName     string
+	collPrev     []collectionLeg
+	collNext     []collectionLeg
 	prevCmp      string
 	nextCmp      string
 	prevSort     string
@@ -401,7 +416,15 @@ func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int6
 		return p, err
 	}
 
-	where, args, hasMissingFilter, ceilingRewrote := buildWhereDBDriverFull(q.Expr, src, driverLegs)
+	p.collOrder = q.Sort == "order" && q.OrderCollection != ""
+	expr := q.Expr
+	if p.collOrder {
+		expr = withoutAndedLeaves(expr, func(e Expr) bool {
+			f, ok := e.(FilterExpr)
+			return ok && f.Key == "collection" && strings.EqualFold(f.Val, q.OrderCollection)
+		})
+	}
+	where, args, hasMissingFilter, ceilingRewrote := buildWhereDBDriverFull(expr, src, driverLegs)
 	where, args = applyAndDriver(where, args, driverLegs)
 
 	// The folder legs carry the folder predicate, so the per-image where
@@ -423,7 +446,6 @@ func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int6
 		args = append(args, bucketLo, bucketHi)
 	}
 
-	p.collOrder = q.Sort == "order" && q.OrderCollection != ""
 	var pcPos sql.NullInt64
 	if p.collOrder {
 		// No membership reads as a NULL position, which sorts in the
@@ -434,9 +456,8 @@ func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int6
 	}
 
 	if p.collOrder {
-		before, after, fwd, rev, bArgs, aArgs := collectionCursor(pcPos, currentID, q.Order == "desc")
-		p.prevCmp, p.prevSort, p.prevArgs = before, rev, bArgs
-		p.nextCmp, p.nextSort, p.nextArgs = after, fwd, aArgs
+		p.collName = q.OrderCollection
+		p.collPrev, p.collNext = collectionCursor(pcPos, currentID, q.Order == "desc")
 	} else if q.Sort == "order" {
 		before, after, fwd, rev, bArgs, aArgs := orderCursor(series, seriesOrder, currentID, q.Order == "desc")
 		p.prevCmp, p.prevSort, p.prevArgs = before, rev, bArgs
@@ -484,9 +505,38 @@ func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int6
 	return p, nil
 }
 
+// CROSS JOIN drives from the membership, so the walk rides the label's reading index.
+func (p adjacencyPlan) collectionRows(sel string, leg collectionLeg, tail string) (string, []any) {
+	query := "SELECT " + sel + " FROM image_collections pc CROSS JOIN images i ON i.id = pc.image_id WHERE pc.name = ? AND " +
+		p.where + " AND " + leg.cmp + tail
+	return query, slices.Concat([]any{p.collName}, p.args, leg.args)
+}
+
+func (p adjacencyPlan) collectionNeighbour(legs []collectionLeg) (string, []any) {
+	subs := make([]string, 0, len(legs)+1)
+	var args []any
+	for _, leg := range legs {
+		sub, subArgs := p.collectionRows("i.id", leg, " "+leg.sort+" LIMIT 1")
+		subs = append(subs, "("+sub+")")
+		args = append(args, subArgs...)
+	}
+	return "SELECT COALESCE(" + strings.Join(append(subs, "NULL"), ", ") + ")", args
+}
+
+func (p adjacencyPlan) collectionPreceding() (string, []any) {
+	legs := make([]string, 0, len(p.collPrev))
+	var args []any
+	for _, leg := range p.collPrev {
+		rows, legArgs := p.collectionRows("1", leg, "")
+		legs = append(legs, rows)
+		args = append(args, legArgs...)
+	}
+	return strings.Join(legs, " UNION ALL "), args
+}
+
 func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) (*int64, *int64, error) {
 	database := src.DB
-	if ids, ok := src.Cache.get(q.listKey()); ok {
+	if ids, ok := src.Cache.get(q.listKey(src)); ok {
 		prev, next := findInAdjacencyList(ids, currentID)
 		return prev, next, nil
 	}
@@ -499,6 +549,13 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 		}
 		prev, next := findInAdjacencyList(ids, currentID)
 		return prev, next, nil
+	}
+
+	if anyLeaf(q.Expr, isTagCountCategory) {
+		if ids := fanAdjacencyIDs(src, q); slices.Contains(ids, currentID) {
+			prev, next := findInAdjacencyList(ids, currentID)
+			return prev, next, nil
+		}
 	}
 
 	// Decided first so the driver legs can be cut to the bucket: unbounded, an
@@ -540,15 +597,22 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 		return nil, nil, nil
 	}
 
+	if p.collOrder {
+		neighbour := func(legs []collectionLeg) *int64 {
+			query, qargs := p.collectionNeighbour(legs)
+			var id sql.NullInt64
+			if err := database.Read.QueryRowContext(ctx, query, qargs...).Scan(&id); err != nil || !id.Valid {
+				return nil
+			}
+			return &id.Int64
+		}
+		return neighbour(p.collPrev), neighbour(p.collNext), nil
+	}
+
 	lookup := func(cursorCmp, sort string, cursorArgs []any) *int64 {
 		var sql string
 		var qargs []any
-		if p.collOrder {
-			qargs = slices.Concat([]any{q.OrderCollection}, p.args, cursorArgs)
-			sql = fmt.Sprintf(
-				"SELECT i.id FROM images i JOIN image_collections pc ON pc.image_id = i.id AND pc.name = ? WHERE %s AND %s %s LIMIT 1",
-				p.where, cursorCmp, sort)
-		} else if p.folderActive {
+		if p.folderActive {
 			// Two seeks on idx_images_folder_nocase_visible; SQLite plans
 			// the OR of the equality and the range as a full index scan
 			// plus a temp sort.
@@ -573,6 +637,44 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 		return &id
 	}
 	return lookup(p.prevCmp, p.prevSort, p.prevArgs), lookup(p.nextCmp, p.nextSort, p.nextArgs), nil
+}
+
+// finishSimilarityFan releases the fan lock its caller took.
+func finishSimilarityFan(src Source, key string, gen uint64, seed tags.OverlapSeed, order, where string, args []any) {
+	defer src.Cache.releaseFan(key)
+	ctx, cancel := context.WithTimeout(context.Background(), similarityFanBackgroundBudget)
+	defer cancel()
+	ids := fanSimilarityIDs(ctx, src, seed, order, where, args)
+	if len(ids) == 0 || len(ids) >= adjacencyCacheMaxIDs {
+		src.Cache.markFanOverBudget(key)
+		return
+	}
+	src.Cache.set(key, ids, gen)
+}
+
+// Each cursor statement would redo the grouped tagcount:<category> pass, so
+// a miss fans the whole list once and the walk that follows reads it from the
+// cache. nil when another request holds the fan or it overran its budget.
+func fanAdjacencyIDs(src Source, q Query) []int64 {
+	key := q.listKey(src)
+	if !src.Cache.tryAcquireFan(key) {
+		return nil
+	}
+	defer src.Cache.releaseFan(key)
+	gen := src.Cache.gen()
+	driverLegs, _ := pickAndDriverTag(src.DB, q.Expr, q.Sort == "random")
+	where, args, hasMissingFilter, ceilingRewrote := visibleWhere(src, q.Expr, driverLegs)
+	orderClause, orderArgs, _, _ := viewOrder(src, q.Expr, q.Sort, q.Order, q.RandomSeed, q.OrderCollection)
+	indexHint := sortIndexHint(q.Expr, q.Sort, hasMissingFilter, ceilingRewrote)
+	fanCtx, cancel := context.WithTimeout(context.Background(), fanBudget(0, 0))
+	ids := fetchSortedMatchIDs(fanCtx, src.DB, indexHint, where, args, orderClause, orderArgs, adjacencyCacheMaxIDs)
+	cancel()
+	if len(ids) == 0 || len(ids) >= adjacencyCacheMaxIDs {
+		src.Cache.markFanOverBudget(key)
+		return nil
+	}
+	src.Cache.set(key, ids, gen)
+	return ids
 }
 
 // RankInQuery is 0-based and -1 when it has no useful answer. A sparse
@@ -606,10 +708,7 @@ func RankInQuery(ctx context.Context, src Source, q Query, currentID int64) (int
 	var rows string
 	var qargs []any
 	if p.collOrder {
-		rows = fmt.Sprintf(
-			"SELECT 1 FROM images i JOIN image_collections pc ON pc.image_id = i.id AND pc.name = ? WHERE %s AND %s",
-			p.where, p.prevCmp)
-		qargs = slices.Concat([]any{q.OrderCollection}, p.args, p.prevArgs)
+		rows, qargs = p.collectionPreceding()
 	} else if p.folderActive {
 		legSQL := "SELECT 1 FROM images i INDEXED BY idx_images_folder_nocase_visible WHERE %s AND " + p.where + " AND " + p.prevCmp
 		rows = fmt.Sprintf(legSQL, "i.folder_path = ? COLLATE NOCASE") +
@@ -742,7 +841,7 @@ func SidebarTagsWithGlobalCount(src Source, imageIDs []int64) ([]models.Tag, err
 		fmt.Sprintf(
 			`WITH tag_counts AS (
 			     SELECT t.id AS tag_id, t.name AS tag_name, tc.name AS cat_name,
-			            tc.color AS cat_color, t.usage_count,
+			            tc.color AS cat_color, tc.position AS cat_pos, t.usage_count,
 			            COUNT(DISTINCT it.image_id) AS page_count
 			     FROM image_tags it INDEXED BY idx_image_tags_image
 			     JOIN tags t ON t.id = it.tag_id
@@ -752,13 +851,13 @@ func SidebarTagsWithGlobalCount(src Source, imageIDs []int64) ([]models.Tag, err
 			 )
 			 SELECT tag_id, tag_name, cat_name, cat_color, usage_count
 			 FROM (
-			     SELECT tag_id, tag_name, cat_name, cat_color, usage_count, page_count,
+			     SELECT tag_id, tag_name, cat_name, cat_color, cat_pos, usage_count, page_count,
 			            ROW_NUMBER() OVER (PARTITION BY cat_name
 			                               ORDER BY page_count DESC, tag_name ASC) AS rn
 			     FROM tag_counts
 			 )
 			 WHERE rn <= ?
-			 ORDER BY page_count DESC, tag_name ASC`,
+			 ORDER BY cat_pos, cat_name, page_count DESC, tag_name ASC`,
 			placeholders,
 		),
 		append(args, sidebarMaxPerCategory)...)
@@ -768,7 +867,8 @@ func SidebarTagsWithGlobalCount(src Source, imageIDs []int64) ([]models.Tag, err
 // no image in the context.
 const suggestCandidateCap = 25
 
-// Past this many context images the combination counts become lower bounds.
+// Each side of a combination count reads at most this many rows: the
+// images matching the context, and the images carrying a candidate.
 const suggestContextCap = 1000
 
 // SuggestTagsWithFilter's UsageCount counts the images matching both expr
@@ -783,31 +883,44 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 
 	where, args, hasMissingFilter := buildWhereDB(expr, src)
 	where = andDefaultVisible(where, hasMissingFilter)
+	ownWhere, ownArgs := buildWherePerRow(expr, src)
 
-	// ctx is materialised once and each candidate probes image_tags
-	// against it. (image_id, tag_id) is image_tags' key, so a plain COUNT
-	// per tag counts distinct images.
-	baseSQL := `WITH ctx AS (
-	                SELECT i.id AS image_id FROM images i WHERE %s LIMIT ?
+	// Past the cap ctx is a sample that can miss a rare candidate, so one on
+	// at most cap images is tested image by image (CROSS JOIN keeps the walk
+	// on its rows); the sampled floors of more used candidates rank first.
+	baseSQL := `WITH ctx AS MATERIALIZED (
+	                SELECT i.id AS image_id FROM images i WHERE %[1]s LIMIT ?
 	            ),
 	            cand AS (
 	                SELECT id, category_id, usage_count
 	                FROM tags
 	                WHERE is_alias = 0
 	                  AND name LIKE ? ESCAPE '\'
-	                  %s
+	                  %[2]s
 	                ORDER BY usage_count DESC
 	                LIMIT ?
+	            ),
+	            own AS (
+	                SELECT it.tag_id, COUNT(*) AS n
+	                FROM image_tags it CROSS JOIN images i ON i.id = it.image_id
+	                WHERE (SELECT COUNT(*) FROM ctx) > ?
+	                  AND it.tag_id IN (SELECT id FROM cand WHERE usage_count <= ?)
+	                  AND %[3]s
+	                GROUP BY it.tag_id
 	            )
-	            SELECT c.id, t.name, tc.name, tc.color, COUNT(it.image_id) AS combo
-	            FROM cand c
-	            JOIN tags t ON t.id = c.id
-	            JOIN tag_categories tc ON tc.id = c.category_id
-	            JOIN image_tags it ON it.tag_id = c.id
-	                              AND it.image_id IN (SELECT image_id FROM ctx)
-	            GROUP BY c.id
-	            HAVING combo > 0
-	            ORDER BY combo DESC, c.usage_count DESC
+	            SELECT id, name, cat, color, combo FROM (
+	                SELECT c.id, t.name, tc.name AS cat, tc.color, c.usage_count,
+	                    c.usage_count > ? AND (SELECT COUNT(*) FROM ctx) > ? AS sampled, MAX(
+	                    COALESCE(own.n, 0),
+	                    (SELECT COUNT(*) FROM image_tags it
+	                      WHERE it.tag_id = c.id AND it.image_id IN (SELECT image_id FROM ctx))) AS combo
+	                FROM cand c
+	                JOIN tags t ON t.id = c.id
+	                JOIN tag_categories tc ON tc.id = c.category_id
+	                LEFT JOIN own ON own.tag_id = c.id
+	            )
+	            WHERE combo > 0
+	            ORDER BY sampled DESC, combo DESC, usage_count DESC
 	            LIMIT ?`
 
 	catClause := ""
@@ -819,19 +932,22 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 
 	return tags.SuggestTwoPass(db.EscapeLike(prefix), limit, func(pat, notLike string, n int) ([]models.Tag, error) {
 		extra := catClause
-		qargs := make([]any, 0, 5+len(args)+len(catArgs))
+		qargs := make([]any, 0, 7+len(args)+len(ownArgs)+len(catArgs))
 		qargs = append(qargs, args...)
-		qargs = append(qargs, suggestContextCap)
+		// One row past the cap tells a sample from the whole context.
+		qargs = append(qargs, suggestContextCap+1)
 		qargs = append(qargs, pat)
 		qargs = append(qargs, catArgs...)
 		if notLike != "" {
 			extra = extra + ` AND name NOT LIKE ? ESCAPE '\'`
 			qargs = append(qargs, notLike)
 		}
-		qargs = append(qargs, suggestCandidateCap, n)
+		qargs = append(qargs, suggestCandidateCap, suggestContextCap, suggestContextCap)
+		qargs = append(qargs, ownArgs...)
+		qargs = append(qargs, suggestContextCap, suggestContextCap, n)
 		return db.QueryAll(database.Read, db.ScanRow(func(t *models.Tag) []any {
 			return []any{&t.ID, &t.Name, &t.CategoryName, &t.CategoryColor, &t.UsageCount}
-		}), fmt.Sprintf(baseSQL, where, extra), qargs...)
+		}), fmt.Sprintf(baseSQL, where, extra, ownWhere), qargs...)
 	})
 }
 

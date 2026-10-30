@@ -290,7 +290,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		prevID      *int64
 		nextID      *int64
 	)
-	tagMode := readTagModeCookie(r)
+	tagMode := tagModePref.read(r)
 	isManga := img.FileType == models.FileTypeCBZ
 	misnamedExt := ""
 	if claimed := models.ExtFileType(img.CanonicalPath); claimed != "" && claimed != img.FileType {
@@ -299,7 +299,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		_, imageTags, _ = s.tagSvc().GetImageTags(id)
-		sidebar = s.buildTagSidebar(id, tagMode, imageTags)
+		sidebar = s.buildTagSidebar(id, tagMode, impliedModePref.read(r), imageTags)
 	})
 	wg.Go(func() { sdMeta = loadSDMeta(ctx, s.db(), id) })
 	wg.Go(func() { comfyMeta = loadComfyMeta(ctx, s.db(), id) })
@@ -563,24 +563,27 @@ func (s *Server) findAdjacentImages(ctx context.Context, currentID int64, queryS
 }
 
 func adjacentSearchQuery(queryStr, sortStr, orderStr, seedStr string, ceiling *Ceiling) search.Query {
-	expr := search.Parse(queryStr)
-	pinnedCollection := search.PinnedCollectionName(expr)
-	expr = ceiling.Apply(expr)
-	sq := search.Query{
-		Expr:         expr,
-		Sort:         sortStr,
-		Order:        orderStr,
-		Cached:       true,
-		Text:         queryStr,
-		CeilingLevel: ceiling.Level(),
-	}
-	if sortStr == "order" {
-		sq.OrderCollection = pinnedCollection
-	}
+	sq := viewQuery(search.Parse(queryStr), queryStr, sortStr, orderStr, ceiling)
 	if sortStr == "random" && seedStr != "" {
 		if seed, err := strconv.ParseInt(seedStr, 10, 64); err == nil {
 			sq.RandomSeed = seed
 		}
+	}
+	return sq
+}
+
+// The collection pin is read before the ceiling's terms join the expr.
+func viewQuery(expr search.Expr, text, sortStr, orderStr string, ceiling *Ceiling) search.Query {
+	sq := search.Query{
+		Expr:         ceiling.Apply(expr),
+		Sort:         sortStr,
+		Order:        orderStr,
+		Cached:       true,
+		Text:         text,
+		CeilingLevel: ceiling.Level(),
+	}
+	if sortStr == "order" {
+		sq.OrderCollection = search.PinnedCollectionName(expr)
 	}
 	return sq
 }

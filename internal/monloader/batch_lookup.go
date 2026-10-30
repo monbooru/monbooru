@@ -8,7 +8,6 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/library"
-	"github.com/monbooru/monbooru/internal/lookup"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
@@ -28,7 +27,7 @@ func (l *Link) BatchLookup(ctx context.Context, cx *library.Gallery, opts BatchL
 		ids = unsourcedOnly(cx, ids)
 	}
 
-	enqueued, skipped, matched := 0, 0, 0
+	enqueued, skipped, refused, matched := 0, 0, 0, 0
 	ptrRefused := false
 	total := len(ids)
 	stop := func(err error) {
@@ -73,6 +72,10 @@ func (l *Link) BatchLookup(ctx context.Context, cx *library.Gallery, opts BatchL
 			case "refresh":
 				queued, qErr := l.enqueueSourceFetches(ctx, cx, id, sha)
 				if qErr != nil {
+					if authRefused(qErr) {
+						refused++
+						continue
+					}
 					if peer.IsStatusError(qErr) {
 						skipped++
 						continue
@@ -92,9 +95,13 @@ func (l *Link) BatchLookup(ctx context.Context, cx *library.Gallery, opts BatchL
 					skipped++
 					continue
 				}
-				err = l.EnqueueLookup(ctx, cx, id, lookup.BackendBooru, md5, sha, true, false)
+				err = l.EnqueueLookup(ctx, cx, id, contract.LookupBooru, md5, sha, true, false)
 			}
 			if err != nil {
+				if authRefused(err) {
+					refused++
+					continue
+				}
 				if peer.IsStatusError(err) {
 					skipped++
 					continue
@@ -106,7 +113,11 @@ func (l *Link) BatchLookup(ctx context.Context, cx *library.Gallery, opts BatchL
 		}
 	}
 	if opts.Mode == "refresh" {
-		l.jobs.Complete(fmt.Sprintf("Queued %d source %s on monloader; skipped %d without a fetchable source.", enqueued, models.Plural(enqueued, "fetch", "fetches"), skipped))
+		msg := fmt.Sprintf("Queued %d source %s on monloader; skipped %d without a fetchable source", enqueued, models.Plural(enqueued, "fetch", "fetches"), skipped)
+		if refused > 0 {
+			msg += fmt.Sprintf("; monloader refused %d", refused)
+		}
+		l.jobs.Complete(msg + ".")
 		return
 	}
 	parts := []string{}
@@ -122,7 +133,15 @@ func (l *Link) BatchLookup(ctx context.Context, cx *library.Gallery, opts BatchL
 	if skipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
 	}
+	if refused > 0 {
+		parts = append(parts, fmt.Sprintf("%d refused by monloader", refused))
+	}
 	l.jobs.Complete(fmt.Sprintf("Looked up %d %s: %s.", total, models.Plural(total, "image", "images"), strings.Join(parts, ", ")))
+}
+
+func authRefused(err error) bool {
+	var se peer.StatusError
+	return errors.As(err, &se) && (strings.HasPrefix(se.Status, "401") || strings.HasPrefix(se.Status, "403"))
 }
 
 func unsourcedOnly(cx *library.Gallery, ids []int64) []int64 {
@@ -145,8 +164,8 @@ func unsourcedOnly(cx *library.Gallery, ids []int64) []int64 {
 
 func (l *Link) batchPTRLookup(ctx context.Context, cx *library.Gallery, ids []int64) (int, error) {
 	matched := 0
-	for start := 0; start < len(ids) && ctx.Err() == nil; start += ptrLookupChunk {
-		chunk := ids[start:min(start+ptrLookupChunk, len(ids))]
+	for start := 0; start < len(ids) && ctx.Err() == nil; start += contract.MaxPTRHashes {
+		chunk := ids[start:min(start+contract.MaxPTRHashes, len(ids))]
 		placeholders, args := db.InPlaceholders(chunk)
 		hashes, err := db.QueryAll(cx.DB.Read, db.ScanRow(func(v *contract.PTRLookupImage) []any {
 			return []any{&v.ImageID, &v.SHA256}
@@ -200,12 +219,12 @@ func (l *Link) enqueueSourceFetches(ctx context.Context, cx *library.Gallery, id
 			if err := l.EnqueueMetadataFetch(ctx, id, galleryName, u); err != nil {
 				return queued, err
 			}
-		case strings.EqualFold(strings.TrimSpace(o.site), lookup.BackendPTR):
+		case strings.EqualFold(strings.TrimSpace(o.site), contract.LookupPTR):
 			if ptrDone {
 				continue
 			}
 			ptrDone = true
-			if err := l.EnqueueLookup(ctx, cx, id, lookup.BackendPTR, "", sha, true, false); err != nil {
+			if err := l.EnqueueLookup(ctx, cx, id, contract.LookupPTR, "", sha, true, false); err != nil {
 				if errors.Is(err, ErrPTRUnavailable) {
 					continue
 				}

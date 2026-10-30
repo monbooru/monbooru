@@ -45,16 +45,22 @@ type LookupGroup struct {
 }
 
 func ptrLookupAliasRow(tagSvc func() *tags.Service, tagID int64, name string) LookupRow {
-	row := LookupRow{Name: name}
 	if !tagSvc().FormValid(name) {
-		row.Standing = StandingInvalid
-		return row
+		return LookupRow{Name: name, Standing: StandingInvalid}
 	}
+	row := formStanding(tagSvc, name, tagID)
+	row.Adds = row.Standing == StandingFree
+	return row
+}
+
+// An alias of self is held; self 0 reads every alias as filed elsewhere.
+func formStanding(tagSvc func() *tags.Service, name string, self int64) LookupRow {
+	row := LookupRow{Name: name}
 	held, exists := tagSvc().FormRow(name)
 	switch {
 	case !exists:
-		row.Standing, row.Adds = StandingFree, true
-	case held.IsAlias && held.CanonicalID == tagID:
+		row.Standing = StandingFree
+	case held.IsAlias && held.CanonicalID == self:
 		row.Standing = StandingHeld
 	case held.IsAlias:
 		row.Standing, row.Canonical = StandingAliasElsewhere, held.CanonicalName
@@ -65,28 +71,18 @@ func ptrLookupAliasRow(tagSvc func() *tags.Service, tagID int64, name string) Lo
 }
 
 func ptrLookupImplRow(tagSvc func() *tags.Service, name string, declared map[string]bool) LookupRow {
-	row := LookupRow{Name: name}
 	if declared[localForm(tagSvc, name)] {
-		row.Standing = StandingHeld
-		return row
+		return LookupRow{Name: name, Standing: StandingHeld}
 	}
 	if !tagSvc().FormValid(name) {
-		row.Standing = StandingInvalid
-		return row
+		return LookupRow{Name: name, Standing: StandingInvalid}
 	}
-	held, exists := tagSvc().FormRow(name)
-	switch {
-	case !exists:
-		row.Standing, row.Adds = StandingFree, true
-	case held.IsAlias:
-		row.Standing, row.Canonical = StandingAliasElsewhere, held.CanonicalName
-	default:
-		row.Standing, row.Usage, row.Adds = StandingTag, held.Usage, true
-	}
+	row := formStanding(tagSvc, name, 0)
+	row.Adds = row.Standing == StandingFree || row.Standing == StandingTag
 	return row
 }
 
-func LookupGroups(tagSvc func() *tags.Service, id int64, tagForm, spelling string, info PTRTagInfo) ([]LookupGroup, error) {
+func LookupGroups(tagSvc func() *tags.Service, id int64, tagForm, spelling string, info contract.PTRTagInfo) ([]LookupGroup, error) {
 	implications, err := tagSvc().ListImplications(id)
 	if err != nil {
 		return nil, err
@@ -143,26 +139,13 @@ func ptrLookupImplGroup(tagSvc func() *tags.Service, g LookupGroup, names []stri
 }
 
 func LookupLocalStatus(tagSvc func() *tags.Service, id int64, tagForm, spelling string) LookupRow {
-	row := LookupRow{Name: spelling}
 	if spelling == tagForm {
-		row.Standing = StandingSelf
-		return row
+		return LookupRow{Name: spelling, Standing: StandingSelf}
 	}
-	held, exists := tagSvc().FormRow(spelling)
-	switch {
-	case !exists:
-		row.Standing, row.Adds = StandingFree, true
-	case held.IsAlias && held.CanonicalID == id:
-		row.Standing = StandingHeld
-	case held.IsAlias:
-		row.Standing, row.Canonical, row.Adds = StandingAliasElsewhere, held.CanonicalName, true
-	default:
-		row.Standing, row.Usage, row.Adds = StandingTag, held.Usage, true
-	}
+	row := formStanding(tagSvc, spelling, id)
+	row.Adds = row.Standing != StandingHeld
 	return row
 }
-
-const PTRSearchLimit = contract.PTRSearchLimit
 
 // Longest first: an operator's spelling is usually the repository's with
 // something added.
@@ -197,24 +180,26 @@ func ptrSpellingStems(form string) []string {
 }
 
 // The tag's own name often sits in the index as an orphan, so a stem
-// whose clusters carry relations beats the first stem that answers.
-func (l *Link) PTRSeedSearch(ctx context.Context, tagForm string) (clusters []PTRCluster, stem string, truncated bool, err error) {
+// whose clusters carry relations beats the first stem that answers;
+// ownHeld says the tag's own name answered all the same.
+func (l *Link) PTRSeedSearch(ctx context.Context, tagForm string) (clusters []contract.PTRCluster, stem string, truncated, ownHeld bool, err error) {
 	for _, candidate := range ptrSpellingStems(tagForm) {
-		got, cut, err := l.PTRSpellingSearch(ctx, candidate, "", PTRSearchLimit)
+		got, cut, err := l.PTRSpellingSearch(ctx, candidate, "", contract.PTRSearchLimit)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, false, err
 		}
 		if len(got) == 0 {
 			continue
 		}
+		ownHeld = ownHeld || candidate == tagForm
 		if clusters == nil {
 			clusters, stem, truncated = got, candidate, cut
 		}
 		for _, c := range got {
 			if c.Aliases+c.Implications+c.ImpliedBy > 0 {
-				return got, candidate, cut, nil
+				return got, candidate, cut, ownHeld, nil
 			}
 		}
 	}
-	return clusters, stem, truncated, nil
+	return clusters, stem, truncated, ownHeld, nil
 }

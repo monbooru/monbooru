@@ -230,21 +230,23 @@ type TagCategory struct {
 	Name      string
 	Color     string
 	IsBuiltin bool
+	Position  int
 }
 
 type ImageTag struct {
-	ImageID    int64
-	TagID      int64
-	TagName    string
-	Category   string
-	Color      string
-	UsageCount int
-	IsAuto     bool
-	IsImplied  bool // row was fanned out from a parent tag's implication graph
-	Confidence *float64
-	TaggerName string // the auto-tagger or source that applied it; "" for a tag added by hand
-	Stale      bool   // the attributed source's latest fetch no longer carried this tag
-	CreatedAt  time.Time
+	ImageID          int64
+	TagID            int64
+	TagName          string
+	Category         string
+	Color            string
+	CategoryPosition int
+	UsageCount       int
+	IsAuto           bool
+	IsImplied        bool // row was fanned out from a parent tag's implication graph
+	Confidence       *float64
+	TaggerName       string // the auto-tagger or source that applied it; "" for a tag added by hand
+	Stale            bool   // the attributed source's latest fetch no longer carried this tag
+	CreatedAt        time.Time
 }
 
 // Adding ParentID to an image also adds ImpliedID as an implied row.
@@ -369,6 +371,7 @@ type JobState struct {
 	StartedAt  time.Time
 	FinishedAt *time.Time
 	Summary    string
+	Partial    bool
 	Error      string
 	// Changes counts the gallery changes a sync or the watcher made while a
 	// job runs; the client refreshes on it without touching the progress line.

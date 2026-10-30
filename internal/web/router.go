@@ -7,7 +7,6 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -36,6 +35,7 @@ import (
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/plugins"
+	"github.com/monbooru/monbooru/internal/registry"
 	"github.com/monbooru/monbooru/internal/schedule"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/contract"
@@ -85,6 +85,7 @@ type Server struct {
 	loginRL    *session.Backoff
 	tmpl       *template.Template
 	staticFS   fs.FS
+	lightFS    fs.FS
 	done       chan struct{}
 
 	desktop bool
@@ -138,6 +139,10 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	if err != nil {
 		return nil, err
 	}
+	lightFS, err := fs.Sub(registry.FS, builtinLightDir)
+	if err != nil {
+		return nil, err
+	}
 
 	s := &Server{
 		cfg:          cfg,
@@ -148,6 +153,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 		loginRL:      session.NewBackoff(),
 		tmpl:         tmpl,
 		staticFS:     staticFS,
+		lightFS:      lightFS,
 		done:         make(chan struct{}),
 		desktop:      dk.Active,
 		folderOpener: desktop.OpenFolder,
@@ -345,9 +351,11 @@ func (s *Server) registerRoutes(rt *routes) {
 	// its context.
 	rt.free("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(s.staticFS))).ServeHTTP)
 	rt.free("GET /static/shared/", http.StripPrefix("/static/shared/", http.FileServer(http.FS(webui.Static))).ServeHTTP)
+	rt.free("GET /static/light/", http.StripPrefix("/static/light/", http.FileServer(http.FS(s.lightFS))).ServeHTTP)
 	rt.free("GET /theme.css", s.serveThemeCSS)
 	rt.free("GET /theme.logo", s.serveThemeLogo)
 	rt.free("GET /theme.favicon", s.serveThemeFavicon)
+	rt.free("GET /theme.mascot/{face}", s.serveThemeMascot)
 	rt.free("GET /manifest.json", s.manifestHandler)
 	rt.free("GET /thumbnails/{gallery}/{file}", s.serveThumbnail)
 	// Found, not permanent: the target follows the active theme.
@@ -359,11 +367,9 @@ func (s *Server) registerRoutes(rt *routes) {
 		// Not refused over its Origin: the browser blocks a cross-origin
 		// read itself, and a monitor sending one still gets an answer.
 		api.SetCORS(w, r, s.cfgSnapshot())
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
 		// A second launch reads "app" to tell this instance from another
 		// program on the port.
-		_ = json.NewEncoder(w).Encode(contract.Health{App: contract.AppMonbooru, Status: "ok", Version: Version,
+		contract.WriteJSON(w, http.StatusOK, contract.Health{App: contract.AppMonbooru, Status: "ok", Version: Version,
 			API: peer.APIVersion, MinPeerAPI: peer.MinPeerAPI})
 	})
 
@@ -437,6 +443,8 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /tags/batch-alias", s.batchTagAliasPost)
 	rt.read("POST /tags/merge-folded", s.batchMergeFoldedPost)
 	rt.read("POST /tags/batch-imply", s.batchTagImplyPost)
+	rt.read("POST /tags/batch-clean", s.batchTagCleanPost)
+	rt.read("POST /tags/batch-distinct", s.batchTagDistinctPost)
 	rt.read("POST /tags/new", s.createTagPost)
 	rt.read("POST /tags/aliases", s.createAliasPost)
 	rt.read("POST /tags/{id}/rename", s.renameTagPost)
@@ -454,10 +462,13 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("DELETE /tags/{id}/implied-by/group", s.removeImpliedByDelete)
 	rt.read("DELETE /tags/{id}/aliases/group", s.removeTagAliasesDelete)
 	rt.read("DELETE /tags/{id}/implications/{impliedID}", s.removeImplicationDelete)
+	rt.read("DELETE /tags/{id}/distinct/{otherID}", s.unmarkTagDistinctDelete)
 	rt.read("POST /tags/categories", s.createCategoryPost)
 	rt.read("POST /tags/categories/{id}/rename", s.renameCategoryPost)
 	rt.read("DELETE /tags/categories/{id}", s.deleteCategoryDelete)
 	rt.read("GET /tags/categories/{id}/count", s.categoryCountHandler)
+	rt.read("POST /tags/categories/{id}/remove-implications", s.removeCategoryImplicationsPost)
+	rt.read("POST /tags/categories/order", s.reorderCategoriesPost)
 
 	rt.read("GET /collections", s.collectionsHandler)
 	rt.read("POST /collections/rename", s.renameCollectionPost)
@@ -496,7 +507,13 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/maintenance/prune-orphaned-thumbnails", s.pruneOrphanedThumbnailsPost)
 	rt.read("POST /settings/maintenance/empty-folders", s.emptyFoldersScanPost)
 	rt.read("POST /settings/maintenance/empty-folders/remove", s.emptyFoldersRemovePost)
+	rt.read("GET /settings/maintenance/apply-destination", s.applyDestinationGet)
+	rt.read("POST /settings/maintenance/apply-destination", s.applyDestinationPost)
 	rt.read("POST /settings/maintenance/recalc-tags", s.recalcTagsPost)
+	rt.read("GET /settings/maintenance/unused-tags", s.unusedTagsGet)
+	rt.read("POST /settings/maintenance/unused-tags", s.unusedTagsPost)
+	rt.read("GET /settings/maintenance/reset-tags", s.resetTagsGet)
+	rt.read("POST /settings/maintenance/reset-tags", s.resetTagsPost)
 	rt.read("POST /settings/maintenance/tag-conflicts", s.tagCategoryConflictsPost)
 	rt.read("POST /settings/maintenance/find-folded-duplicates", s.findFoldedDuplicatesPost)
 	rt.read("POST /settings/maintenance/lookup-due", s.lookupDuePost)
@@ -547,6 +564,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("DELETE /search/saved/{id}", s.deleteSavedSearch)
 
 	rt.read("GET /internal/job/status", s.jobStatusHandler)
+	rt.read("GET /internal/footer-counts", s.footerCountsHandler)
 	rt.free("GET /internal/monloader-status", s.monloaderStatusHandler)
 	rt.read("POST /internal/job/dismiss", s.jobDismissPost)
 	rt.read("POST /internal/job/cancel", s.jobCancelPost)
@@ -563,6 +581,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /internal/batch-lookup", s.batchLookup)
 	rt.free("POST /internal/batch-download", s.batchDownload)
 	rt.read("POST /internal/batch-download/count", s.batchDownloadCount)
+	rt.read("POST /internal/slideshow", s.slideshowItems)
 	rt.read("POST /internal/delete-search", s.deleteSearchPost)
 	rt.read("POST /tags/delete-search", s.deleteTagsSearchPost)
 	rt.read("POST /tags/ptr-lookup-search", s.ptrLookupSearchPost)
@@ -618,7 +637,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	api.New(s.cfgSnapshot, s.jobs, s.apiResolver, Version).WithGalleryLock(func() func() {
 		s.set.RLock()
 		return s.set.RUnlock
-	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).Mount(apiMux)
+	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).Mount(apiMux)
 	// The exact pairing routes above answer ahead of this subtree, so
 	// they skip notePeerAddress: none of them may move a peer.
 	apiHandler := s.notePeerAddress(apiMux.ServeHTTP)
@@ -731,6 +750,7 @@ type baseData struct {
 	BooruName           string
 	BooruLogo           string
 	BooruFavicon        string
+	Mascot              map[string]string
 	ActiveGallery       string
 	Galleries           []config.Gallery
 	VisibleCount        int
@@ -751,14 +771,14 @@ type baseData struct {
 	// The render gate, where MonloaderPTR is the live one: a paused or
 	// unreachable link reports no PTR, so it counts as present.
 	MonloaderPTRPresent bool
+	PairNotice          webui.PairNotice
 }
 
 // main.js writes it; the name and the "collapsed" value must match.
 const sidebarCookieName = "monbooru_sidebar"
 
 func sidebarCollapsed(r *http.Request) bool {
-	c, err := r.Cookie(sidebarCookieName)
-	return err == nil && c.Value == "collapsed"
+	return session.FromCookie(r, sidebarCookieName) == "collapsed"
 }
 
 func (s *Server) base(r *http.Request, nav, title string) baseData {
@@ -800,6 +820,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		BooruName:           s.booruName(),
 		BooruLogo:           themeLogoURL(theme),
 		BooruFavicon:        themeFaviconURL(theme),
+		Mascot:              themeMascots(theme),
 		MonloaderPaired:     paired,
 		MonloaderUsable:     monloaderUsable,
 		MonloaderConn:       ml.Conn,
@@ -817,6 +838,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		RatingLevels:        ratingFooterLevels,
 		ActiveRating:        active,
 		RequestStart:        requestStartFromContext(r.Context()),
+		PairNotice:          s.pairNotice(),
 	}
 }
 
@@ -895,13 +917,9 @@ func (s *Server) sessionLifetimeDays() int {
 const thumbSizeCookieName = "monbooru_thumb_size"
 
 func thumbSize(r *http.Request) string {
-	c, err := r.Cookie(thumbSizeCookieName)
-	if err != nil {
-		return "m"
-	}
-	switch c.Value {
+	switch v := session.FromCookie(r, thumbSizeCookieName); v {
 	case "s", "l":
-		return c.Value
+		return v
 	}
 	return "m"
 }
@@ -913,11 +931,7 @@ var PageSizeOptions = []int{20, 40, 60, 100, 250, 500}
 // The cookie is client-writable, and the query budgets cover only the
 // offered sizes.
 func pageSizeOverride(r *http.Request) int {
-	c, err := r.Cookie(pageSizeCookieName)
-	if err != nil {
-		return 0
-	}
-	n, err := strconv.Atoi(c.Value)
+	n, err := strconv.Atoi(session.FromCookie(r, pageSizeCookieName))
 	if err != nil || !slices.Contains(PageSizeOptions, n) {
 		return 0
 	}
@@ -1004,23 +1018,23 @@ func (s *Server) galleries() []config.Gallery {
 	return slices.Clone(s.cfg.Galleries)
 }
 
-func themeLogoURL(e themeEntry) string {
+func themeLogoURL(e webui.Theme) string {
 	if e.Logo != "" {
 		return "/theme.logo"
 	}
-	return "/static/logo.png"
+	return cmp.Or(builtinArt[e.Name], "/static/") + "logo.png"
 }
 
 // Versioned: browsers keep favicons outside the page cache and Firefox
 // does not revalidate them, so a fixed URL keeps the first icon seen.
-func themeFaviconURL(e themeEntry) string {
+func themeFaviconURL(e webui.Theme) string {
 	if e.Favicon == "" {
-		return "/static/favicon.png"
+		return cmp.Or(builtinArt[e.Name], "/static/") + "favicon.png"
 	}
 	return "/theme.favicon?v=" + themeFaviconVersion(e)
 }
 
-func themeFaviconVersion(e themeEntry) string {
+func themeFaviconVersion(e webui.Theme) string {
 	if e.Builtin {
 		return cmp.Or(Version, "builtin")
 	}

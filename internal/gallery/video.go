@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/monbooru/monbooru/internal/metadata"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 )
 
@@ -56,7 +58,7 @@ func runFFmpeg(combinedOutput bool, name string, args ...string) ([]byte, error)
 	return cmd.Output()
 }
 
-func ffmpegAvailable() bool {
+func FFmpegAvailable() bool {
 	resolveTools()
 	return ffmpegPath != ""
 }
@@ -70,7 +72,7 @@ func ffprobeAvailable() bool {
 // args must end with "--" and the temp path, so a name starting with "-"
 // stays an output.
 func runFFmpegToFile(dstPath, tmpPattern, label string, args func(tmp string) []string) error {
-	if !ffmpegAvailable() {
+	if !FFmpegAvailable() {
 		return fmt.Errorf("ffmpeg not available")
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(dstPath), tmpPattern)
@@ -151,11 +153,7 @@ func RenderStillFrame(srcPath, dir string, maxDim int) (string, error) {
 }
 
 func tenPercentOffset(srcPath string) string {
-	duration, err := probeDuration(srcPath)
-	if err != nil || duration <= 0 {
-		duration = 0
-	}
-	return strconv.FormatFloat(duration*0.10, 'f', 3, 64)
+	return strconv.FormatFloat(probeVideo(srcPath).duration*0.10, 'f', 3, 64)
 }
 
 // The video track can end before 10% of the container's length, so a
@@ -221,13 +219,10 @@ func generateGIFHover(srcPath, dstPath string) error {
 // ExtractVideoFrames takes offsets as fractions of the duration and skips
 // a frame that fails, so a short result is a partial success.
 func ExtractVideoFrames(srcPath, tmpDir string, positions []float64) ([]string, error) {
-	if !ffmpegAvailable() {
+	if !FFmpegAvailable() {
 		return nil, fmt.Errorf("ffmpeg not available")
 	}
-	duration, _ := probeDuration(srcPath)
-	if duration <= 0 {
-		duration = 0
-	}
+	duration := probeVideo(srcPath).duration
 	var out []string
 	for i, pos := range positions {
 		offset := duration * min(max(pos, 0), 1)
@@ -255,23 +250,6 @@ func ExtractVideoFrames(srcPath, tmpDir string, positions []float64) ([]string, 
 	return out, nil
 }
 
-func probeDuration(srcPath string) (float64, error) {
-	// The thumbnail path can get here before the tools are resolved.
-	resolveTools()
-	out, err := runFFmpeg(false, ffprobePath,
-		"-v", "quiet",
-		"-print_format", "csv=p=0",
-		"-show_entries", "format=duration",
-		"--",
-		srcPath,
-	)
-	if err != nil {
-		return 0, err
-	}
-	s := strings.TrimSpace(string(out))
-	return strconv.ParseFloat(s, 64)
-}
-
 func ProbeDurationSeconds(srcPath string) (float64, bool) {
 	p := probeVideo(srcPath)
 	return p.duration, p.duration > 0
@@ -285,6 +263,7 @@ func ProbeVideoDimensions(srcPath string) (int, int, bool) {
 type videoProbe struct {
 	width, height int
 	duration      float64
+	comfy         *models.ComfyUIMetadata
 }
 
 // The size is the display size: the thumbnail and the player apply a
@@ -297,7 +276,7 @@ func probeVideo(srcPath string) videoProbe {
 	out, err := runFFmpeg(false, ffprobePath,
 		"-v", "quiet",
 		"-select_streams", "v:0",
-		"-show_entries", "format=duration:stream=width,height:stream_side_data=rotation:stream_tags=rotate",
+		"-show_entries", "format=duration:format_tags=prompt,workflow:stream=width,height:stream_side_data=rotation:stream_tags=rotate",
 		"-print_format", "json",
 		"--",
 		srcPath,
@@ -318,11 +297,16 @@ func probeVideo(srcPath string) videoProbe {
 		} `json:"streams"`
 		Format struct {
 			Duration string `json:"duration"`
+			Tags     struct {
+				Prompt   string `json:"prompt"`
+				Workflow string `json:"workflow"`
+			} `json:"tags"`
 		} `json:"format"`
 	}
 	if json.Unmarshal(out, &probe) != nil {
 		return p
 	}
+	p.comfy = metadata.ParseComfyTags(probe.Format.Tags.Prompt, probe.Format.Tags.Workflow)
 	if d, err := strconv.ParseFloat(probe.Format.Duration, 64); err == nil && d > 0 {
 		p.duration = d
 	}

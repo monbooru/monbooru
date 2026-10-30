@@ -10,16 +10,18 @@
   <div id="gallery-header">
     <form id="search-form" action="/" method="GET">
       {{template "partials/search_input.html" .BackQuery}}
-      <select name="sort" id="search-sort" aria-label="Sort">
-        <option value="newest"   {{if eq .BackSort "newest"}}selected{{end}}>Newest</option>
-        <option value="filesize" {{if eq .BackSort "filesize"}}selected{{end}}>File size</option>
-        <option value="order"    {{if eq .BackSort "order"}}selected{{end}}>Collection order</option>
-      </select>
-      <select name="order" aria-label="Sort direction">
-        <option value="desc" {{if ne .BackOrder "asc"}}selected{{end}}>↓</option>
-        <option value="asc"  {{if eq .BackOrder "asc"}}selected{{end}}>↑</option>
-      </select>
-      <button type="submit">Search</button>
+      <span class="search-controls">
+        <select name="sort" id="search-sort" aria-label="Sort">
+          <option value="newest"   {{if eq .BackSort "newest"}}selected{{end}}>Date added</option>
+          <option value="filesize" {{if eq .BackSort "filesize"}}selected{{end}}>File size</option>
+          <option value="order"    {{if eq .BackSort "order"}}selected{{end}}>Collection order</option>
+        </select>
+        <select name="order" aria-label="Sort direction">
+          <option value="desc" {{if ne .BackOrder "asc"}}selected{{end}}>↓</option>
+          <option value="asc"  {{if eq .BackOrder "asc"}}selected{{end}}>↑</option>
+        </select>
+        <button type="submit">Search</button>
+      </span>
     </form>
   </div>
 
@@ -55,7 +57,7 @@
       {{if .RefURL}}
       <a href="{{.RefURL}}" class="back-link">‹ Previous image</a>
       {{else if or .BackQuery .BackSort}}
-      <a href="/?q={{urlQ .BackQuery}}&sort={{.BackSort}}&order={{.BackOrder}}{{if .BackPage}}&page={{.BackPage}}{{end}}{{if .BackSeed}}&seed={{.BackSeed}}{{end}}#img-{{.Image.ID}}" class="back-link">‹ Search</a>
+      <a href="/?q={{urlQ .BackQuery}}&sort={{.BackSort}}&order={{.BackOrder}}{{if .BackPage}}&page={{.BackPage}}&at={{.Image.ID}}{{end}}{{if .BackSeed}}&seed={{.BackSeed}}{{end}}#img-{{.Image.ID}}" class="back-link">‹ Search</a>
       {{else}}
       <a href="/#img-{{.Image.ID}}" class="back-link">‹ Search</a>
       {{end}}
@@ -78,6 +80,11 @@
         {{else}}
         <span class="nav-arrow nav-arrow-placeholder" aria-hidden="true">Next →</span>
         {{end}}
+        {{if or .PrevID .NextID}}
+        <button type="button" id="slideshow-btn" class="nav-arrow" onclick="slideshow.start(this)"
+                data-start="{{.Image.ID}}" data-q="{{.BackQuery}}" data-sort="{{.BackSort}}" data-order="{{.BackOrder}}" data-seed="{{if .BackSeed}}{{.BackSeed}}{{end}}" data-next="{{if .NextID}}{{deref64 .NextID}}{{end}}" data-back="{{.BackQS}}"
+                title="Slideshow from this image (w)">▶&#xFE0E;</button>
+        {{end}}
       </div>
       <div class="detail-actions">
         <form id="inbox-form" hx-post="/images/{{.Image.ID}}/inbox"
@@ -85,7 +92,7 @@
               style="display:inline">
           <button type="submit" id="inbox-btn" class="btn-inbox{{if .Image.IsInbox}} active{{end}}"
                   title="{{if .Image.IsInbox}}Archive (i){{else}}Send to inbox (i){{end}}">
-            {{if .Image.IsInbox}}In inbox{{else}}Archived{{end}}
+            {{if .Image.IsInbox}}Archive{{else}}Back to inbox{{end}}
           </button>
         </form>
         <form id="fav-form" hx-post="/images/{{.Image.ID}}/favorite"
@@ -110,7 +117,7 @@
       <input type="hidden" id="source-prev-site" name="prev_site" value="">
       <input type="hidden" id="source-prev-post" name="prev_post" value="">
       <input type="hidden" id="source-post" name="post_id" value="">
-      <p>Source: <strong id="source-dialog-title">add</strong></p>
+      <p class="dlg-title">Source: <strong id="source-dialog-title">add</strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>Source label (max 200 chars)</label>
         {{template "suggest_input" dict "Name" "site" "InputID" "source-site-input" "Endpoint" "/internal/source/suggest" "SuggestID" "source-suggest"}}
@@ -123,7 +130,7 @@
 
   {{template "partials/external_edit_dialog_head.html" dict "Stem" "collection" "Action" "collections/set" "ImageID" .Image.ID}}
       <input type="hidden" id="collection-prev" name="prev" value="">
-      <p>Collection: <strong id="collection-dialog-title">add</strong></p>
+      <p class="dlg-title">Collection: <strong id="collection-dialog-title">add</strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>Collection label (max 200 chars)</label>
         {{template "suggest_input" dict "Name" "collection" "InputID" "collection-name-input" "Endpoint" "/internal/collection/suggest" "SuggestID" "collection-suggest"}}
@@ -137,7 +144,7 @@
   {{if .IsManga}}
   <dialog id="generate-collection-dialog">
     <form id="generate-collection-form">
-      <p>Generate a collection from <strong>{{.Filename}}</strong>?</p>
+      <p class="dlg-title">Generate a collection from <strong>{{.Filename}}</strong>?{{template "webui/dialog_x"}}</p>
       <p class="field-hint">Every page is extracted as its own image and grouped under this collection. The archive itself is left untouched.</p>
       <div class="field">
         <label>Collection name</label>
@@ -177,7 +184,7 @@
   {{template "partials/external_edit_dialog_head.html" dict "Stem" "commentary" "Action" "commentary/set" "ImageID" .Image.ID}}
       <input type="hidden" id="commentary-post" name="post_id" value="">
       <input type="hidden" id="commentary-site" name="site" value="">
-      <p>Commentary: <strong id="commentary-dialog-site"></strong></p>
+      <p class="dlg-title">Commentary: <strong id="commentary-dialog-site"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>Commentary text</label>
         <textarea id="commentary-body" name="commentary" rows="6" maxlength="10000"></textarea>
@@ -188,7 +195,7 @@
   {{template "partials/external_edit_dialog_head.html" dict "Stem" "translation" "Action" "translation/set" "ImageID" .Image.ID}}
       <input type="hidden" id="translation-post" name="post_id" value="">
       <input type="hidden" id="translation-site" name="site" value="">
-      <p>Translation: <strong id="translation-dialog-site"></strong></p>
+      <p class="dlg-title">Translation: <strong id="translation-dialog-site"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>Translated commentary</label>
         <textarea id="translation-body" name="commentary_translated" rows="6" maxlength="10000"></textarea>
@@ -199,7 +206,7 @@
   {{template "partials/external_edit_dialog_head.html" dict "Stem" "original" "Action" "original/set" "ImageID" .Image.ID}}
       <input type="hidden" id="original-post" name="post_id" value="">
       <input type="hidden" id="original-site" name="site" value="">
-      <p>Original source: <strong id="original-dialog-site"></strong></p>
+      <p class="dlg-title">Original source: <strong id="original-dialog-site"></strong>{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label>Where the artist first posted it (one per line; max 2048 chars)</label>
         <textarea id="original-body" name="original" rows="2" maxlength="2048"></textarea>
@@ -274,7 +281,7 @@
     <form hx-post="/images/{{.Image.ID}}/autotag"
           hx-target="#autotag-error"
           hx-on::after-request="if(event.detail.xhr.status === 202)document.getElementById('autotag-dialog').close()">
-      <p>Auto-tag this image. Pick which tagger to run.</p>
+      <p class="dlg-title">Auto-tag this image. Pick which tagger to run.{{template "webui/dialog_x"}}</p>
       <div class="field">
         <label><input type="radio" name="tagger_name" value="" checked> All enabled taggers</label>
         {{range .EnabledTaggers}}<label><input type="radio" name="tagger_name" value="{{.Name}}"> {{.Name}}</label>{{end}}
@@ -290,7 +297,7 @@
           hx-target="#relation-edit-error"
           hx-on::after-request="onRelationEditResponse(event)">
       <input type="hidden" name="direction" id="relation-edit-direction" value="ab">
-      <p>Declare a <strong>relation</strong> between this image and another.</p>
+      <p class="dlg-title">Declare a <strong>relation</strong> between this image and another.{{template "webui/dialog_x"}}</p>
       <div class="relation-edit-grid" id="relation-edit-grid">
         <div class="relation-edit-side" data-side="self">
           <h4>This image</h4>
@@ -316,6 +323,7 @@
                  placeholder="image id">
         </div>
       </div>
+      <p class="field-hint">The other image's ID is the first row of its Metadata panel (click to copy).</p>
       <div class="field">
         <label>Relation type</label>
         <label><input type="radio" name="type" value="duplicate" checked> Same image (Duplicate)</label>
@@ -578,14 +586,7 @@
               hx-target="#image-tags"
               hx-swap="outerHTML">
           <div class="add-tag-input-wrap">
-            <input type="text" name="tag" id="tag-input" placeholder="Add tag(s)..." autocomplete="off"
-                   hx-get="/internal/tags/suggest"
-                   hx-trigger="input changed delay:200ms"
-                   hx-target="#tag-suggest-dropdown"
-                   hx-swap="innerHTML"
-                   hx-include="this"
-                   onkeydown="handleSuggestKey(event, 'tag-suggest-dropdown', 'tag-input')">
-            <div id="tag-suggest-dropdown" class="suggest-dropdown tag-suggest-dropdown"></div>
+            {{template "multi_tag_suggest_input" dict "Name" "tag" "InputID" "tag-input" "SuggestID" "tag-suggest-dropdown" "Placeholder" "Add tags..." "ValsKey" "tag"}}
           </div>
           <button type="submit">Add</button>
           {{if .TaggersPresent}}
@@ -604,6 +605,8 @@
                   data-confirm-ok="Lookup online boorus">Lookup online boorus</button>
           {{end}}
         </form>
+        <h4 class="tag-list-added-title" hidden>Just added</h4>
+        <ul class="tag-list tag-list-added"></ul>
         {{if .MonloaderPaired}}{{template "partials/lookup_history.html" (dict "Lookup" .Lookup)}}{{end}}
         {{if .MonloaderPaired}}<div id="fetch-pending" class="fetch-status"></div>{{end}}
       </div>
@@ -624,7 +627,7 @@
       {{template "partials/detail_danger_zone.html" (dict "ImageID" .Image.ID "ImageTags" .ImageTags "HasUserTags" .HasUserTags "HasStaleTags" .HasStaleTags "ImageTaggers" .ImageTaggers "ImageSources" .ImageSources "CanTransfer" (gt (len .Galleries) 1) "BackKVQS" .BackKVQS "Ref" .Ref "CurrentFolder" .Image.FolderPath "Filename" .Filename "ExtraPaths" .ExtraPaths "RewrittenBy" .RewrittenBy)}}
       {{if gt (len .Galleries) 1}}
       <dialog id="transfer-image-dialog">
-        <p>Transfer this image to another gallery:</p>
+        <p class="dlg-title">Transfer this image to another gallery:{{template "webui/dialog_x"}}</p>
         <p class="field-hint">The image and its tags, sources and notes are copied into the target gallery.</p>
         <p class="field-hint" style="color:var(--error)">Relations and collections are not carried over.</p>
         <form id="transfer-image-form"
@@ -805,7 +808,7 @@
               {{if .Image.Phash}}
                 {{$hex := phashHex .Image.Phash}}
                 <button type="button" class="mono-small sha-copyable" data-copy="{{$hex}}" title="Click to copy">{{$hex}}</button>
-                <a href="/?q=phash:{{$hex}}~{{.PhashDistance}}" class="btn-link-accent" title="Search near-duplicates (Hamming distance {{.PhashDistance}})">[search near-duplicates]</a>
+                <a href="/?q=phash:{{$hex}}~{{.PhashDistance}}" class="btn-link-accent" title="Find images that look almost the same">[search near-duplicates]</a>
                 <span class="copy-flash" hidden>copied</span>
               {{else}}
                 <span class="field-hint">(not computed)</span>
@@ -817,7 +820,7 @@
               {{end}}
             </td></tr>
             <tr><th>Ingested</th><td>{{localTime .Image.IngestedAt}}</td></tr>
-            {{if .Image.Origin}}<tr><th>Added via</th><td>{{.Image.Origin}}</td></tr>{{end}}
+            {{if .Image.Origin}}<tr><th>Added via</th><td>{{addedViaLabel .Image.Origin}}</td></tr>{{end}}
             {{if and .IsManga .Image.PageCount}}
             <tr><th>Pages</th><td>{{deref .Image.PageCount}}</td></tr>
             {{end}}
@@ -1113,9 +1116,29 @@
          hx-get="/internal/images/{{.Image.ID}}/related-entries{{.BackQS}}"
          hx-trigger="load, relations-changed"></div>
     <div hx-get="/images/{{.Image.ID}}/related{{.BackQS}}" hx-trigger="load" hx-swap="outerHTML"></div>
+    <script>
+    function fitMiniGrid(grid) {
+      var tiles = Array.prototype.slice.call(grid.children);
+      tiles.forEach(function(t) { t.hidden = false; });
+      var cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+      var keep = tiles.length <= cols ? tiles.length : cols * Math.floor(tiles.length / cols);
+      var cur = tiles.findIndex(function(t) { return t.classList.contains('relations-tree-current'); });
+      var order = tiles.map(function(t, i) { return i; });
+      if (cur >= 0) order.sort(function(a, b) { return Math.abs(a - cur) - Math.abs(b - cur) || a - b; });
+      order.slice(keep).forEach(function(i) { tiles[i].hidden = true; });
+    }
+    var miniGridFit = new ResizeObserver(function(entries) {
+      entries.forEach(function(e) { fitMiniGrid(e.target); });
+    });
+    document.body.addEventListener('htmx:afterSettle', function() {
+      document.querySelectorAll('.related-mini-grid').forEach(function(g) { miniGridFit.observe(g); });
+    });
+    </script>
     </div>
   </div>
 </div>
+
+{{template "partials/slideshow.html"}}
 
 {{template "layout_end" .}}
 {{end}}

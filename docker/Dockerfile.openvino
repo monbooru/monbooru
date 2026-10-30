@@ -15,9 +15,9 @@ FROM openvino/ubuntu22_runtime:2026.4.0
 USER root
 COPY --from=build /monbooru /usr/local/bin/monbooru
 
-ARG FFMPEG_BUILD=v8.1.3-mb1
-ARG FFMPEG_NAME=ffmpeg-8.1.3-mb1
-ARG FFMPEG_SHA256_LINUX64=2fc794c828a3f61836605f09f97bc9e59f906a52b971c6c170aaf480be63a216
+ARG FFMPEG_BUILD=v8.1.3-mb2
+ARG FFMPEG_NAME=ffmpeg-8.1.3-mb2
+ARG FFMPEG_SHA256_LINUX64=eb15fba0c9f2c01a5ae1da1a6d6392ff5822dee950650521e2c0b214e9851c65
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
       ca-certificates curl xz-utils && \
@@ -37,7 +37,7 @@ ARG ORT_OPENVINO_VERSION=1.23.0
 # Link the whole capi directory, not just libonnxruntime.so: the provider
 # library pulls in the wheel's bundled OpenVINO by soname.
 RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir onnxruntime-openvino==${ORT_OPENVINO_VERSION} && \
+    pip install --no-cache-dir --no-deps onnxruntime-openvino==${ORT_OPENVINO_VERSION} && \
     PKG_DIR=$(python3 -c "import onnxruntime, os; print(os.path.dirname(onnxruntime.__file__))") && \
     find "$PKG_DIR" -name "*.so*" -type f -exec ln -sf {} /usr/local/lib/ \; && \
     ORT_FILE=$(find "$PKG_DIR" -name "libonnxruntime.so.*" | head -1) && \

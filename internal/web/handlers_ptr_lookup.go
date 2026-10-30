@@ -40,11 +40,14 @@ func (s *Server) ptrLookupTagPost(w http.ResponseWriter, r *http.Request) {
 	if !s.startJob(w, models.JobTypeTag) {
 		return
 	}
-	if merge {
-		go s.ml.PTRMergeSweep(s.tagSvc(), id, as)
-	} else {
-		go s.ml.PTRTagSweep(s.tagSvc(), []int64{id}, as)
-	}
+	svc := s.tagSvc()
+	s.goJobWork(models.JobTypeTag, func(context.Context) {
+		if merge {
+			s.ml.PTRMergeSweep(svc, id, as)
+		} else {
+			s.ml.PTRTagSweep(svc, []int64{id}, as)
+		}
+	})
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -132,7 +135,7 @@ type ptrSearchRow struct {
 	Note     string
 }
 
-func (s *Server) ptrSearchRows(clusters []monloader.PTRCluster) []ptrSearchRow {
+func (s *Server) ptrSearchRows(clusters []contract.PTRCluster) []ptrSearchRow {
 	color := s.contribTagColor()
 	rows := make([]ptrSearchRow, 0, len(clusters))
 	for _, c := range clusters {
@@ -182,18 +185,19 @@ func (s *Server) tagPtrLookupSearch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	var clusters []monloader.PTRCluster
+	var clusters []contract.PTRCluster
 	var truncated bool
 	var err error
+	var ownHeld bool
 	stem := q
 	if isTypeahead {
 		mode := ""
 		if query.Get("anywhere") != "" {
 			mode = contract.SearchContains
 		}
-		clusters, truncated, err = s.ml.PTRSpellingSearch(ctx, q, mode, monloader.PTRSearchLimit)
+		clusters, truncated, err = s.ml.PTRSpellingSearch(ctx, q, mode, contract.PTRSearchLimit)
 	} else {
-		clusters, stem, truncated, err = s.ml.PTRSeedSearch(ctx, tagForm)
+		clusters, stem, truncated, ownHeld, err = s.ml.PTRSeedSearch(ctx, tagForm)
 	}
 	switch {
 	case errors.Is(err, monloader.ErrNoSearch):
@@ -217,6 +221,8 @@ func (s *Server) tagPtrLookupSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	case len(clusters) == 0:
 		data["Note"] = "the Public Tag Repository holds no spelling near " + tagForm + "."
+	case stem != tagForm && ownHeld:
+		data["Note"] = "the Public Tag Repository holds " + tagForm + " with no relations; showing " + stem + "."
 	case stem != tagForm:
 		data["Note"] = "no PTR spelling starts with " + tagForm + "; showing " + stem + "."
 	}

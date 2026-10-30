@@ -17,9 +17,10 @@ func Extract(path, fileType string) (*models.SDMetadata, *models.ComfyUIMetadata
 	case "png":
 		return extractFromPNG(path)
 	case "jpeg":
-		return sdFromEXIF(decodeJPEGEXIF(path)), nil
+		return sdFromEXIF(decodeFileEXIF(path, fileType)), nil
 	case "webp":
-		return sdFromEXIF(decodeWebPEXIF(path)), nil
+		x := decodeFileEXIF(path, fileType)
+		return sdFromEXIF(x), comfyFromEXIF(x)
 	default:
 		return nil, nil
 	}
@@ -31,10 +32,8 @@ func ExtractGeneric(path, fileType string) []models.SDParam {
 	switch fileType {
 	case "png":
 		return genericFromPNG(path)
-	case "jpeg":
-		return collectEXIFTags(decodeJPEGEXIF(path))
-	case "webp":
-		return collectEXIFTags(decodeWebPEXIF(path))
+	case "jpeg", "webp":
+		return collectEXIFTags(decodeFileEXIF(path, fileType))
 	default:
 		return nil
 	}
@@ -70,7 +69,7 @@ func collectEXIFTags(x *exifData) []models.SDParam {
 	out := make([]models.SDParam, 0, len(x.tags))
 	for name, tag := range x.tags {
 		numeric := tag.typ != exifASCII && tag.typ != exifUndefined
-		if name == userCommentField || numeric && len(tag.val) > maxNumericEXIFBytes {
+		if name == userCommentField || comfyEXIFText(x, name) != "" || numeric && len(tag.val) > maxNumericEXIFBytes {
 			continue
 		}
 		out = append(out, models.SDParam{Key: name, Val: tag.String()})
@@ -80,13 +79,7 @@ func collectEXIFTags(x *exifData) []models.SDParam {
 }
 
 func EXIFOrientation(path, fileType string) (int, bool) {
-	var x *exifData
-	switch fileType {
-	case "jpeg":
-		x = decodeJPEGEXIF(path)
-	case "webp":
-		x = decodeWebPEXIF(path)
-	}
+	x := decodeFileEXIF(path, fileType)
 	if x == nil {
 		return 0, false
 	}

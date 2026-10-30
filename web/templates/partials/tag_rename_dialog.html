@@ -3,7 +3,7 @@
   <form id="rename-form"
         hx-post=""
         hx-target="#rename-error">
-    <p>Rename <strong id="rename-src-name"></strong></p>
+    <p class="dlg-title">Rename <strong id="rename-src-name"></strong>{{template "webui/dialog_x"}}</p>
     <div class="field">
       <label>New name</label>
       <input type="text" name="name" id="rename-new-name" required autocomplete="off">

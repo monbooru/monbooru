@@ -29,20 +29,36 @@ func AddCollectionMembership(database *db.DB, imageID int64, name string, order 
 		return errors.New("collection name required")
 	}
 	return db.InWriteTx(database.Write, func(tx *sql.Tx) error {
-		return addMembershipTx(tx, imageID, name, order)
+		_, err := addMembershipTx(tx, imageID, name, order)
+		return err
 	})
 }
 
-func addMembershipTx(tx *sql.Tx, imageID int64, name string, order *int) error {
+func ExistingLabelTx(tx *sql.Tx, name string) (string, error) {
+	var existing sql.NullString
+	if err := tx.QueryRow(`SELECT MIN(name) FROM image_collections WHERE name = ?`, name).Scan(&existing); err != nil {
+		return "", err
+	}
+	if existing.Valid {
+		return existing.String, nil
+	}
+	return name, nil
+}
+
+func addMembershipTx(tx *sql.Tx, imageID int64, name string, order *int) (string, error) {
+	name, err := ExistingLabelTx(tx, name)
+	if err != nil {
+		return "", err
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO image_collections (image_id, name, position) VALUES (?, ?, ?)
 		 ON CONFLICT(image_id, name) DO UPDATE SET position = excluded.position`,
 		imageID, name, order); err != nil {
-		return err
+		return "", err
 	}
 	home, err := homeName(tx, imageID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	switch {
 	case home == "":
@@ -52,7 +68,7 @@ func addMembershipTx(tx *sql.Tx, imageID int64, name string, order *int) error {
 		_, err = tx.Exec(`UPDATE images SET series_order = ? WHERE id = ?`,
 			order, imageID)
 	}
-	return err
+	return name, err
 }
 
 func RemoveCollectionMembership(database *db.DB, imageID int64, name string) error {
@@ -82,7 +98,8 @@ func RenameCollectionMembership(database *db.DB, imageID int64, prev, name strin
 		if err := removeMembershipTx(tx, imageID, prev); err != nil {
 			return err
 		}
-		if err := addMembershipTx(tx, imageID, name, order); err != nil {
+		name, err := addMembershipTx(tx, imageID, name, order)
+		if err != nil {
 			return err
 		}
 		if !strings.EqualFold(home, prev) {
@@ -101,6 +118,11 @@ func SetHomeCollection(database *db.DB, imageID int64, name string, order *int) 
 		oldHome, err := homeName(tx, imageID)
 		if err != nil {
 			return err
+		}
+		if name != "" {
+			if name, err = ExistingLabelTx(tx, name); err != nil {
+				return err
+			}
 		}
 		relabel := oldHome != "" && !strings.EqualFold(oldHome, name)
 		if relabel && name != "" {
@@ -255,7 +277,7 @@ func CountCollections(database *db.DB, nameFilter string, ceiling RankCeiling) (
 	args = append(args, filterArgs...)
 	err := database.Read.QueryRow(
 		`SELECT COUNT(*) FROM (SELECT DISTINCT name FROM image_collections) d
-		 WHERE EXISTS (SELECT 1 FROM image_collections c JOIN images i ON i.id = c.image_id
+		 WHERE EXISTS (SELECT 1 FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
 		   WHERE c.name = d.name AND i.is_missing = 0`+under+`)`+where, args...).Scan(&n)
 	return n, err
 }
@@ -282,7 +304,8 @@ func CollectionSamples(database *db.DB, names []string, per int, ceiling RankCei
 }
 
 // CollectionMembers' ORDER BY matches idx_image_collections_reading, so
-// the LIMIT stops the scan early instead of sorting the whole label.
+// the LIMIT stops the scan early instead of sorting the whole label. The
+// member walks CROSS JOIN so stats can't start them at idx_images_missing.
 func CollectionMembers(database *db.DB, name string, ceiling RankCeiling, limit, offset int) ([]CollectionSample, error) {
 	under, args := ceiling.and("i")
 	args = append([]any{name}, args...)
@@ -291,9 +314,86 @@ func CollectionMembers(database *db.DB, name string, ceiling RankCeiling, limit,
 		return []any{&sample.ID, &sample.Order, &sample.Filename}
 	}),
 		`SELECT c.image_id, c.position, basename(i.canonical_path)
-		 FROM image_collections c JOIN images i ON i.id = c.image_id
+		 FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
 		 WHERE c.name = ? AND i.is_missing = 0`+under+`
 		 ORDER BY c.position IS NULL, c.position, c.image_id LIMIT ? OFFSET ?`, args...)
+}
+
+// CollectionNav places an image in one of its collections. Rank is
+// 1-based among the visible members, in reading order.
+type CollectionNav struct {
+	Name        string
+	Rank, Total int
+	Window      []CollectionSample
+}
+
+// The image counts even when missing or above the ceiling, so it always
+// has a rank.
+func CollectionNavs(database *db.DB, imageID int64, ceiling RankCeiling, size int) ([]CollectionNav, error) {
+	memberships, err := CollectionsForImage(database, imageID)
+	if err != nil {
+		return nil, err
+	}
+	navs := make([]CollectionNav, 0, len(memberships))
+	for _, m := range memberships {
+		nav, err := collectionNav(database, imageID, m, ceiling, size)
+		if err != nil {
+			return nil, err
+		}
+		navs = append(navs, nav)
+	}
+	return navs, nil
+}
+
+// The key compares unnumbered members as position 0 behind the IS NULL
+// flag: a NULL inside a row value would make the comparison NULL.
+const readingKey = `(c.position IS NULL, COALESCE(c.position, 0), c.image_id)`
+
+func collectionNav(database *db.DB, imageID int64, m models.Collection, ceiling RankCeiling, size int) (CollectionNav, error) {
+	under, underArgs := ceiling.and("i")
+	from := ` FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
+		 WHERE c.name = ? AND (c.image_id = ? OR (i.is_missing = 0` + under + `))`
+	fromArgs := append([]any{m.Name, imageID}, underArgs...)
+	selfNull, selfPos := 1, 0
+	if m.Order != nil {
+		selfNull, selfPos = 0, *m.Order
+	}
+	selfKey := []any{selfNull, selfPos, imageID}
+
+	nav := CollectionNav{Name: m.Name}
+	var before int
+	if err := database.Read.QueryRow(`SELECT COUNT(*), COALESCE(SUM(`+readingKey+` < (?, ?, ?)), 0)`+from,
+		append(append([]any{}, selfKey...), fromArgs...)...).Scan(&nav.Total, &before); err != nil {
+		return nav, err
+	}
+	nav.Rank = before + 1
+
+	side := func(cmp, dir string) ([]CollectionSample, error) {
+		args := append(append(append([]any{}, fromArgs...), selfKey...), size-1)
+		return db.QueryAll(database.Read, db.ScanRow(func(sample *CollectionSample) []any {
+			return []any{&sample.ID, &sample.Order}
+		}), `SELECT c.image_id, c.position`+from+` AND `+readingKey+` `+cmp+` (?, ?, ?)
+			 ORDER BY c.position IS NULL `+dir+`, c.position `+dir+`, c.image_id `+dir+` LIMIT ?`, args...)
+	}
+	prev, err := side("<", "DESC")
+	if err != nil {
+		return nav, err
+	}
+	next, err := side(">", "ASC")
+	if err != nil {
+		return nav, err
+	}
+	others := size - 1
+	nb := min(len(prev), others/2)
+	na := min(len(next), others-nb)
+	nb = min(len(prev), others-na)
+	nav.Window = make([]CollectionSample, 0, nb+1+na)
+	for i := nb - 1; i >= 0; i-- {
+		nav.Window = append(nav.Window, prev[i])
+	}
+	nav.Window = append(nav.Window, CollectionSample{ID: imageID, Order: m.Order})
+	nav.Window = append(nav.Window, next[:na]...)
+	return nav, nil
 }
 
 // ReorderCollection leaves the members missing from ids unordered. Past
@@ -354,7 +454,7 @@ func SortCollectionByFilename(database *db.DB, name string) error {
 	members, err := db.QueryAll(database.Read, db.ScanRow(func(m *member) []any {
 		return []any{&m.id, &m.filename}
 	}), `SELECT c.image_id, basename(i.canonical_path)
-		 FROM image_collections c JOIN images i ON i.id = c.image_id
+		 FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
 		 WHERE c.name = ?
 		 ORDER BY c.image_id`, name)
 	if err != nil {
@@ -406,7 +506,7 @@ func CollectionHiddenOrderedIDs(database *db.DB, name string, ceiling RankCeilin
 		overCeiling, args = " OR i.rating_rank > ?", append(args, ceiling.Rank)
 	}
 	return db.QueryIDs(database.Read,
-		`SELECT c.image_id FROM image_collections c JOIN images i ON i.id = c.image_id
+		`SELECT c.image_id FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
 		 WHERE c.name = ? AND c.position IS NOT NULL AND (i.is_missing = 1`+overCeiling+`)
 		 ORDER BY c.position, c.image_id`, args...)
 }
@@ -426,7 +526,7 @@ func CollectionCBZMembers(database *db.DB, name string) ([]CBZMember, error) {
 	rows, err := db.QueryAll(database.Read, db.ScanRow(func(r *memberRow) []any {
 		return []any{&r.Path, &r.FileType, &r.filename, &r.pos}
 	}), `SELECT i.canonical_path, i.file_type, basename(i.canonical_path), c.position
-		 FROM image_collections c JOIN images i ON i.id = c.image_id
+		 FROM image_collections c CROSS JOIN images i ON i.id = c.image_id
 		 WHERE c.name = ? AND i.is_missing = 0
 		 ORDER BY c.position IS NULL, c.position, c.image_id`, name)
 	if err != nil {
@@ -448,8 +548,12 @@ func CollectionCBZMembers(database *db.DB, name string) ([]CBZMember, error) {
 
 func AddCollectionToImages(database *db.DB, ids []int64, name string) error {
 	placeholders, args := db.InPlaceholders(ids)
-	labelArgs := append([]any{name}, args...)
 	return db.InWriteTx(database.Write, func(tx *sql.Tx) error {
+		name, err := ExistingLabelTx(tx, name)
+		if err != nil {
+			return err
+		}
+		labelArgs := append([]any{name}, args...)
 		if _, err := tx.Exec(
 			`INSERT INTO image_collections (image_id, name, position)
 			 SELECT id, ?, NULL FROM images WHERE id IN (`+placeholders+`)
@@ -458,7 +562,7 @@ func AddCollectionToImages(database *db.DB, ids []int64, name string) error {
 		); err != nil {
 			return err
 		}
-		_, err := tx.Exec(
+		_, err = tx.Exec(
 			`UPDATE images SET series = ?, series_order = NULL
 			 WHERE series = '' AND id IN (`+placeholders+`)`,
 			labelArgs...,

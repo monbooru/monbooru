@@ -1,7 +1,10 @@
 package search
 
 import (
+	"context"
 	"database/sql"
+	"errors"
+	"slices"
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/db"
@@ -56,6 +59,11 @@ func fastTotalExact(expr Expr) bool {
 // Unlike fastTagTotal, AND and OR are not gated here: the bucket decision
 // needs exactly the small intersections that gate hides.
 func adjacencyTotalEstimate(src Source, expr Expr) (int, bool) {
+	// The ceiling only narrows, so the user part bounds the set; its lone
+	// NOT rating:X leaves have no count of their own.
+	if user, _, ok := extractCeilingShape(expr); ok && user != nil {
+		return adjacencyTotalEstimate(src, user)
+	}
 	switch e := expr.(type) {
 	case AndExpr:
 		return fastCountBinary(src, e.Left, e.Right, adjacencyTotalEstimate, minInt)
@@ -108,19 +116,34 @@ func ApplyCeiling(expr Expr, level string) Expr {
 	return AndExpr{Left: expr, Right: ce}
 }
 
-// HiddenByCeiling counts exactly the images expr matches that level hides.
-func HiddenByCeiling(src Source, expr Expr, level string) (int, error) {
+// HiddenByCeiling counts exactly the images the query text matches that
+// level hides.
+func HiddenByCeiling(ctx context.Context, src Source, text, level string) (int, error) {
 	rank := contract.RatingRank(level)
 	if rank < 0 || rank >= len(contract.RatingLevels)-1 {
 		return 0, nil
 	}
-	where, args := exactCountWhere(src, expr)
+	key := adjacencyKey(text, "", "", 0, level, src.LookupBackends)
+	if entry, ok := src.Cache.hiddenCount(key); ok {
+		if entry.overran {
+			return 0, context.DeadlineExceeded
+		}
+		return entry.n, nil
+	}
+	gen := src.Cache.gen()
+	where, args := exactCountWhere(src, Parse(text))
 	var n int
-	err := src.DB.Read.QueryRow(
+	if err := src.DB.Read.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM images i WHERE "+where+" AND i.rating_rank > ?",
 		append(args, rank)...,
-	).Scan(&n)
-	return n, err
+	).Scan(&n); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			src.Cache.setHiddenCount(key, hiddenCountEntry{overran: true}, gen)
+		}
+		return 0, err
+	}
+	src.Cache.setHiddenCount(key, hiddenCountEntry{n: n}, gen)
+	return n, nil
 }
 
 // A lone literal drives from image_tags rather than walking every visible
@@ -421,31 +444,17 @@ func fastCountFolder(src Source, e FilterExpr) (int, bool) {
 // The LIKE-OR matches no index, so the few distinct source_type values
 // are matched in Go and the count takes an IN over them.
 func fastCountAI(src Source, e FilterExpr) (int, bool) {
-	val := strings.ToLower(e.Val)
-	if val == "sd" {
-		val = "a1111"
-	}
-	if val == "any" || val == "none" {
-		return 0, false
-	}
-	if !strings.Contains(val, ",") {
+	parts := aiParts(e.Val)
+	if len(parts) < 2 {
 		return 0, false
 	}
 	present, err := db.QueryStrings(src.DB.Read, `SELECT DISTINCT source_type FROM images`)
 	if err != nil {
 		return 0, false
 	}
-
-	// Must accept exactly what buildAIFilter's four LIKEs do.
-	prefix := val + ","
-	suffix := "," + val
-	middle := "," + val + ","
 	var matching []string
 	for _, s := range present {
-		if s == val ||
-			strings.HasPrefix(s, prefix) ||
-			strings.HasSuffix(s, suffix) ||
-			strings.Contains(s, middle) {
+		if slices.ContainsFunc(parts, func(p string) bool { return aiValueMatches(s, p) }) {
 			matching = append(matching, s)
 		}
 	}

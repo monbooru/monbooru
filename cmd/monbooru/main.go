@@ -69,17 +69,23 @@ func main() {
 	// Runs after the defers below, so the new process finds the port, the
 	// database and the log file released.
 	restartOnExit := false
+	var layout desktop.Layout
 	defer func() {
-		if restartOnExit {
-			if err := desktop.Relaunch(); err != nil {
-				logx.Errorf("restart: %v", err)
+		if !restartOnExit {
+			return
+		}
+		if err := desktop.Relaunch(); err != nil {
+			if layout.LogDir != "" {
+				if f, ferr := desktop.OpenLog(layout.LogDir, appName); ferr == nil {
+					defer func() { _ = f.Close() }()
+				}
 			}
+			reportFatal("restart: " + err.Error())
 		}
 	}()
 
 	var seed func(*config.Config)
 	var profile internalweb.Desktop
-	var layout desktop.Layout
 	if *desktopMode {
 		dialogOnFatal = true
 		resolved, err := desktop.Resolve(appName, explicitFlag("config", *configPath))

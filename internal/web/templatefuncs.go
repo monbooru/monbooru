@@ -110,6 +110,7 @@ func templateFuncs() template.FuncMap {
 			}
 		},
 		"cancelTitle": cancelTitle,
+		"jobLabel":    jobLabel,
 		"localTime": func(t time.Time) string {
 			return t.In(time.Local).Format("2006-01-02 15:04:05")
 		},
@@ -128,6 +129,8 @@ func templateFuncs() template.FuncMap {
 			return "no match"
 		},
 		"browseSortLabel": browseSortLabel,
+		"tokenHint":       tokenHint,
+		"addedViaLabel":   addedViaLabel,
 		"isLongValue": func(s string) bool {
 			return len(s) > 200 || strings.ContainsAny(s, "\n\r")
 		},
@@ -227,6 +230,22 @@ var runningJobNames = map[string]string{
 
 func runningJobName(jobType string) string { return cmp.Or(runningJobNames[jobType], "A job") }
 
+var jobLabels = map[string]string{
+	"autotag":         "auto-tag",
+	"tag":             "tagging",
+	"rebuild-thumbs":  "thumbnails",
+	"prune-thumbs":    "orphaned thumbnails",
+	"prune-dirs":      "empty folders",
+	"meta-tags":       "meta tags",
+	"index-workflows": "workflow index",
+	"relations":       "find pairs",
+	"free-memory":     "free memory",
+	"fold":            "old spellings",
+	"check":           "name check",
+}
+
+func jobLabel(jobType string) string { return cmp.Or(jobLabels[jobType], jobType) }
+
 var browseSortLabels = map[string]string{
 	"recent":         "Recent",
 	"size":           "Size",
@@ -236,6 +255,33 @@ var browseSortLabels = map[string]string{
 }
 
 func browseSortLabel(s string) string { return cmp.Or(browseSortLabels[s], s) }
+
+var tokenHints = map[string]string{
+	"{name}":    "current file name, no extension",
+	"{ext}":     "extension, e.g. png",
+	"{id}":      "image ID, e.g. 1042",
+	"{hash:8}":  "first 8 characters of the file hash, e.g. 3fa2c91b",
+	"{md5}":     "MD5 of the file",
+	"{date}":    "day the image was added, e.g. 2026-10-25",
+	"{year}":    "year the image was added, e.g. 2026",
+	"{month}":   "month the image was added, e.g. 10",
+	"{gallery}": "gallery name, e.g. default",
+	"{type}":    "detected type, e.g. png, gif, cbz",
+	"{folder}":  "the image's current folder",
+	"{n}":       "01, 02, ... in the order of the selection",
+	"{source}":  "site the sender gave, e.g. danbooru",
+	"{post_id}": "post number on that site, e.g. 4821337",
+}
+
+func tokenHint(token string) string { return tokenHints[token] }
+
+var addedViaLabels = map[string]string{
+	models.OriginIngest:   "found on disk",
+	models.OriginExtract:  "extracted from an archive",
+	models.OriginGenerate: "built from a collection",
+}
+
+func addedViaLabel(origin string) string { return cmp.Or(addedViaLabels[origin], origin) }
 
 var monloaderOffReasons = map[string]string{
 	peer.ConnPaused:   "monloader is paused",

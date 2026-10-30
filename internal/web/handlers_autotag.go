@@ -36,7 +36,7 @@ func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, im
 			return
 		}
 		if finished, _ := tagger.Settle(ctx, s.jobs, "", "", len(ids), skipped, err); finished {
-			peak(fmt.Sprintf("batch %d image(s)", len(ids)))
+			peak(fmt.Sprintf("batch %d %s", len(ids), models.Plural(len(ids), "image", "images")))
 		}
 	}()
 }
@@ -97,7 +97,7 @@ func (s *Server) uploadPost(w http.ResponseWriter, r *http.Request) {
 	for _, fh := range files {
 		totalBytes += fh.Size
 	}
-	logx.Infof("upload: ingesting %d file(s) (%s)", len(files), webui.HumanBytes(totalBytes))
+	logx.Infof("upload: ingesting %d %s (%s)", len(files), models.Plural(len(files), "file", "files"), webui.HumanBytes(totalBytes))
 
 	var addedIDs []int64
 	var dupeIDs []int64

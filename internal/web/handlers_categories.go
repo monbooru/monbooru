@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/models"
@@ -16,8 +17,9 @@ import (
 // Galleries shadows the layout's list with the config rows the picker renders.
 type categoriesData struct {
 	baseData
-	Galleries  []config.Gallery
-	Categories []models.TagCategory
+	Galleries    []config.Gallery
+	Categories   []models.TagCategory
+	DefaultOrder []int64
 }
 
 func (s *Server) categoriesHandler(w http.ResponseWriter, r *http.Request) {
@@ -26,11 +28,17 @@ func (s *Server) categoriesHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defaultOrder, err := s.tagSvc().DefaultCategoryOrder()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	s.renderTemplate(w, "categories.html", categoriesData{
-		baseData:   s.base(r, "categories", "Categories - "+s.booruName()),
-		Galleries:  s.galleryList(),
-		Categories: cats,
+		baseData:     s.base(r, "categories", "Categories - "+s.booruName()),
+		Galleries:    s.galleryList(),
+		Categories:   cats,
+		DefaultOrder: defaultOrder,
 	})
 }
 
@@ -61,7 +69,20 @@ func (s *Server) categoryCountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = fmt.Fprintf(w, `{"count":%d,"aliases":%d,"linked_aliases":%d}`, c.Tags, c.Aliases, c.LinkedAliases)
+	_, _ = fmt.Fprintf(w, `{"count":%d,"aliases":%d,"linked_aliases":%d,"implications":%d}`, c.Tags, c.Aliases, c.LinkedAliases, c.Implications)
+}
+
+func (s *Server) removeCategoryImplicationsPost(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt64(w, r, "id")
+	if !ok {
+		return
+	}
+	edges, err := s.tagSvc().ImplicationsDeclaredIn(id)
+	if err != nil {
+		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.removeImplicationsAndSweep(w, edges, nil)
 }
 
 func (s *Server) createCategoryPost(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +127,26 @@ func (s *Server) updateCategoryPatch(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "partials/category_row.html", cat)
 }
 
+func (s *Server) reorderCategoriesPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	var ids []int64
+	for _, part := range strings.Split(r.FormValue("ids"), ",") {
+		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil {
+			http.Error(w, "Bad category id list.", http.StatusBadRequest)
+			return
+		}
+		ids = append(ids, id)
+	}
+	if err := s.tagSvc().ReorderCategories(ids); err != nil {
+		http.Error(w, err.Error(), categoryStatus(err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) deleteCategoryDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := idAndForm(w, r)
 	if !ok {
@@ -137,7 +178,7 @@ func categoryStatus(err error) int {
 		errors.Is(err, tags.ErrInvalidCategoryName), errors.Is(err, tags.ErrReservedCategoryName),
 		errors.Is(err, tags.ErrInvalidCategoryColor):
 		return http.StatusBadRequest
-	case errors.As(err, &collision), errors.Is(err, tags.ErrCategoryExists):
+	case errors.As(err, &collision), errors.Is(err, tags.ErrCategoryExists), errors.Is(err, tags.ErrCategoryOrderStale):
 		return http.StatusConflict
 	}
 	return http.StatusInternalServerError

@@ -492,18 +492,29 @@ func (s *Scheduler) removeOrphans(r *jobs.Reservation, cx *library.Gallery) erro
 		logx.Warnf("scheduler orphans %q: %v", cx.Name, err)
 		return err
 	}
-	logx.Infof("scheduler: [%s] removed %d orphaned thumbnail(s)", cx.Name, removed)
+	logx.Infof("scheduler: [%s] removed %d orphaned %s", cx.Name, removed, models.Plural(removed, "thumbnail", "thumbnails"))
 	return nil
 }
 
 // A stamped image was tagged before, so tags the operator stripped since
-// stay stripped.
-func autotagCandidates(d *db.DB) ([]int64, error) {
-	return db.QueryIDs(d.Read, `SELECT id FROM images WHERE is_missing = 0 AND auto_tagged_at IS NULL`)
+// stay stripped. Without ffmpeg the tagger skips the types only it frames
+// and leaves them unstamped, so they are left out rather than retried nightly.
+func autotagCandidates(d *db.DB, ffmpeg bool) ([]int64, error) {
+	q := `SELECT id FROM images WHERE is_missing = 0 AND auto_tagged_at IS NULL`
+	if !ffmpeg {
+		var skip []string
+		for _, ft := range models.FileTypes {
+			if ft.Video || ft.FFmpegStill {
+				skip = append(skip, "'"+ft.Name+"'")
+			}
+		}
+		q += ` AND file_type NOT IN (` + strings.Join(skip, ", ") + `)`
+	}
+	return db.QueryIDs(d.Read, q)
 }
 
 func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
-	ids, err := autotagCandidates(cx.DB)
+	ids, err := autotagCandidates(cx.DB, gallery.FFmpegAvailable())
 	if err != nil {
 		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
 		return err
@@ -524,7 +535,7 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, enabled, s.jobs, cfg.Tagger.ExecutionProvider)
 	finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(ids), skipped, err)
 	if finished {
-		peak(fmt.Sprintf("scheduled %s %d image(s)", cx.Name, len(ids)))
+		peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(ids), models.Plural(len(ids), "image", "images")))
 	}
 	if err != nil {
 		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)

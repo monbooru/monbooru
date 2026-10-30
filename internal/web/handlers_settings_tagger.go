@@ -8,11 +8,11 @@ import (
 	"html"
 	"io/fs"
 	"maps"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -38,7 +38,6 @@ type taggerRow struct {
 	Supported           bool
 	Gated               bool
 	HostCommand         string
-	DockerCommand       string
 	// The browser fetches these itself, which keeps the server's
 	// no-outbound-request promise.
 	Files     []tagger.CatalogFile
@@ -450,7 +449,6 @@ func (s *Server) categoryChoices() (map[string]int64, []string) {
 		ids[c.Name] = c.ID
 		names = append(names, c.Name)
 	}
-	sort.Strings(names)
 	return ids, names
 }
 
@@ -458,7 +456,7 @@ func (s *Server) categoryChoices() (map[string]int64, []string) {
 func parseThresholdForm(r *http.Request) (global float64, overrides map[string]float64, topK map[string]int, disabled []string, errMsg string) {
 	globalRaw := strings.TrimSpace(r.FormValue("global_threshold"))
 	global, err := strconv.ParseFloat(globalRaw, 64)
-	if err != nil || global < 0 || global > 1 {
+	if err != nil || math.IsNaN(global) || global < 0 || global > 1 {
 		return 0, nil, nil, nil, "Global threshold must be between 0 and 1."
 	}
 	overrides = map[string]float64{}
@@ -471,7 +469,7 @@ func parseThresholdForm(r *http.Request) (global float64, overrides map[string]f
 		raw := strings.TrimSpace(r.FormValue("threshold_" + cat))
 		if raw != "" {
 			v, err := strconv.ParseFloat(raw, 64)
-			if err != nil || v < 0 || v > 1 {
+			if err != nil || math.IsNaN(v) || v < 0 || v > 1 {
 				return 0, nil, nil, nil, "Threshold for " + cat + " must be between 0 and 1."
 			}
 			overrides[cat] = v

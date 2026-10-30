@@ -6,46 +6,59 @@
 <div id="gallery-header">
   <form id="search-form" hx-get="/" hx-target="#gallery-grid" hx-push-url="true" hx-swap="innerHTML">
     {{template "partials/search_input.html" .Query}}
-    {{template "partials/sort_select.html" .}}
-    <select name="order" aria-label="Sort direction" onchange="submitSearch()">
-      <option value="desc" {{if eq .Order "desc"}}selected{{end}}>↓</option>
-      <option value="asc"  {{if eq .Order "asc"}}selected{{end}}>↑</option>
-    </select>
-    {{if .RandomSeed}}<input type="hidden" name="seed" value="{{.RandomSeed}}">{{end}}
-    <button type="submit">Search</button>
-    <button type="button" id="fav-filter-btn" class="{{if hasFavFilter .Query}}active{{end}}"
-            onclick="toggleFavFilter()" title="Show favorites (F)">♥&#xFE0E;</button>
-    <button type="button" id="random-sort-btn" class="{{if eq .Sort "random"}}active{{end}}"
-            onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)">⇄</button>
+    <span class="search-controls">
+      {{template "partials/sort_select.html" .}}
+      <select name="order" aria-label="Sort direction" onchange="submitSearch()">
+        <option value="desc" {{if eq .Order "desc"}}selected{{end}}>↓</option>
+        <option value="asc"  {{if eq .Order "asc"}}selected{{end}}>↑</option>
+      </select>
+      {{if .RandomSeed}}<input type="hidden" name="seed" value="{{.RandomSeed}}">{{end}}
+      <button type="submit">Search</button>
+      <button type="button" id="fav-filter-btn" class="{{if hasFavFilter .Query}}active{{end}}"
+              onclick="toggleFavFilter()" title="Show favorites (F)">♥&#xFE0E;</button>
+      <button type="button" id="random-sort-btn" class="{{if eq .Sort "random"}}active{{end}}"
+              onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)">⇄</button>
+      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)">▶&#xFE0E;</button>
+    </span>
   </form>
-  <div id="save-search-area">{{template "partials/save_search_area.html" .}}</div>
-  <button type="button" id="select-mode-btn" aria-pressed="false" onclick="toggleSelectMode()" title="Select mode (V)">Select mode</button>
+  <div class="gallery-header-end">
+    <div id="save-search-area">{{template "partials/save_search_area.html" .}}</div>
+  </div>
 </div>
 
 <div id="gallery-flash" data-action-flash></div>
 <div id="search-warning">{{if .SearchWarning}}<span class="field-hint">{{.SearchWarning}}</span>{{end}}</div>
 
-{{template "partials/gallery_status.html" .}}
+<div class="gallery-status-row">
+  {{template "partials/gallery_status.html" .}}
+  <button type="button" id="select-mode-btn" aria-pressed="false" onclick="toggleSelectMode()" title="Select mode (V)">Select mode</button>
+</div>
 
 <div id="batch-bars">
 <div id="batch-bar" class="batch-bar" hidden>
-  <button onclick="selectAll()">Select page</button>
-  <button id="batch-invert" onclick="invertSelection()">Invert</button>
-  <button id="batch-cancel" onclick="clearSelection()">Cancel</button>
+  <span class="batch-group"><span class="batch-group-label">select</span><span class="batch-ramp">
+    <button type="button" onclick="selectAll()" title="Select page">Page</button>
+    <button type="button" id="batch-invert" onclick="invertSelection()" title="Invert the page's selection">Invert</button>
+    <button type="button" id="batch-cancel" onclick="clearSelection()" title="Clear selection">None</button>
+  </span><button type="button" id="batch-exit" onclick="toggleSelectMode()" title="Exit select mode (V)">Exit</button></span>
   <span class="batch-actions">
     <span class="batch-bar-spacer"></span>
-    <button type="button" onclick="openTagDialog('selection')">Add tags</button>
-    <button type="button" onclick="openStripDialog('selection')">Remove tags</button>
-    {{if .TaggersPresent}}<button type="button" class="btn-autotag"{{if not .EnabledTaggers}} disabled title="{{.TaggerReason}}"{{end}} onclick="openBatchAutotagDialog('selection')">Auto-tag</button>{{end}}
-    {{if .MonloaderPaired}}<button type="button" class="peer-accent" data-peer-title=""{{if not .MonloaderUsable}} disabled title="{{monloaderOffReason .MonloaderConn}}"{{end}} onclick="openBatchLookupDialog('selection')">Find tags</button>{{end}}
-    <span class="batch-bar-sep" aria-hidden="true"></span>
-    <button type="button" onclick="openBatchDialog('batch-inbox', 'selection')">Inbox</button>
-    <button type="button" onclick="openBatchDialog('batch-fav', 'selection')">Favorite</button>
-    <button type="button" onclick="openBatchCollectionDialog('selection')">Set collection</button>
-    <span class="batch-bar-sep" aria-hidden="true"></span>
-    <button type="button" id="batch-download" onclick="openBatchDownloadDialog('selection')">Download</button>
-    {{if gt (len .Galleries) 1}}<button type="button" id="batch-transfer" onclick="openBatchTransferDialog('selection')">Transfer</button>{{end}}
-    <button type="button" onclick="openBatchPlaceDialog('selection')">Rename</button>
+    <span class="batch-group"><span class="batch-group-label">tags</span><span class="batch-ramp">
+      <button type="button" onclick="openTagDialog('selection')" title="Add tags">Add</button>
+      <button type="button" onclick="openStripDialog('selection')" title="Remove tags">Remove</button>
+      {{if .TaggersPresent}}<button type="button" class="btn-autotag"{{if not .EnabledTaggers}} disabled title="{{.TaggerReason}}"{{end}} onclick="openBatchAutotagDialog('selection')">Auto-tag</button>{{end}}
+      {{if .MonloaderPaired}}<button type="button" class="peer-accent" data-peer-title="Find tags" title="{{if .MonloaderUsable}}Find tags{{else}}{{monloaderOffReason .MonloaderConn}}{{end}}"{{if not .MonloaderUsable}} disabled{{end}} onclick="openBatchLookupDialog('selection')">Find</button>{{end}}
+    </span></span>
+    <span class="batch-group"><span class="batch-group-label">toggle</span><span class="batch-ramp">
+      <button type="button" onclick="openBatchDialog('batch-inbox', 'selection')" title="Toggle inbox">Inbox</button>
+      <button type="button" onclick="openBatchDialog('batch-fav', 'selection')" title="Toggle favorite">Favorite</button>
+    </span></span>
+    <span class="batch-ramp">
+      <button type="button" onclick="openBatchCollectionDialog('selection')" title="Set collection">Collection</button>
+      <button type="button" id="batch-download" onclick="openBatchDownloadDialog('selection')">Download</button>
+      {{if gt (len .Galleries) 1}}<button type="button" id="batch-transfer" onclick="openBatchTransferDialog('selection')">Transfer</button>{{end}}
+      <button type="button" onclick="openBatchPlaceDialog('selection')">Rename / move</button>
+    </span>
     <button type="button" class="btn-danger" onclick="openBatchDeleteDialog('selection')">Delete</button>
   </span>
 </div>
@@ -68,7 +81,8 @@
     <input type="hidden" name="sort" id="save-search-sort" value="{{.Sort}}">
     <input type="hidden" name="order" id="save-search-order" value="{{.Order}}">
     <input type="hidden" name="seed" id="save-search-seed" value="{{if .RandomSeed}}{{.RandomSeed}}{{end}}">
-    <p>Save search:<br><code id="save-search-preview" class="save-search-terms">{{.Query}}</code></p>
+    <p class="dlg-title">Save search{{template "webui/dialog_x"}}</p>
+    <p><code id="save-search-preview" class="save-search-terms">{{.Query}}</code></p>
     <div class="field">
       <label>Name</label>
       <input type="text" name="name" id="save-search-name" placeholder="Search name" required
@@ -81,7 +95,7 @@
 
 <dialog id="batch-delete-dialog">
   <input type="hidden" id="batch-delete-scope">
-  <p>Delete {{template "batch_count" "batch-delete"}}?</p>
+  <p class="dlg-title">Delete {{template "batch_count" "batch-delete"}}?{{template "webui/dialog_x"}}</p>
   <p style="color:var(--error);font-size:12px">Files are permanently deleted from disk. This cannot be undone.</p>
   <div id="batch-delete-flash"></div>
   <div class="dialog-actions">
@@ -91,15 +105,15 @@
 </dialog>
 
 <dialog id="batch-tag-dialog">
-  <p>
+  <p class="dlg-title">
     Add tags to <strong id="batch-tag-count-display"></strong>
-    <span id="batch-tag-noun"></span>:
+    <span id="batch-tag-noun"></span>:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-tag-form" onsubmit="event.preventDefault(); confirmBatchTag();">
     <input type="hidden" name="scope" id="batch-tag-scope">
     <div class="field" style="position:relative">
       <label>Tags (space-separated, <code>category:name</code> for non-general)</label>
-      {{template "multi_tag_suggest_input" dict "Name" "tags" "InputID" "batch-tag-input" "SuggestID" "batch-tag-suggest" "Placeholder" "Add tag(s)..." "Class" "upload-wide-input" "ValsKey" "tag"}}
+      {{template "multi_tag_suggest_input" dict "Name" "tags" "InputID" "batch-tag-input" "SuggestID" "batch-tag-suggest" "Placeholder" "Add tags..." "Class" "upload-wide-input" "ValsKey" "tag"}}
     </div>
     <div id="batch-tag-flash"></div>
     {{template "dialog_actions" dict "ID" "batch-tag-dialog" "Submit" "Apply"}}
@@ -108,8 +122,8 @@
 
 {{if .EnabledTaggers}}
 <dialog id="batch-autotag-dialog">
-  <p>
-    Auto-tag {{template "batch_count" "batch-autotag"}}. Pick which tagger to run.
+  <p class="dlg-title">
+    Auto-tag {{template "batch_count" "batch-autotag"}}. Pick which tagger to run.{{template "webui/dialog_x"}}
   </p>
   <form id="batch-autotag-form" onsubmit="event.preventDefault(); confirmBatchAutotag();">
     <input type="hidden" id="batch-autotag-scope">
@@ -124,19 +138,19 @@
 {{end}}
 
 <dialog id="batch-strip-dialog">
-  <p>
+  <p class="dlg-title">
     Remove tags from <strong id="batch-strip-count-display"></strong>
-    <span id="batch-strip-noun"></span>:
+    <span id="batch-strip-noun"></span>:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-strip-form" onsubmit="event.preventDefault(); confirmBatchStrip();">
     <input type="hidden" name="scope" id="batch-strip-scope">
     <div class="field" onchange="updateBatchStripRow()">
-      <label><input type="radio" name="mode" value="specific" checked> Specific tags by name</label>
+      <label><input type="radio" name="mode" value="specific" checked> Tags by name</label>
       <div class="field" style="position:relative; margin: 4px 0 8px 22px" id="batch-strip-specific-row">
         {{template "multi_tag_suggest_input" dict "Name" "tags" "InputID" "batch-strip-input" "SuggestID" "batch-strip-suggest" "Placeholder" "Tags to remove (space-separated, category:name)" "Class" "upload-wide-input" "ValsKey" "tag"}}
       </div>
       {{if .SourceLabelCounts}}
-      <label><input type="radio" name="mode" value="source-specific"> Specific source</label>
+      <label><input type="radio" name="mode" value="source-specific"> Tags from one source</label>
       <div class="field" style="margin: 4px 0 8px 22px" id="batch-strip-source-row">
         <select name="source" id="batch-strip-source" class="upload-wide-input">
           {{range .SourceLabelCounts}}<option value="{{.Source}}">{{.Source}}</option>{{end}}
@@ -144,16 +158,16 @@
       </div>
       {{end}}
       {{if .EnabledTaggers}}
-      <label><input type="radio" name="mode" value="auto-specific"> Specific auto-tagger</label>
+      <label><input type="radio" name="mode" value="auto-specific"> Tags from one auto-tagger</label>
       <div class="field" style="margin: 4px 0 8px 22px" id="batch-strip-tagger-row">
         <select name="tagger_name" id="batch-strip-tagger" class="upload-wide-input">
           {{range .EnabledTaggers}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
         </select>
       </div>
       {{end}}
-      <label><input type="radio" name="mode" value="user"> All user tags</label>
-      {{if .SourceLabelCounts}}<label><input type="radio" name="mode" value="source-all"> All external sources</label>{{end}}
-      {{if .SourceLabelCounts}}<label><input type="radio" name="mode" value="stale"> Stale tags</label>{{end}}
+      <label><input type="radio" name="mode" value="user"> All tags you added</label>
+      {{if .SourceLabelCounts}}<label><input type="radio" name="mode" value="source-all"> All tags from sources</label>{{end}}
+      {{if .SourceLabelCounts}}<label><input type="radio" name="mode" value="stale"> Stale tags (dropped by their source)</label>{{end}}
       <label><input type="radio" name="mode" value="auto"> All auto-tagger tags</label>
       <label><input type="radio" name="mode" value="all"> All tags</label>
     </div>
@@ -163,8 +177,8 @@
 </dialog>
 
 <dialog id="batch-place-dialog">
-  <p>Rename / move {{template "batch_count" "batch-place"}}:</p>
-  <p class="field-hint">A plain name numbers the scope in order: name01.ext, name02.ext, ... A template with tokens names each file on its own. Extensions are kept.</p>
+  <p class="dlg-title">Rename / move {{template "batch_count" "batch-place"}}:{{template "webui/dialog_x"}}</p>
+  <p class="field-hint">A plain name adds numbers to the files (holiday gives holiday01, holiday02, ...). Use the tokens below to build each name from the image instead. Extensions are kept.</p>
   <form id="batch-place-form" onsubmit="event.preventDefault(); confirmBatchPlace();">
     <input type="hidden" id="batch-place-scope">
     <div class="field">
@@ -175,7 +189,7 @@
            hx-trigger="input delay:200ms from:#batch-place-folder, input delay:200ms from:#batch-place-name, preview"
            hx-vals='js:{...namePreviewVals("batch-place", "place-batch")}'></div>
       <button type="button" class="name-preview-more" id="batch-place-check"
-              onclick="checkBatchPlaceCollisions()">check the whole scope for taken names</button>
+              onclick="checkBatchPlaceCollisions()">check every image for name clashes</button>
     </div>
     <div id="batch-place-flash"></div>
     {{template "dialog_actions" dict "ID" "batch-place-dialog" "Submit" "Rename / move"}}
@@ -183,7 +197,7 @@
 </dialog>
 
 <dialog id="batch-transfer-dialog">
-  <p>Transfer {{template "batch_count" "batch-transfer"}} to another gallery:</p>
+  <p class="dlg-title">Transfer {{template "batch_count" "batch-transfer"}} to another gallery:{{template "webui/dialog_x"}}</p>
   <p class="field-hint">The image and its tags, sources and notes are copied into the target gallery.</p>
   <p class="field-hint" style="color:var(--error)">Relations and collections are not carried over.</p>
   <form id="batch-transfer-form" onsubmit="event.preventDefault(); confirmBatchTransfer();">
@@ -203,7 +217,7 @@
 </dialog>
 
 <dialog id="batch-download-dialog">
-  <p>Download {{template "batch_count" "batch-download"}} as a zip:</p>
+  <p class="dlg-title">Download {{template "batch_count" "batch-download"}} as a zip:{{template "webui/dialog_x"}}</p>
   <p class="field-hint" id="batch-download-summary"></p>
   <form id="batch-download-form" method="post" action="/internal/batch-download" target="batch-download-frame"
         onsubmit="event.preventDefault(); confirmBatchDownload();">
@@ -225,7 +239,7 @@
 {{template "batch_toggle_dialog" dict "Prefix" "batch-fav" "Lead" "Toggle favorite state for" "Hint" "Favorited images become unfavorited; unfavorited become favorited." "Endpoint" "/internal/batch-favorite" "FailMsg" "Favorite update failed."}}
 
 <dialog id="batch-collection-dialog">
-  <p>Set collection for {{template "batch_count" "batch-collection"}}:</p>
+  <p class="dlg-title">Set collection for {{template "batch_count" "batch-collection"}}:{{template "webui/dialog_x"}}</p>
   <form id="batch-collection-form" onsubmit="event.preventDefault(); confirmBatchCollection();">
     <input type="hidden" id="batch-collection-scope">
     <div class="field">
@@ -245,35 +259,37 @@
 
 <dialog id="batch-lookup-dialog">
   <input type="hidden" id="batch-lookup-scope">
-  <p>
+  <p class="dlg-title">
     Find tags for
-    {{template "batch_count" "batch-lookup"}}:
+    {{template "batch_count" "batch-lookup"}}:{{template "webui/dialog_x"}}
   </p>
   <div class="field">
-    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="refresh" checked onchange="updateBatchLookupSummary()"> Refresh tags from declared sources</label>
+    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="refresh" checked onchange="updateBatchLookupSummary()"> Refresh tags from each image's source page</label>
     <span class="field-hint batch-lookup-sub" id="batch-lookup-refresh-hint">&nbsp;</span>
 
-    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="hash" onchange="updateBatchLookupSummary()"> Look up by file hash</label>
+    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="hash" onchange="updateBatchLookupSummary()"> Find each image on boorus by its hash</label>
     <div class="batch-lookup-sub">
-      <label{{if not .MonloaderPTR}} title="{{if .MonloaderPTRSyncing}}the Public Tag Repository index is still syncing{{else if not .MonloaderUsable}}{{monloaderOffReason .MonloaderConn}}{{else}}the PTR index is off on monloader{{end}}"{{end}}><input type="checkbox" id="batch-lookup-ptr"{{if .MonloaderPTR}} checked{{else}} disabled{{end}} onchange="updateBatchLookupSummary()"> Public Tag Repository <span class="field-hint">local index, no quota</span></label>
-      <label><input type="checkbox" id="batch-lookup-booru" checked onchange="updateBatchLookupSummary()"> Online boorus <span class="field-hint">spends site quota, one request per image</span></label>
+      <label{{if not .MonloaderPTR}} title="{{if .MonloaderPTRSyncing}}the Public Tag Repository index is still syncing{{else if not .MonloaderUsable}}{{monloaderOffReason .MonloaderConn}}{{else}}the PTR index is off on monloader{{end}}"{{end}}><input type="checkbox" id="batch-lookup-ptr"{{if .MonloaderPTR}} checked{{else}} disabled{{end}} onchange="updateBatchLookupSummary()"> Public Tag Repository <span class="field-hint">offline copy, free</span></label>
+      <label><input type="checkbox" id="batch-lookup-booru" checked onchange="updateBatchLookupSummary()"> Online boorus <span class="field-hint">uses each site's request limit, one request per image</span></label>
       <label><input type="checkbox" id="batch-lookup-unsourced" checked onchange="updateBatchLookupSummary()"> Only images with no source <span class="field-hint" id="batch-lookup-unsourced-count"></span></label>
     </div>
 
-    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="schedule" onchange="updateBatchLookupSummary()"> Set scheduled lookup</label>
+    <label class="batch-lookup-op"><input type="radio" name="batch-lookup-mode" value="schedule" onchange="updateBatchLookupSummary()"> Nightly lookup <span class="field-hint">keep looking these images up each night while they have no source</span></label>
     <div class="batch-lookup-sub">
       <label><input type="radio" name="batch-lookup-schedule" value="1" checked> On</label>
       <label><input type="radio" name="batch-lookup-schedule" value="0"> Off</label>
     </div>
   </div>
   <p class="batch-lookup-summary" id="batch-lookup-summary"></p>
-  <p style="color:var(--fg-dim);font-size:12px">Queued lookups run behind anything you are waiting on, and cannot be cancelled from here.</p>
+  <p style="color:var(--fg-dim);font-size:12px">Lookups run in the background and cannot be cancelled from here.</p>
   <div id="batch-lookup-flash"></div>
   <div class="dialog-actions">
     <button type="button" id="batch-lookup-submit" onclick="confirmBatchLookup()">Find tags</button>
     <button type="button" onclick="document.getElementById('batch-lookup-dialog').close()">Cancel</button>
   </div>
 </dialog>
+
+{{template "partials/slideshow.html"}}
 
 
 <script>
@@ -324,7 +340,7 @@ function updateBatchLookupSummary() {
   var n = 0, text = '';
   if (mode === 'refresh') {
     n = c.sourced;
-    text = n + (n === 1 ? ' image' : ' images') + ' will be refreshed from their declared sources.';
+    text = n + (n === 1 ? ' image' : ' images') + ' will be refreshed from their source pages.';
   } else if (mode === 'hash') {
     n = unsourced.checked ? c.unsourced : c.total;
     var backends = [];
@@ -372,6 +388,9 @@ function openBatchPlaceDialog(scope) {
     beforeShow: function() {
       document.getElementById('batch-place-folder').value = '{folder}';
       delete document.getElementById('batch-place-preview').dataset.rows;
+      var n = +document.getElementById('batch-place-count').textContent;
+      document.getElementById('batch-place-check').textContent = n === 1
+        ? 'check the image for a name clash' : 'check all ' + n + ' images for name clashes';
     },
     focusId: 'batch-place-name'
   });
@@ -394,7 +413,7 @@ function checkBatchPlaceCollisions() {
   if (!scoped) return;
   var parts = ['scope=' + encodeURIComponent(scope), 'check=1']
     .concat(batchPlaceParams()).concat(scoped);
-  setFlashText(flash, 'ok', 'Checking the whole scope...');
+  setFlashText(flash, 'ok', 'Checking every image...');
   postForm('/internal/batch-place', new URLSearchParams(parts.join('&')), {
     flashId: 'batch-place-flash',
     failMsg: 'Check failed.',

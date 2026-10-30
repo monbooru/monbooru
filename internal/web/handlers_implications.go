@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tags"
@@ -42,22 +45,22 @@ func (s *Server) implicationsDialogHandler(w http.ResponseWriter, r *http.Reques
 	s.renderTemplate(w, "partials/implications_dialog.html", data)
 }
 
-// ok false means the response is written; ok true means the caller holds
-// the job lane for the fan-out. The lane is claimed before the first
-// write, so no edge is stored whose fan-out cannot run.
-func (s *Server) declareImplications(w http.ResponseWriter, r *http.Request, field string, edge func(tagID int64) (parent, implied int64)) (added int, edges []models.Implication, failures []string, ok bool) {
+// A nil res means the response is written; otherwise the caller holds the
+// job lane for the fan-out and hands it to propagateDeclared. The lane is
+// held before the first write, so no edge is stored whose fan-out cannot run.
+func (s *Server) declareImplications(w http.ResponseWriter, r *http.Request, field string, edge func(tagID int64) (parent, implied int64)) (added int, edges []models.Implication, failures []string, res *jobs.Reservation) {
 	raw := strings.TrimSpace(r.FormValue(field))
 	if raw == "" {
 		writeInlineFlash(w, "err", "Tag name is required.")
-		return 0, nil, nil, false
+		return 0, nil, nil, nil
 	}
 	tokens, err := splitTagTokens(raw)
 	if err != nil {
 		writeInlineFlash(w, "err", err.Error())
-		return 0, nil, nil, false
+		return 0, nil, nil, nil
 	}
-	if !s.startJob(w, models.JobTypeTag) {
-		return 0, nil, nil, false
+	if res = s.reserveJob(w); res == nil {
+		return 0, nil, nil, nil
 	}
 	for _, token := range tokens {
 		ref, msg := s.resolveCanonicalTagInput(token, true)
@@ -85,15 +88,15 @@ func (s *Server) declareImplications(w http.ResponseWriter, r *http.Request, fie
 		// Re-declaring an edge re-applies it, repairing images that lack what it implies.
 		edges = append(edges, models.Implication{ParentID: parent, ImpliedID: implied})
 	}
-	return added, edges, failures, true
+	return added, edges, failures, res
 }
 
-func (s *Server) propagateDeclared(edges []models.Implication, op string) {
-	if len(edges) == 0 {
-		s.jobs.Complete("no implication to propagate")
+func (s *Server) propagateDeclared(res *jobs.Reservation, edges []models.Implication, op string) {
+	defer res.Release()
+	if len(edges) == 0 || !s.startReserved(res, models.JobTypeTag) {
 		return
 	}
-	go s.runImplicationEdges(edges, op)
+	s.goJobWork(models.JobTypeTag, func(context.Context) { s.runImplicationEdges(edges, op) })
 }
 
 func implicationsAddedMsg(added int) string {
@@ -121,12 +124,12 @@ func (s *Server) addImplicationPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	added, edges, failures, ok := s.declareImplications(w, r, "implied_id",
+	added, edges, failures, res := s.declareImplications(w, r, "implied_id",
 		func(tagID int64) (int64, int64) { return parentID, tagID })
-	if !ok {
+	if res == nil {
 		return
 	}
-	s.propagateDeclared(edges, "add")
+	s.propagateDeclared(res, edges, "add")
 	if added > 0 {
 		setFlashHeader(w, implicationsAddedMsg(added), "ok", map[string]any{"implication-added": ""})
 	}
@@ -140,12 +143,12 @@ func (s *Server) addImpliedByPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	added, edges, failures, ok := s.declareImplications(w, r, "parent_id",
+	added, edges, failures, res := s.declareImplications(w, r, "parent_id",
 		func(tagID int64) (int64, int64) { return tagID, impliedID })
-	if !ok {
+	if res == nil {
 		return
 	}
-	s.propagateDeclared(edges, "add")
+	s.propagateDeclared(res, edges, "add")
 	if !writeImplicationFailures(w, added, len(edges), failures) {
 		hxDone(w, r, implicationsAddedMsg(added), "", fmt.Sprintf("/tags/%d", impliedID))
 	}
@@ -170,7 +173,9 @@ func (s *Server) removeImplicationDelete(w http.ResponseWriter, r *http.Request)
 		flashHeaderErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.propagateDeclared([]models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
+	s.goJobWork(models.JobTypeTag, func(context.Context) {
+		s.runImplicationEdges([]models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
+	})
 	setFlashHeader(w, "Implication removed.", "ok",
 		map[string]any{"tag-relations-changed": ""})
 	w.WriteHeader(http.StatusNoContent)
@@ -197,27 +202,28 @@ func (s *Server) removeImplicationGroup(w http.ResponseWriter, r *http.Request, 
 		flashHeaderErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if !s.startJob(w, models.JobTypeTag) {
+	edges = slices.DeleteFunc(edges, func(im models.Implication) bool { return im.Origin != origin || im.Stale != stale })
+	s.removeImplicationsAndSweep(w, edges, map[string]any{"tag-relations-changed": ""})
+}
+
+func (s *Server) removeImplicationsAndSweep(w http.ResponseWriter, edges []models.Implication, extras map[string]any) {
+	res := s.reserveJob(w)
+	if res == nil {
 		return
 	}
+	defer res.Release()
 	var removed []models.Implication
 	for _, im := range edges {
-		if im.Origin != origin || im.Stale != stale {
-			continue
-		}
 		if err := s.tagSvc().RemoveImplication(im.ParentID, im.ImpliedID); err != nil {
 			logx.Warnf("remove implication %d -> %d: %v", im.ParentID, im.ImpliedID, err)
 			continue
 		}
 		removed = append(removed, im)
 	}
-	if len(removed) > 0 {
-		go s.runImplicationGroupSweep(removed)
-	} else {
-		s.jobs.Complete("no implication to propagate")
+	if len(removed) > 0 && s.startReserved(res, models.JobTypeTag) {
+		s.goJobWork(models.JobTypeTag, func(context.Context) { s.runImplicationGroupSweep(removed) })
 	}
-	setFlashHeader(w, fmt.Sprintf("%d implication%s removed.", len(removed), plural(len(removed))), "ok",
-		map[string]any{"tag-relations-changed": ""})
+	setFlashHeader(w, fmt.Sprintf("%d implication%s removed.", len(removed), plural(len(removed))), "ok", extras)
 	w.WriteHeader(http.StatusNoContent)
 }
 

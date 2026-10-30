@@ -13,7 +13,7 @@
         hx-encoding="multipart/form-data">
     <div id="inbox-upload-drop" class="upload-drop-zone">
       <div class="upload-drop-prompt">
-        <span class="upload-drop-hint">Drop files here or use the button.</span>
+        <span class="upload-drop-hint">New images stay in the inbox until you archive them.<br>Drop images here to upload them, or</span>
         <button type="button" id="inbox-upload-pick-btn" class="btn-sm">Choose files</button>
       </div>
       <input type="file" name="files" id="inbox-upload-file-input" multiple accept="{{.AcceptFileTypes}}" hidden>
@@ -38,8 +38,8 @@
     <span class="thumb-cluster-label mono-small">{{.DateLabel}} · <a class="thumb-cluster-range" href="{{.RangeLink}}">{{.RangeLabel}}</a> · {{.Count}} on this page</span>
     <span class="thumb-cluster-rule" aria-hidden="true"></span>
     <button type="button" class="btn-sm thumb-cluster-select" data-cluster-unselect hidden>[Unselect]</button>
-    <button type="button" class="btn-sm thumb-cluster-select" data-cluster-all="{{.RangeQuery}}" title="The whole batch, including the part on other pages.">[Select all]</button>
-    <button type="button" class="btn-sm thumb-cluster-select" data-cluster-select>[Select]</button>
+    <button type="button" class="btn-sm thumb-cluster-select" data-cluster-all="{{.RangeQuery}}" title="The whole batch, including the part on other pages.">[Select whole batch]</button>
+    <button type="button" class="btn-sm thumb-cluster-select" data-cluster-select>[Select these]</button>
   </div>
   {{end}}{{end}}
   <div class="thumb-card" data-id="{{.ID}}"
@@ -49,6 +49,9 @@
       <img src="/thumbnails/{{$.ActiveGallery}}/{{.ID}}.jpg" alt="image {{.ID}}" loading="lazy"
            class="thumb-img"
            onerror="this.parentElement.innerHTML='<div class=thumb-placeholder title=&quot;preview unavailable&quot;>?</div>'">
+      {{if and .IsInbox (not $.InboxUploadActive)}}
+        <span class="inbox-mark" title="In inbox" aria-label="In inbox"></span>
+      {{end}}
       {{with index $.SimilarityPercent .ID}}
         <span class="badge badge-similarity" title="Tag similarity to the seed image">{{.}}%</span>
       {{end}}
@@ -58,9 +61,6 @@
         {{end}}
         {{if .IsFavorited}}
           <span class="badge fav-heart" title="Favorited"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 11 L1.2 6.4 a2.6 2.6 0 0 1 3.7 -3.7 L6 3.7 l1.1 -1 a2.6 2.6 0 0 1 3.7 3.7 Z"/></svg></span>
-        {{end}}
-        {{if .IsInbox}}
-          <span class="badge badge-inbox" title="In inbox">Inbox</span>
         {{end}}
         {{if .IsMissing}}
           <span class="badge badge-missing" title="Missing from disk"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg></span>
@@ -79,14 +79,25 @@
     </a>
   </div>
   {{else}}
-  <div class="no-results">No images found.
-    {{if and (not $.Query) (not $.Degraded)}}
+  <div class="no-results mascot-empty">
+    {{if $.Degraded}}{{with $.Mascot.panic}}<img src="{{.}}" alt="" class="mascot">{{end}}
+    {{else if or (not $.Query) (eq $.Query "inbox:true")}}{{with $.Mascot.sleep}}<img src="{{.}}" alt="" class="mascot">{{end}}
+    {{else}}{{with $.Mascot.lost}}<img src="{{.}}" alt="" class="mascot">{{end}}{{end}}
+    <div>
+    {{if $.Degraded}}No images found. (≖_≖ )
+    <p class="field-hint">The gallery folder can't be read, so nothing can be listed. Check its path in the configuration.</p>
+    {{else if eq $.Query "inbox:true"}}Inbox zero. (－ω－) zzZ
+    <p class="field-hint">New images land here. Press <kbd>Y</kbd> to sync now.</p>
+    {{else if $.Query}}No images found. (￣～￣;)
+    <p class="field-hint">Try fewer tags, or raise the rating ceiling in the footer.</p>
+    {{else}}No images found.
     <p class="field-hint empty-gallery-hint">
       <button type="button" class="btn-link-accent" onclick="document.getElementById('sync-form').requestSubmit()">[Sync gallery]</button>
       scans the gallery folder for existing files.<br>
       Drop files on the <a href="/?q=inbox:true">Inbox</a> page to upload.
     </p>
     {{end}}
+    </div>
   </div>
   {{end}}
 </div>

@@ -17,8 +17,7 @@ const (
 )
 
 // Outcome reads a fetch state as a lookup result. Only hash_not_found says
-// anything about the image; a dropped job or a failure code is about the
-// plumbing and leaves the ladder where it was.
+// anything about the image.
 func Outcome(state string) (result string, concluded bool) {
 	switch state {
 	case StatePending, StateOK:

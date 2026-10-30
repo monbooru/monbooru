@@ -82,7 +82,6 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		row.Description = e.Description
 		row.Gated = e.Gated
 		row.HostCommand = get.HostCommand()
-		row.DockerCommand = get.DockerCommand("monbooru")
 		supportedRows = append(supportedRows, row)
 	}
 	for _, t := range taggers {

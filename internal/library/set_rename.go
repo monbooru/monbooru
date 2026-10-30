@@ -205,5 +205,8 @@ func (cx *Gallery) imagesExcludedBy(b *gallery.Boundary) int {
 			n++
 		}
 	}
+	if err := rows.Err(); err != nil {
+		logx.Warnf("gallery %q: count ignored images: %v", cx.Name, err)
+	}
 	return n
 }

@@ -212,9 +212,6 @@ func (s *Server) settingsGalleryImport(w http.ResponseWriter, r *http.Request) {
 			writeInlineFlash(w, "err", err.Error())
 			return
 		}
-		if err := s.switchGallery(name); err != nil {
-			logx.Infof("gallery %q: post-merge switch skipped: %v", name, err)
-		}
 		writeInlineFlash(w, "ok", "Gallery "+name+" merged: "+res.Summary()+".")
 		return
 	}
@@ -223,7 +220,11 @@ func (s *Server) settingsGalleryImport(w http.ResponseWriter, r *http.Request) {
 		writeInlineFlash(w, "err", err.Error())
 		return
 	}
-	writeInlineFlash(w, "ok", "Gallery "+name+" imported. Rebuilding thumbnails in the background."+leftOutNote(leftOut))
+	nowActive := ""
+	if s.activeGallery() == name {
+		nowActive = " and now active"
+	}
+	writeInlineFlash(w, "ok", "Gallery "+name+" imported"+nowActive+". Rebuilding thumbnails in the background."+leftOutNote(leftOut))
 }
 
 func (s *Server) batchTransfer(w http.ResponseWriter, r *http.Request) {
@@ -252,6 +253,8 @@ func (s *Server) transferImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srcCx := s.active()
+	srcCx.WaitIngests(s.jobs.Context())
+	dstCx.WaitIngests(s.jobs.Context())
 	kept, err := galleryio.TransferOneImage(srcCx, dstCx, id, removeAfter)
 	if err != nil {
 		s.jobs.Fail(err.Error())
@@ -298,6 +301,7 @@ func (s *Server) transferTarget(w http.ResponseWriter, r *http.Request) (*librar
 
 func (s *Server) runBatchTransfer(ids []int64, dstCx *library.Gallery, removeAfter bool) {
 	srcCx := s.active()
+	dstCx.WaitIngests(s.jobs.Context())
 	total := len(ids)
 	keptFiles := 0
 	transferred, failed, cancelled := s.perImageLoop(ids, "transfer", "transferring", func(_ int, id int64) error {
@@ -341,6 +345,7 @@ func (s *Server) mergeGallery(name, format string, upload io.Reader) (galleryio.
 		s.jobs.Fail(err.Error())
 		return galleryio.MergeResult{}, err
 	}
+	cx.WaitIngests(s.jobs.Context())
 	total := 0
 	res, err := galleryio.MergeGallery(s.jobs.Context(), cx, format, upload, s.maxFileSizeMB(), func(done, n int) {
 		total = n

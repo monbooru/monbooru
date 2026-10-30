@@ -1,5 +1,6 @@
 {{define "partials/category_row.html"}}
-<tr id="cat-row-{{.ID}}" hx-target="this" hx-swap="outerHTML">
+<tr id="cat-row-{{.ID}}" data-id="{{.ID}}" hx-target="this" hx-swap="outerHTML">
+  <td class="cat-grip"><button type="button" class="cat-grip-btn" aria-label="Move {{.Name}}" title="Drag to reorder, or press &uarr; / &darr;">&equiv;</button></td>
   <td><span style="color:{{catColor .Color}}">{{.Name}}</span>{{if .IsBuiltin}} <span class="field-hint">(built-in)</span>{{end}}</td>
   <td>
     <span class="cat-color-pair">
@@ -15,6 +16,11 @@
   </td>
   <td>
     <div class="cat-actions">
+      {{if ne .Name "rating"}}
+      <button type="button" class="btn-sm btn-cat-cleanup" data-id="{{.ID}}" data-name="{{.Name}}">Clean up…</button>
+      {{else}}
+      <button class="btn-sm cat-action-spacer" tabindex="-1" aria-hidden="true">Clean up…</button>
+      {{end}}
       {{$default := catDefault .Name}}
       {{if and $default (ne .Color $default)}}
       <button type="button" class="btn-sm btn-cat-reset"

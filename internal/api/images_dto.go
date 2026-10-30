@@ -18,15 +18,8 @@ import (
 )
 
 const (
-	maxImageSourceLen     = gallery.MaxSourceLabelLen
-	maxImageURLLen        = gallery.MaxSourceURLLen
-	maxImageCommentaryLen = gallery.MaxCommentaryLen
-	maxImageOriginalLen   = gallery.MaxOriginalLen
-	maxAnnotationBodyLen  = gallery.MaxAnnotationBodyLen
-	maxAnnotations        = 500
-	maxSourceMD5Len       = contract.MaxMD5
-	maxSourcePostIDLen    = contract.MaxPostID
-	maxSourcePostExtLen   = contract.MaxPostExt
+	maxAnnotationBodyLen = gallery.MaxAnnotationBodyLen
+	maxAnnotations       = 500
 )
 
 func validateMaxLen(field, s string, max int) error {
@@ -36,14 +29,14 @@ func validateMaxLen(field, s string, max int) error {
 	return nil
 }
 
-func validateImageSource(s string) error { return validateMaxLen("source", s, maxImageSourceLen) }
+func validateImageSource(s string) error { return validateMaxLen("source", s, contract.MaxSourceLabel) }
 
 func validateImageURL(s string) error {
 	if s == "" {
 		return nil
 	}
-	if utf8.RuneCountInString(s) > maxImageURLLen {
-		return fmt.Errorf("url must be %d characters or less", maxImageURLLen)
+	if utf8.RuneCountInString(s) > contract.MaxURL {
+		return fmt.Errorf("url must be %d characters or less", contract.MaxURL)
 	}
 	if !gallery.ValidExternalURL(s) {
 		return fmt.Errorf("url must start with http:// or https://")
@@ -98,10 +91,10 @@ type provenance struct {
 // The limits apply to what is stored, after a DText body has superseded
 // the plain one.
 func (p provenanceJSON) read() (provenance, error) {
-	if err := validateMaxLen("commentary_dtext", p.CommentaryDText, maxImageCommentaryDTextLen); err != nil {
+	if err := validateMaxLen("commentary_dtext", p.CommentaryDText, contract.MaxDText); err != nil {
 		return provenance{}, err
 	}
-	if err := validateMaxLen("commentary_translated_dtext", p.CommentaryTranslatedDText, maxImageCommentaryDTextLen); err != nil {
+	if err := validateMaxLen("commentary_translated_dtext", p.CommentaryTranslatedDText, contract.MaxDText); err != nil {
 		return provenance{}, err
 	}
 	v := provenance{
@@ -118,7 +111,7 @@ func (p provenanceJSON) read() (provenance, error) {
 	if err := validateImageSource(v.source); err != nil {
 		return v, err
 	}
-	if err := validateMaxLen("post_id", v.postID, maxSourcePostIDLen); err != nil {
+	if err := validateMaxLen("post_id", v.postID, contract.MaxPostID); err != nil {
 		return v, err
 	}
 	if err := validateImageURL(v.url); err != nil {
@@ -127,16 +120,16 @@ func (p provenanceJSON) read() (provenance, error) {
 	if err := validateImageURL(v.parentURL); err != nil {
 		return v, fmt.Errorf("parent_url: %v", err)
 	}
-	if err := validateMaxLen("commentary", v.commentary, maxImageCommentaryLen); err != nil {
+	if err := validateMaxLen("commentary", v.commentary, contract.MaxCommentary); err != nil {
 		return v, err
 	}
-	if err := validateMaxLen("commentary_translated", v.translated, maxImageCommentaryLen); err != nil {
+	if err := validateMaxLen("commentary_translated", v.translated, contract.MaxCommentary); err != nil {
 		return v, err
 	}
-	if err := validateMaxLen("original", v.original, maxImageOriginalLen); err != nil {
+	if err := validateMaxLen("original", v.original, contract.MaxOriginal); err != nil {
 		return v, err
 	}
-	if err := validateMaxLen("post_ext", v.postFile.Ext, maxSourcePostExtLen); err != nil {
+	if err := validateMaxLen("post_ext", v.postFile.Ext, contract.MaxPostExt); err != nil {
 		return v, err
 	}
 	return v, nil
@@ -215,7 +208,6 @@ type sourceJSON struct {
 	Similarity           float64 `json:"similarity,omitempty"`
 }
 
-// On input the site comes from the pushed source, not the box.
 type annotationJSON struct {
 	Site     string `json:"site,omitempty"`
 	PostID   string `json:"post_id,omitempty"`
@@ -224,14 +216,9 @@ type annotationJSON struct {
 	W        int    `json:"w"`
 	H        int    `json:"h"`
 	Body     string `json:"body"`
-	BodyHTML string `json:"body_html,omitempty"`
 	BodyText string `json:"body_text,omitempty"`
 }
 
-// Without it only the 16 MiB body cap bounds the DText conversion.
-const maxImageCommentaryDTextLen = contract.MaxDText
-
-// A note's HTML is cut before converting, for the same reason.
 const maxAnnotationBodyHTMLLen = 4 * maxAnnotationBodyLen
 
 const maxFetchMessageLen = 1000
@@ -254,7 +241,7 @@ func commentaryFromInput(plain, dtext string) string {
 	}
 	body := markup.FromDText(dtext)
 	// Converting can grow a body, so the cap applies to what is stored.
-	return firstRunes(body, maxImageCommentaryLen)
+	return firstRunes(body, contract.MaxCommentary)
 }
 
 func annotationsFromInput(in []contract.NoteBox, postURL string) []models.Annotation {

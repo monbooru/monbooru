@@ -9,15 +9,10 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
-const (
-	BackendPTR   = contract.LookupPTR
-	BackendBooru = contract.LookupBooru
-)
-
 // Backends lists the history rows a lookup on monloader's backend covers.
 func Backends(name string) []string {
 	if name == contract.LookupAll {
-		return []string{BackendPTR, BackendBooru}
+		return []string{contract.LookupPTR, contract.LookupBooru}
 	}
 	return []string{name}
 }
@@ -46,7 +41,7 @@ var PTRCursor atomic.Uint64
 
 func NextDue(now time.Time, backend string, attempts int) (time.Time, bool) {
 	ladder := PTRLadder
-	if backend == BackendBooru {
+	if backend == contract.LookupBooru {
 		if attempts >= BooruMaxAttempts {
 			return time.Time{}, false
 		}

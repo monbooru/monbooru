@@ -8,20 +8,22 @@ import (
 	"os"
 )
 
-func decodeJPEGEXIF(path string) *exifData {
+func decodeFileEXIF(path, fileType string) *exifData {
+	var find func(io.Reader) []byte
+	switch fileType {
+	case "jpeg":
+		find = jpegEXIF
+	case "webp":
+		find = readWebPEXIF
+	default:
+		return nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-	block := jpegEXIF(f)
-	if block == nil {
-		return nil
-	}
-	x, err := decodeEXIF(block)
-	if err != nil {
-		return nil
-	}
+	x, _ := decodeEXIF(find(f))
 	return x
 }
 

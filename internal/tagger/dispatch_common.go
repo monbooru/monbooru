@@ -53,7 +53,12 @@ func DefaultDispatchRules(modelPath, taggerName string) []DispatchEntry {
 	if err != nil {
 		return nil
 	}
-	return parseDispatchDoc(data, source)
+	rules, err := decodeDispatchDoc(data)
+	if err != nil {
+		logx.Warnf("tagger: %s dispatch: %v", source, err)
+		return nil
+	}
+	return rules
 }
 
 func OverlayDispatchRules(modelPath, taggerName string) []DispatchEntry {
@@ -76,15 +81,6 @@ func ReadDispatchOverlay(modelPath, taggerName string) ([]DispatchEntry, error) 
 		return nil, err
 	}
 	return decodeDispatchDoc(data)
-}
-
-func parseDispatchDoc(data []byte, source string) []DispatchEntry {
-	rules, err := decodeDispatchDoc(data)
-	if err != nil {
-		logx.Warnf("tagger: %s dispatch: %v", source, err)
-		return nil
-	}
-	return rules
 }
 
 func decodeDispatchDoc(data []byte) ([]DispatchEntry, error) {

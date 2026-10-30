@@ -46,18 +46,47 @@ func (s *Service) ListCategories() ([]models.TagCategory, error) {
 	return db.QueryAll(s.db.Read, func(rows *sql.Rows) (models.TagCategory, error) {
 		var c models.TagCategory
 		var isBuiltin int
-		err := rows.Scan(&c.ID, &c.Name, &c.Color, &isBuiltin)
+		err := rows.Scan(&c.ID, &c.Name, &c.Color, &isBuiltin, &c.Position)
 		c.IsBuiltin = isBuiltin == 1
 		return c, err
-	}, `SELECT id, name, color, is_builtin FROM tag_categories ORDER BY id`)
+	}, `SELECT id, name, color, is_builtin, position FROM tag_categories ORDER BY position, id`)
+}
+
+func (s *Service) DefaultCategoryOrder() ([]int64, error) {
+	return db.QueryIDs(s.db.Read, `SELECT id FROM tag_categories ORDER BY `+db.DefaultCategoryOrder)
+}
+
+// ReorderCategories takes every category id exactly once, in the new order.
+func (s *Service) ReorderCategories(ids []int64) error {
+	return s.inWriteTx(func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM tag_categories`).Scan(&n); err != nil {
+			return err
+		}
+		if len(ids) != n {
+			return ErrCategoryOrderStale
+		}
+		seen := make(map[int64]bool, len(ids))
+		for pos, id := range ids {
+			res, err := tx.Exec(`UPDATE tag_categories SET position = ? WHERE id = ?`, pos, id)
+			if err != nil {
+				return err
+			}
+			if affected, _ := res.RowsAffected(); affected == 0 || seen[id] {
+				return ErrCategoryOrderStale
+			}
+			seen[id] = true
+		}
+		return nil
+	})
 }
 
 func (s *Service) GetCategory(id int64) (models.TagCategory, error) {
 	var c models.TagCategory
 	var isBuiltin int
 	err := s.db.Read.QueryRow(
-		`SELECT id, name, color, is_builtin FROM tag_categories WHERE id = ?`, id,
-	).Scan(&c.ID, &c.Name, &c.Color, &isBuiltin)
+		`SELECT id, name, color, is_builtin, position FROM tag_categories WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.Color, &isBuiltin, &c.Position)
 	if err == sql.ErrNoRows {
 		return c, ErrCategoryNotFound
 	}
@@ -79,10 +108,13 @@ func (s *Service) CreateCategory(name, color string) (*models.TagCategory, error
 	}
 	color = normalizeCategoryColor(color)
 	var id int64
+	var position int
 	err := s.db.Write.QueryRow(
-		`INSERT INTO tag_categories (name, color) VALUES (?, ?) RETURNING id`,
+		`INSERT INTO tag_categories (name, color, position)
+		 VALUES (?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM tag_categories))
+		 RETURNING id, position`,
 		name, color,
-	).Scan(&id)
+	).Scan(&id, &position)
 	if err != nil {
 		if isUniqueConstraintErr(err) {
 			return nil, ErrCategoryExists
@@ -90,7 +122,7 @@ func (s *Service) CreateCategory(name, color string) (*models.TagCategory, error
 		return nil, fmt.Errorf("creating category: %w", err)
 	}
 	s.changed()
-	return &models.TagCategory{ID: id, Name: name, Color: color}, nil
+	return &models.TagCategory{ID: id, Name: name, Color: color, Position: position}, nil
 }
 
 var builtinCategoryColors = map[string]string{
@@ -183,8 +215,9 @@ func isUniqueConstraintErr(err error) bool {
 
 // CategoryCounts is what deleting a category takes: its tags and aliases,
 // and on delete_all the aliases elsewhere that resolve to its tags.
+// Implications counts the edges declared on its tags.
 type CategoryCounts struct {
-	Tags, Aliases, LinkedAliases int
+	Tags, Aliases, LinkedAliases, Implications int
 }
 
 func (s *Service) CategoryDeleteCounts(id int64) (CategoryCounts, error) {
@@ -194,9 +227,11 @@ func (s *Service) CategoryDeleteCounts(id int64) (CategoryCounts, error) {
 		   (SELECT COUNT(*) FROM tags WHERE category_id = c.id AND is_alias = 0),
 		   (SELECT COUNT(*) FROM tags WHERE category_id = c.id AND is_alias = 1),
 		   (SELECT COUNT(*) FROM tags a JOIN tags t ON t.id = a.canonical_tag_id
-		     WHERE a.is_alias = 1 AND a.category_id <> c.id AND t.category_id = c.id)
+		     WHERE a.is_alias = 1 AND a.category_id <> c.id AND t.category_id = c.id),
+		   (SELECT COUNT(*) FROM tag_implications ti JOIN tags p ON p.id = ti.parent_tag_id
+		     WHERE p.category_id = c.id)
 		 FROM tag_categories c WHERE c.id = ?`, id,
-	).Scan(&c.Tags, &c.Aliases, &c.LinkedAliases)
+	).Scan(&c.Tags, &c.Aliases, &c.LinkedAliases, &c.Implications)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrCategoryNotFound
 	}

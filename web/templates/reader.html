@@ -38,7 +38,7 @@
       <a class="reader-nav reader-first" href="/images/{{.Image.ID}}/read?page=1{{.BackKVQS}}" title="First page (Home)">|&lt;</a>
       <a class="reader-nav reader-prev" href="/images/{{.Image.ID}}/read?page={{sub .Page 1}}{{.BackKVQS}}" title="Previous page (←)">&lt;</a>
       {{else}}
-      <span class="reader-nav reader-disabled" aria-hidden="true">|&lt;</span>
+      <span class="reader-nav reader-first reader-disabled" aria-hidden="true">|&lt;</span>
       <span class="reader-nav reader-disabled" aria-hidden="true">&lt;</span>
       {{end}}
       <button type="button" class="reader-counter" id="reader-counter" title="Jump to page (p)" onclick="openReaderJumpDialog()">{{.Page}} / {{.PageCount}}</button>
@@ -47,7 +47,7 @@
       <a class="reader-nav reader-last" href="/images/{{.Image.ID}}/read?page={{.PageCount}}{{.BackKVQS}}" title="Last page (End)">&gt;|</a>
       {{else}}
       <span class="reader-nav reader-disabled" aria-hidden="true">&gt;</span>
-      <span class="reader-nav reader-disabled" aria-hidden="true">&gt;|</span>
+      <span class="reader-nav reader-last reader-disabled" aria-hidden="true">&gt;|</span>
       {{end}}
       <form class="reader-extract" method="POST" action="/images/{{.Image.ID}}/page/{{.Page}}/extract"
             onsubmit="event.preventDefault(); extractReaderPage(this)">
@@ -61,7 +61,7 @@
   {{template "partials/image_lightbox.html" .}}
   <dialog id="reader-jump-dialog">
     <form onsubmit="event.preventDefault(); submitPageJump('reader-jump-input');">
-      <p>Jump to page (1 - {{.PageCount}})</p>
+      <p class="dlg-title">Jump to page (1 - {{.PageCount}}){{template "webui/dialog_x"}}</p>
       <div class="field">
         <input type="number" name="page" id="reader-jump-input" min="1" max="{{.PageCount}}" data-max="{{.PageCount}}" value="{{.Page}}" autocomplete="off">
       </div>

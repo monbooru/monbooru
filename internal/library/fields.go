@@ -70,9 +70,14 @@ func (cx *Gallery) BackfillPhashes(ctx context.Context, progress relations.Phash
 	return relations.BackfillPhashes(ctx, cx.DB, cx.bkTree, cx.ThumbnailsPath, progress)
 }
 
+// StoreMD5 drops the caches only when it stored a digest: the image page
+// asks on every view of a file it cannot read.
 func (cx *Gallery) StoreMD5(ctx context.Context, id int64) (string, error) {
-	defer cx.InvalidateCaches()
-	return gallery.ComputeAndStoreMD5(ctx, cx.DB, id)
+	sum, err := gallery.ComputeAndStoreMD5(ctx, cx.DB, id)
+	if err == nil {
+		cx.InvalidateCaches()
+	}
+	return sum, err
 }
 
 func (cx *Gallery) BackfillMD5s(ctx context.Context, progress gallery.MD5BackfillProgress) (processed, updated int, err error) {

@@ -24,11 +24,17 @@ const (
 // per-call deadline, or it cuts off a send the peer may still commit. A
 // redirect is not followed, since it could point at any host.
 var Client = &http.Client{
-	Timeout: 15 * time.Second,
-	CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+	Timeout:       15 * time.Second,
+	CheckRedirect: noRedirect,
 }
+
+// SlowClient backs calls whose own deadline outlasts Client's backstop.
+var SlowClient = &http.Client{
+	Timeout:       5 * time.Minute,
+	CheckRedirect: noRedirect,
+}
+
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // A refused request, not a sign the peer is down, so a batch skips the
 // row. It carries the peer's name: a plugin's refusal must not read as

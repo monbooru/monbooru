@@ -4,20 +4,23 @@
      hx-get="/internal/job/status"
      hx-trigger="every 2s"
      hx-swap="outerHTML"
+     hx-vals='{"pair":"{{.PairKey}}"}'
      {{if and $job $job.Running}}class="job-running"{{end}}
      {{if $job}}data-job-type="{{$job.JobType}}" data-processed="{{$job.Processed}}" data-changes="{{$job.Changes}}"{{end}}
      {{if and $job $job.FinishedAt}}data-finished-at="{{$job.FinishedAt.UnixNano}}"{{end}}>
   {{with $job}}{{if .Running}}
-    <span class="job-type">{{.JobType}}</span>
+    {{with $.Mascot}}<img src="{{.}}" alt="" class="job-mascot">{{end}}
+    <span class="job-type">{{jobLabel .JobType}}</span>
     {{if gt .Total 0}}
       <span class="job-progress">{{.Processed}}/{{.Total}}</span>
     {{end}}
     <span class="job-msg" title="{{.Message}}">{{.Message}}</span>
+    <span class="job-spin" aria-hidden="true">✦</span>
     {{with cancelTitle .JobType}}
     <button class="job-dismiss" onclick="cancelJobStatus()" title="{{.}}">×</button>
     {{end}}
   {{else if .Summary}}
-    <span class="job-done" id="job-done-msg" title="{{.Summary}}">✓ {{.Summary}}</span>
+    <span class="job-done{{if .Partial}} job-partial{{end}}" id="job-done-msg" title="{{.Summary}}">✓ {{.Summary}}</span>
     <button class="job-dismiss" onclick="dismissJobStatus()" title="Dismiss">×</button>
   {{else if .Error}}
     <span class="job-error" id="job-error-msg" title="{{.Error}}">✗ {{.Error}}</span>

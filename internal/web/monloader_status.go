@@ -12,8 +12,7 @@ import (
 
 func (s *Server) monloaderStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if !s.pairedWith(monloader.App) {
-		// Stop polling and clear the light once the pairing is gone.
-		_, _ = w.Write([]byte(`<span id="peer-light"></span>`))
+		s.renderTemplate(w, "webui/peer_light", s.monloaderLight("", "", "", ""))
 		return
 	}
 	if s.ml.Paused() {
@@ -34,11 +33,12 @@ func (s *Server) monloaderStatusHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) monloaderLight(conn, version, mismatch, seen string) webui.PeerLight {
+	paired := s.pairedWith(monloader.App)
 	l := webui.PeerLight{
 		Peer: monloader.App, Conn: conn, Version: version, Mismatch: mismatch, Seen: seen,
 		StatusURL: "/internal/monloader-status",
 		PauseURL:  "/internal/monloader/disconnect", ResumeURL: "/internal/monloader/reconnect",
-		CheckNow: true, Paired: true,
+		CheckNow: paired, Paired: paired,
 	}
 	if base := s.monloaderWebBase(); base != "" {
 		l.Href = base + "/queue"

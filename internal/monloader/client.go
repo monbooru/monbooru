@@ -15,7 +15,7 @@ import (
 )
 
 // App is the peer's name in pairing records and error text.
-const App = peer.Companion
+const App = contract.AppMonloader
 
 // errUnconfigured is returned before any I/O when no link is set up.
 var errUnconfigured = errors.New("monloader is not configured")
@@ -28,6 +28,10 @@ type Client struct {
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return c.do(ctx, peer.Client, method, path, body)
+}
+
+func (c *Client) do(ctx context.Context, hc *http.Client, method, path string, body []byte) (*http.Response, error) {
 	base := strings.TrimRight(c.Base(), "/")
 	token := c.Token()
 	if base == "" || token == "" {
@@ -45,20 +49,12 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*htt
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	resp.Body = http.MaxBytesReader(nil, resp.Body, maxResponseBytes)
 	return resp, nil
-}
-
-// A followed redirect would re-send a POST as a GET and carry the token along.
-var httpClient = &http.Client{
-	Timeout: peer.Client.Timeout,
-	CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
 }
 
 const maxResponseBytes = 16 << 20
@@ -74,7 +70,11 @@ func setupRequired(resp *http.Response) bool {
 	return e.Code == contract.CodeSetupRequired
 }
 
-func refused(resp *http.Response) error {
+func setupRefusal(resp *http.Response) error {
+	return peer.StatusError{Peer: App, Status: resp.Status, Code: contract.CodeSetupRequired}
+}
+
+func refused(resp *http.Response) peer.StatusError {
 	var e contract.Error
 	_ = json.NewDecoder(resp.Body).Decode(&e)
 	return peer.StatusError{Peer: App, Status: resp.Status, Code: e.Code}
@@ -83,4 +83,11 @@ func refused(resp *http.Response) error {
 func (c *Client) Post(ctx context.Context, path string, payload any) (*http.Response, error) {
 	body, _ := json.Marshal(payload)
 	return c.Do(ctx, http.MethodPost, path, body)
+}
+
+// PostSlow must be given a deadline: only peer.SlowClient's backstop
+// bounds it otherwise.
+func (c *Client) PostSlow(ctx context.Context, path string, payload any) (*http.Response, error) {
+	body, _ := json.Marshal(payload)
+	return c.do(ctx, peer.SlowClient, http.MethodPost, path, body)
 }

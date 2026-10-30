@@ -3,10 +3,12 @@ package api
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/contract"
@@ -41,6 +43,20 @@ func resolveCategoryID(w http.ResponseWriter, g *library.Gallery, name string) (
 		return 0, false
 	}
 	return id, true
+}
+
+func splitTypedName(w http.ResponseWriter, g *library.Gallery, name string, catID int64) (string, int64, bool) {
+	f, err := tags.SplitForm(g.DB, name)
+	switch {
+	case serverError(w, err):
+		return "", 0, false
+	case f.CategoryID != 0 && strings.TrimSpace(f.Name) == "":
+		contract.WriteError(w, http.StatusBadRequest, "invalid_request", "name is empty after its category prefix")
+		return "", 0, false
+	case f.CategoryID != 0:
+		return f.Name, f.CategoryID, true
+	}
+	return f.Name, catID, true
 }
 
 type sentinelStatus struct {
@@ -107,7 +123,11 @@ func (h *Handler) createTag(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tag, err := g.TagSvc.GetOrCreateTagFrom(body.Name, catID, "api")
+	name, catID, ok := splitTypedName(w, g, body.Name, catID)
+	if !ok {
+		return
+	}
+	tag, err := g.TagSvc.GetOrCreateTagFrom(name, catID, "api")
 	if err != nil {
 		writeTagError(w, err)
 		return
@@ -141,12 +161,18 @@ func (h *Handler) patchTag(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var name string
+	if body.Name != nil {
+		if name, catID, ok = splitTypedName(w, g, *body.Name, catID); !ok {
+			return
+		}
+	}
 	var err error
 	switch {
-	case body.Name != nil && body.Category != nil:
-		err = g.TagSvc.RenameAndMoveTag(id, *body.Name, catID)
+	case body.Name != nil && catID != 0:
+		err = g.TagSvc.RenameAndMoveTag(id, name, catID)
 	case body.Name != nil:
-		err = g.TagSvc.RenameTag(id, *body.Name)
+		err = g.TagSvc.RenameTag(id, name)
 	default:
 		err = g.TagSvc.ChangeTagCategory(id, catID)
 	}
@@ -199,7 +225,11 @@ func (h *Handler) createAlias(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	alias, err := g.TagSvc.CreateAliasFrom(body.Name, catID, body.CanonicalID, "api")
+	name, catID, ok := splitTypedName(w, g, body.Name, catID)
+	if !ok {
+		return
+	}
+	alias, err := g.TagSvc.CreateAliasFrom(name, catID, body.CanonicalID, "api")
 	if err != nil {
 		writeTagError(w, err)
 		return
@@ -282,9 +312,25 @@ func (h *Handler) addImplication(w http.ResponseWriter, r *http.Request) {
 		contract.WriteError(w, http.StatusBadRequest, "invalid_request", "implied_id is required")
 		return
 	}
+	propagate := r.URL.Query().Get("propagate") == "true"
+	var res *jobs.Reservation
+	if propagate {
+		if res = h.reserveImplicationJob(w); res == nil {
+			return
+		}
+		defer res.Release()
+	}
 	isNew, err := g.TagSvc.AddImplicationFrom(parentID, body.ImpliedID, "api")
 	if err != nil {
 		writeTagError(w, err)
+		return
+	}
+	if propagate {
+		if !startImplicationJob(w, res, g) {
+			return
+		}
+		go h.propagateImplication(g, parentID, body.ImpliedID, false)
+		contract.WriteJSON(w, http.StatusAccepted, map[string]any{"created": isNew, "job": "implication job started"})
 		return
 	}
 	if isNew {
@@ -303,9 +349,68 @@ func (h *Handler) removeImplication(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	propagate := r.URL.Query().Get("propagate") == "true"
+	var res *jobs.Reservation
+	if propagate {
+		if res = h.reserveImplicationJob(w); res == nil {
+			return
+		}
+		defer res.Release()
+	}
 	if err := g.TagSvc.RemoveImplication(parentID, impliedID); err != nil {
 		writeTagError(w, err)
 		return
 	}
+	if propagate {
+		if !startImplicationJob(w, res, g) {
+			return
+		}
+		go h.propagateImplication(g, parentID, impliedID, true)
+		contract.WriteJSON(w, http.StatusAccepted, map[string]any{"job": "implication job started"})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The job lane is held before the edge is written, so no edge is stored
+// whose fan-out cannot run, and a refused edge leaves the status bar as it was.
+func (h *Handler) reserveImplicationJob(w http.ResponseWriter) *jobs.Reservation {
+	res, err := h.jobs.Reserve()
+	if err != nil {
+		contract.WriteError(w, http.StatusConflict, "conflict", "a job is already running")
+		return nil
+	}
+	return res
+}
+
+func startImplicationJob(w http.ResponseWriter, res *jobs.Reservation, g *library.Gallery) bool {
+	if err := res.Start(models.JobTypeTag, g.Name); err != nil {
+		contract.WriteError(w, http.StatusConflict, "conflict", "a job is already running")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) propagateImplication(g *library.Gallery, parentID, impliedID int64, remove bool) {
+	ctx := h.jobs.Context()
+	g.WaitIngests(ctx)
+	verb, done := "applying implication", "Implication applied to %d %s."
+	if remove {
+		verb, done = "removing implication", "Implication removed from %d %s."
+	}
+	progress := func(n, total int) { h.jobs.Update(n, total, verb+"…") }
+	var p tags.Propagation
+	var err error
+	if remove {
+		var closure []int64
+		if closure, err = g.TagSvc.ImplicationClosure(impliedID); err == nil {
+			p, err = g.TagSvc.SweepImplicationRemoval(ctx, parentID, closure, progress)
+		}
+	} else {
+		p, err = g.TagSvc.PropagateImplication(ctx, parentID, progress)
+	}
+	n := len(p.Walked)
+	h.jobs.Finish(err, p.Cancelled,
+		fmt.Sprintf("%s cancelled (%d/%d)", verb, n, p.Total),
+		fmt.Sprintf(done, n, models.Plural(n, "image", "images")))
 }

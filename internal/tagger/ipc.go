@@ -393,7 +393,13 @@ func (b *ipcBackend) ReleaseIdle(after time.Duration) bool {
 	return resp.Released
 }
 
+// A run in flight holds b.mu and keeps its child: waiting would hang the
+// caller for the batch and then kill the worker the next chunk needs. Idle
+// release takes the child once the run ends.
 func (b *ipcBackend) ReleaseAll() {
+	if b.inFlight.Load() > 0 {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.shutdownLocked()

@@ -15,6 +15,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 // A name made only of these is content-free; emoticons like ">_<" pass on
@@ -228,9 +229,10 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 		args = append(args, filter.CreatedAfter)
 	}
 	if filter.ConflictsOnly {
-		where += ` AND t.is_alias = 0 AND t.name IN (
-			SELECT name FROM tags WHERE is_alias = 0
-			GROUP BY name HAVING COUNT(*) >= 2)`
+		where += ` AND ` + conflictWhere
+	}
+	if filter.DistinctOnly {
+		where += ` AND ` + distinctWhere
 	}
 	// IN bounds the scan to tags with a stale row. Implied rows are never
 	// stale, so live implied usage keeps a tag out of "full".
@@ -238,10 +240,7 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 	case "has":
 		where += ` AND t.id IN (SELECT tag_id FROM image_tags WHERE stale = 1)`
 	case "full":
-		// usage_count counts visible images only, so the stale side must too.
-		where += ` AND t.usage_count > 0 AND t.id IN (SELECT tag_id FROM image_tags WHERE stale = 1)
-			AND (SELECT COUNT(*) FROM image_tags it JOIN images mi ON mi.id = it.image_id AND mi.is_missing = 0
-			     WHERE it.tag_id = t.id AND it.stale = 1) = t.usage_count`
+		where += ` AND ` + fullyStaleWhere
 	}
 	if filter.FoldedOnly {
 		where += ` AND t.id IN (SELECT fp.old_id FROM ` + liveFoldedPairs + `)`
@@ -265,8 +264,8 @@ func tagOrderBy(filter TagFilter) string {
 	}
 	orderBy := "t.name " + dir
 	switch {
-	case filter.ConflictsOnly:
-		// Colliding rows must sit together whatever the requested order.
+	case filter.ConflictsOnly, filter.DistinctOnly:
+		// Same-name rows must sit together whatever the requested order.
 		orderBy = "t.name ASC, t.category_id ASC"
 	case filter.Sort == "usage" || filter.Sort == "created" || filter.Sort == "last_used":
 		dir = "DESC"
@@ -354,31 +353,18 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 	return tagList, total, nil
 }
 
-// COUNT(*) per name equals its category count under UNIQUE(name,
-// category_id), and reading only name keeps both scans inside
-// idx_tags_active_name.
-func (s *Service) ConflictsCount() (int, error) {
-	var n int
-	err := s.db.Read.QueryRow(`SELECT COUNT(*) FROM tags WHERE is_alias = 0 AND name IN (
-		SELECT name FROM tags WHERE is_alias = 0
-		GROUP BY name HAVING COUNT(*) >= 2)`).Scan(&n)
-	return n, err
-}
-
 func (s *Service) StaleUsageCount() (int, error) {
 	var n int
 	err := s.db.Read.QueryRow(`SELECT COUNT(DISTINCT tag_id) FROM image_tags WHERE stale = 1`).Scan(&n)
 	return n, err
 }
 
-func (s *Service) FullyStaleCount() (int, error) {
-	var n int
-	err := s.db.Read.QueryRow(`SELECT COUNT(*) FROM tags t
-		WHERE t.usage_count > 0 AND t.id IN (SELECT tag_id FROM image_tags WHERE stale = 1)
-		  AND (SELECT COUNT(*) FROM image_tags it JOIN images mi ON mi.id = it.image_id AND mi.is_missing = 0
-		       WHERE it.tag_id = t.id AND it.stale = 1) = t.usage_count`).Scan(&n)
-	return n, err
-}
+// usage_count counts visible images only, so the stale side must too.
+const fullyStaleWhere = `t.usage_count > 0 AND t.id IN (SELECT tag_id FROM image_tags WHERE stale = 1)
+	AND (SELECT COUNT(*) FROM image_tags it JOIN images mi ON mi.id = it.image_id AND mi.is_missing = 0
+	     WHERE it.tag_id = t.id AND it.stale = 1) = t.usage_count`
+
+func (s *Service) FullyStaleCount() (int, error) { return s.countTagsWhere(fullyStaleWhere) }
 
 type OriginCount struct {
 	Label string
@@ -431,6 +417,62 @@ func (s *Service) ListTagIDs(filter TagFilter) ([]int64, error) {
 	return db.QueryIDs(s.db.Read, `SELECT t.id FROM tags t WHERE `+where+` ORDER BY t.id`, args...)
 }
 
+// UnusedTags lists the plain tags no image row carries, missing images
+// included: usage_count counts visible images only, so a zero there can
+// still sit on a missing file that comes back. kept holds those with an
+// alias, an implication either way, or a note, which an operator curated.
+func (s *Service) UnusedTags() (plain, kept []int64, err error) {
+	type row struct {
+		id      int64
+		curated bool
+	}
+	rows, err := db.QueryAll(s.db.Read, db.ScanRow(func(r *row) []any { return []any{&r.id, &r.curated} }),
+		`SELECT t.id,
+		        EXISTS (SELECT 1 FROM tags a WHERE a.canonical_tag_id = t.id)
+		        OR EXISTS (SELECT 1 FROM tag_implications i WHERE i.parent_tag_id = t.id)
+		        OR EXISTS (SELECT 1 FROM tag_implications i WHERE i.implied_tag_id = t.id)
+		        OR EXISTS (SELECT 1 FROM tag_notes n WHERE n.tag_id = t.id AND (n.body != '' OR n.links != ''))
+		   FROM tags t
+		  WHERE t.is_alias = 0 AND t.category_id != ?
+		    AND NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = t.id)
+		  ORDER BY t.id`, s.ratingCatID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, r := range rows {
+		if r.curated {
+			kept = append(kept, r.id)
+		} else {
+			plain = append(plain, r.id)
+		}
+	}
+	return plain, kept, nil
+}
+
+// TagResetScope is everything a tag reset deletes: the aliases pointing at
+// one of the four ratings, which no canonical delete sweeps, then every
+// plain tag but those four. Deleting the canonicals takes every other alias
+// and every implication with them.
+func (s *Service) TagResetScope() (ratingAliases, ids []int64, aliases, implications int, err error) {
+	canonical := []any{s.ratingCatID}
+	for _, level := range contract.RatingLevels {
+		canonical = append(canonical, level)
+	}
+	if ratingAliases, err = db.QueryIDs(s.db.Read,
+		`SELECT a.id FROM tags a JOIN tags c ON c.id = a.canonical_tag_id
+		  WHERE a.is_alias = 1 AND c.category_id = ? AND c.name IN (?, ?, ?, ?) ORDER BY a.id`, canonical...); err != nil {
+		return nil, nil, 0, 0, err
+	}
+	if ids, err = db.QueryIDs(s.db.Read,
+		`SELECT id FROM tags WHERE is_alias = 0 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
+		return nil, nil, 0, 0, err
+	}
+	err = s.db.Read.QueryRow(
+		`SELECT (SELECT COUNT(*) FROM tags WHERE is_alias = 1), (SELECT COUNT(*) FROM tag_implications)`,
+	).Scan(&aliases, &implications)
+	return ratingAliases, ids, aliases, implications, err
+}
+
 func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, err error) {
 	where, args := tagFilterWhere(filter)
 	// No key to seek on, so the ordered scan streams and stops one row
@@ -462,32 +504,52 @@ func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, e
 	return prev, next, nil
 }
 
-func (s *Service) GetTag(id int64) (*models.Tag, error) {
+const tagSelect = `SELECT t.id, t.name, t.category_id, tc.name, tc.color, t.usage_count,
+	        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at
+	 FROM tags t
+	 JOIN tag_categories tc ON tc.id = t.category_id`
+
+func scanTag(row interface{ Scan(...any) error }) (*models.Tag, error) {
 	var t models.Tag
 	var isAlias int
 	var createdAt string
 	var lastUsed sql.NullString
-	err := s.db.Read.QueryRow(
-		`SELECT t.id, t.name, t.category_id, tc.name, tc.color, t.usage_count,
-		        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at
-		 FROM tags t
-		 JOIN tag_categories tc ON tc.id = t.category_id
-		 WHERE t.id = ?`, id,
-	).Scan(
+	if err := row.Scan(
 		&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor,
 		&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt, &t.Origin, &lastUsed,
-	)
-	if err == sql.ErrNoRows {
-		return nil, ErrTagNotFound
-	}
-	if err != nil {
+	); err != nil {
 		return nil, err
 	}
-
 	t.IsAlias = isAlias == 1
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	t.LastUsedAt, _ = time.Parse(time.RFC3339, lastUsed.String)
 	return &t, nil
+}
+
+func (s *Service) GetTag(id int64) (*models.Tag, error) {
+	t, err := scanTag(s.db.Read.QueryRow(tagSelect+` WHERE t.id = ?`, id))
+	if err == sql.ErrNoRows {
+		return nil, ErrTagNotFound
+	}
+	return t, err
+}
+
+// GetTags leaves an id that matches no tag out of the map.
+func (s *Service) GetTags(ids []int64) (map[int64]*models.Tag, error) {
+	out := make(map[int64]*models.Tag, len(ids))
+	err := db.Chunked(ids, 500, func(batch []int64) error {
+		placeholders, args := db.InPlaceholders(batch)
+		found, err := db.QueryAll(s.db.Read, func(rows *sql.Rows) (*models.Tag, error) { return scanTag(rows) },
+			tagSelect+` WHERE t.id IN (`+placeholders+`)`, args...)
+		for _, t := range found {
+			out[t.ID] = t
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Service) AliasesForTagIDs(canonicalIDs []int64) (map[int64][]models.Tag, error) {
@@ -657,7 +719,7 @@ func (s *Service) UsageBreakdown(tagID int64) ([]AppliedByCount, []UsageMonth, e
 func (s *Service) GetImageTags(imageID int64) (string, []models.ImageTag, error) {
 	rows, err := s.db.Read.Query(
 		`SELECT i.folder_path,
-		        it.image_id, it.tag_id, t.name, tc.name, tc.color, t.usage_count,
+		        it.image_id, it.tag_id, t.name, tc.name, tc.color, tc.position, t.usage_count,
 		        it.is_auto, it.is_implied, it.confidence, it.tagger_name, it.stale, it.created_at
 		 FROM images i
 		 LEFT JOIN image_tags it ON it.image_id = i.id
@@ -681,6 +743,7 @@ func (s *Service) GetImageTags(imageID int64) (string, []models.ImageTag, error)
 			tagName    sql.NullString
 			category   sql.NullString
 			color      sql.NullString
+			catPos     sql.NullInt64
 			usage      sql.NullInt64
 			isAuto     sql.NullInt64
 			isImplied  sql.NullInt64
@@ -691,7 +754,7 @@ func (s *Service) GetImageTags(imageID int64) (string, []models.ImageTag, error)
 		)
 		if err := rows.Scan(
 			&folderPath,
-			&imgID, &tagID, &tagName, &category, &color, &usage,
+			&imgID, &tagID, &tagName, &category, &color, &catPos, &usage,
 			&isAuto, &isImplied, &conf, &tagger, &stale, &createdAt,
 		); err != nil {
 			return "", nil, err
@@ -701,17 +764,18 @@ func (s *Service) GetImageTags(imageID int64) (string, []models.ImageTag, error)
 			continue
 		}
 		it := models.ImageTag{
-			ImageID:    imgID.Int64,
-			TagID:      tagID.Int64,
-			TagName:    tagName.String,
-			Category:   category.String,
-			Color:      color.String,
-			UsageCount: int(usage.Int64),
-			IsAuto:     isAuto.Int64 == 1,
-			IsImplied:  isImplied.Int64 == 1,
-			Stale:      stale.Int64 == 1,
-			Confidence: conf,
-			TaggerName: tagger.String,
+			ImageID:          imgID.Int64,
+			TagID:            tagID.Int64,
+			TagName:          tagName.String,
+			Category:         category.String,
+			Color:            color.String,
+			CategoryPosition: int(catPos.Int64),
+			UsageCount:       int(usage.Int64),
+			IsAuto:           isAuto.Int64 == 1,
+			IsImplied:        isImplied.Int64 == 1,
+			Stale:            stale.Int64 == 1,
+			Confidence:       conf,
+			TaggerName:       tagger.String,
 		}
 		it.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
 		result = append(result, it)
@@ -863,16 +927,57 @@ func (s *Service) renameTag(id int64, newName string, keepAlias bool) error {
 // RenameAndMoveTag stores both or neither, so a refused move leaves the
 // old name.
 func (s *Service) RenameAndMoveTag(id int64, newName string, newCategoryID int64) error {
+	return s.renameAndMoveTag(id, newName, newCategoryID, false)
+}
+
+func (s *Service) RenameAndMoveTagKeepAlias(id int64, newName string, newCategoryID int64) error {
+	return s.renameAndMoveTag(id, newName, newCategoryID, true)
+}
+
+func (s *Service) renameAndMoveTag(id int64, newName string, newCategoryID int64, keepAlias bool) error {
 	normalized, err := ValidateTagName(newName)
 	if err != nil {
 		return err
 	}
 	return s.inWriteTx(func(tx *sql.Tx) error {
-		if err := s.renameTagTx(tx, id, normalized, false); err != nil {
+		var oldName string
+		var oldCatID int64
+		var isAlias int
+		if err := tx.QueryRow(`SELECT name, category_id, is_alias FROM tags WHERE id = ?`, id).Scan(&oldName, &oldCatID, &isAlias); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrTagNotFound
+			}
+			return fmt.Errorf("look up tag %d: %w", id, err)
+		}
+		if keepAlias && isAlias == 1 {
+			return errKeepAliasOfAlias
+		}
+		if oldCatID == newCategoryID {
+			return s.renameTagTx(tx, id, normalized, keepAlias)
+		}
+		if err := s.changeTagCategoryTx(tx, id, newCategoryID, normalized); err != nil {
 			return err
 		}
-		return s.changeTagCategoryTx(tx, id, newCategoryID)
+		if oldName != normalized {
+			if err := dropRenamedTagPairsTx(tx, id); err != nil {
+				return err
+			}
+		}
+		if !keepAlias {
+			return nil
+		}
+		return insertOldNameAliasTx(tx, oldName, oldCatID, id)
 	})
+}
+
+var errKeepAliasOfAlias = errors.New("cannot keep the old name of an alias; rename it plainly")
+
+func insertOldNameAliasTx(tx *sql.Tx, name string, catID, canonicalID int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id, usage_count, origin) VALUES (?, ?, 1, ?, 0, 'user')`,
+		name, catID, canonicalID,
+	)
+	return err
 }
 
 func (s *Service) renameTagTx(tx *sql.Tx, id int64, normalized string, keepAlias bool) error {
@@ -886,7 +991,7 @@ func (s *Service) renameTagTx(tx *sql.Tx, id int64, normalized string, keepAlias
 		return fmt.Errorf("look up tag %d: %w", id, err)
 	}
 	if keepAlias && isAlias == 1 {
-		return fmt.Errorf("cannot keep the old name of an alias; rename it plainly")
+		return errKeepAliasOfAlias
 	}
 	if s.ratingCatID != 0 && catID == s.ratingCatID && IsCanonicalRating(oldName) {
 		return ErrRatingTagImmutable
@@ -904,17 +1009,20 @@ func (s *Service) renameTagTx(tx *sql.Tx, id int64, normalized string, keepAlias
 	if _, err := tx.Exec(`UPDATE tags SET name = ? WHERE id = ?`, normalized, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM folded_tag_pairs WHERE old_id = ? OR new_id = ?`, id, id); err != nil {
+	if err := dropRenamedTagPairsTx(tx, id); err != nil {
 		return err
 	}
 	if !keepAlias {
 		return nil
 	}
-	_, err = tx.Exec(
-		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id, usage_count, origin) VALUES (?, ?, 1, ?, 0, 'user')`,
-		oldName, catID, id,
-	)
-	return err
+	return insertOldNameAliasTx(tx, oldName, catID, id)
+}
+
+func dropRenamedTagPairsTx(tx *sql.Tx, id int64) error {
+	if _, err := tx.Exec(`DELETE FROM folded_tag_pairs WHERE old_id = ? OR new_id = ?`, id, id); err != nil {
+		return err
+	}
+	return dropDistinctPairsTx(tx, id)
 }
 
 type ErrCategoryCollision struct {
@@ -927,9 +1035,14 @@ func (e *ErrCategoryCollision) Error() string {
 }
 
 // ChangeTagCategoryMerge merges into the target's same-name tag on a
-// collision and reports whether it did.
-func (s *Service) ChangeTagCategoryMerge(tagID, newCategoryID int64) (bool, error) {
-	err := s.ChangeTagCategory(tagID, newCategoryID)
+// collision and reports whether it did. A merge always leaves the old
+// spelling as an alias; keepAlias does the same for a plain move.
+func (s *Service) ChangeTagCategoryMerge(tagID, newCategoryID int64, keepAlias bool) (bool, error) {
+	move := s.ChangeTagCategory
+	if keepAlias {
+		move = s.ChangeTagCategoryKeepAlias
+	}
+	err := move(tagID, newCategoryID)
 	var coll *ErrCategoryCollision
 	if errors.As(err, &coll) {
 		if err := s.MergeTags(tagID, coll.ExistingID); err != nil {
@@ -940,11 +1053,23 @@ func (s *Service) ChangeTagCategoryMerge(tagID, newCategoryID int64) (bool, erro
 	return false, err
 }
 
-func (s *Service) ChangeTagCategory(tagID, newCategoryID int64) error {
-	return s.inWriteTx(func(tx *sql.Tx) error { return s.changeTagCategoryTx(tx, tagID, newCategoryID) })
+// An alias row moves plainly: an alias of an alias would never resolve.
+func (s *Service) ChangeTagCategoryKeepAlias(tagID, newCategoryID int64) error {
+	t, err := s.GetTag(tagID)
+	if err != nil {
+		return err
+	}
+	if t.IsAlias {
+		return s.ChangeTagCategory(tagID, newCategoryID)
+	}
+	return s.RenameAndMoveTagKeepAlias(tagID, t.Name, newCategoryID)
 }
 
-func (s *Service) changeTagCategoryTx(tx *sql.Tx, tagID, newCategoryID int64) error {
+func (s *Service) ChangeTagCategory(tagID, newCategoryID int64) error {
+	return s.inWriteTx(func(tx *sql.Tx) error { return s.changeTagCategoryTx(tx, tagID, newCategoryID, "") })
+}
+
+func (s *Service) changeTagCategoryTx(tx *sql.Tx, tagID, newCategoryID int64, newName string) error {
 	var currentCatID int64
 	var name string
 	switch err := tx.QueryRow(
@@ -973,13 +1098,23 @@ func (s *Service) changeTagCategoryTx(tx *sql.Tx, tagID, newCategoryID int64) er
 	if catExists == 0 {
 		return ErrCategoryNotFound
 	}
-	existing, err := nameTaken(tx, name, newCategoryID, tagID)
+	newName = cmp.Or(newName, name)
+	existing, err := nameTaken(tx, newName, newCategoryID, tagID)
 	if err != nil {
 		return err
 	}
-	if existing != 0 {
-		return &ErrCategoryCollision{Name: name, ExistingID: existing}
+	if existing != 0 && newName == name {
+		res, err := tx.Exec(`DELETE FROM tags WHERE id = ? AND is_alias = 1 AND canonical_tag_id = ?`, existing, tagID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			existing = 0
+		}
 	}
-	_, err = tx.Exec(`UPDATE tags SET category_id = ? WHERE id = ?`, newCategoryID, tagID)
+	if existing != 0 {
+		return &ErrCategoryCollision{Name: newName, ExistingID: existing}
+	}
+	_, err = tx.Exec(`UPDATE tags SET name = ?, category_id = ? WHERE id = ?`, newName, newCategoryID, tagID)
 	return err
 }

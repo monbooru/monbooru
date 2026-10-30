@@ -1,0 +1,11 @@
+{{define "partials/apply_destination.html"}}
+<div class="field">
+  <label>Destination</label>
+  <div class="apply-dest-line">
+    <span><span class="field-hint">folder</span> {{with .Folder}}<code>{{.}}</code>{{else}}<span class="field-hint">(left where it is)</span>{{end}}</span>
+    <span><span class="field-hint">name</span> {{with .Name}}<code>{{.}}</code>{{else}}<span class="field-hint">(kept)</span>{{end}}</span>
+  </div>
+</div>
+{{with .Message}}<p class="field-hint">{{.}}</p>{{end}}
+{{with .Preview}}{{template "partials/name_preview.html" .}}{{end}}
+{{end}}

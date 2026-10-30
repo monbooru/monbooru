@@ -11,7 +11,7 @@ import (
 var keywordTable = []struct{ key, desc string }{
 	{"fav", "favorite images"},
 	{"inbox", "in inbox"},
-	{"ai", "AI generation tool"},
+	{"ai", "AI generation tool; a comma list matches any"},
 	{"source", "external source label"},
 	{"cat", "by tag category"},
 	{"width", "image width"},
@@ -32,7 +32,7 @@ var keywordTable = []struct{ key, desc string }{
 	{"size", "file size"},
 	{"mime", "file type"},
 	{"ratio", "aspect ratio (width / height)"},
-	{"tagcount", "number of tags"},
+	{"tagcount", "number of tags (all, or per category)"},
 	{"duration", "video duration in seconds"},
 	{"hash", "sha256 or md5 digest"},
 	{"md5", "md5 digest"},
@@ -75,8 +75,9 @@ func IsKeyword(s string) bool {
 	return ok
 }
 
-// For a key outside rangeKeys, its row is also the full set of accepted
-// values. cat: has no row because its values come from tag_categories.
+// For a key outside ordinalKeys and rangeKeys, its row is also the full
+// set of accepted values. cat: has no row because its values come from
+// tag_categories.
 var Expansions = map[string][]string{
 	"fav":        {"true", "false"},
 	"inbox":      {"true", "false"},
@@ -103,11 +104,18 @@ var Expansions = map[string][]string{
 	"upgrade":    {"any", "bigger", "none", "unknown", "sample", "kept"},
 }
 
-// rangeKeys have Expansions rows that are only hints: operators, or
-// shortcuts beside an open tag, site, source or origin label.
-var rangeKeys = map[string]bool{
+// ordinalKeys take a comparison or a lo..hi range, so their Expansions
+// rows are only operator hints.
+var ordinalKeys = map[string]bool{
 	"width": true, "height": true, "date": true, "size": true,
 	"ratio": true, "tagcount": true, "duration": true, "pages": true,
+}
+
+func IsOrdinal(key string) bool { return ordinalKeys[key] }
+
+// rangeKeys have Expansions rows that are only hints: shortcuts beside
+// an open tag, site, source or origin label.
+var rangeKeys = map[string]bool{
 	"stale": true, "source": true, "upgrade": true,
 	"tagged": true, "autotagged": true, "via": true,
 }
@@ -127,7 +135,7 @@ func ParseBool(v string) (val, ok bool) {
 
 func ValueKnown(key, val string) bool {
 	vals, ok := Expansions[key]
-	if !ok || rangeKeys[key] {
+	if !ok || ordinalKeys[key] || rangeKeys[key] {
 		return true
 	}
 	boolRow := slices.Equal(vals, []string{"true", "false"})

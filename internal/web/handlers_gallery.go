@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +23,8 @@ import (
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
-// A first search slower than this skips the second count behind "N hidden".
+// A first search slower than this skips the second count behind "N hidden",
+// and that count gets no longer than this either.
 var galleryHiddenIndicatorBudget = 300 * time.Millisecond
 
 const batchGapMinutes = 15
@@ -127,23 +128,10 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ceiling := resolveCeiling(r, s.active())
-	pinnedCollection := search.PinnedCollectionName(expr)
-	expr = ceiling.Apply(expr)
 	pageSize := s.pageSize(r)
-	sq := search.Query{
-		Expr:         expr,
-		Sort:         sortStr,
-		Order:        orderStr,
-		RandomSeed:   randomSeed,
-		Page:         page,
-		Limit:        pageSize,
-		Cached:       true,
-		Text:         queryStr,
-		CeilingLevel: ceiling.Level(),
-	}
-	if sortStr == "order" {
-		sq.OrderCollection = pinnedCollection
-	}
+	sq := viewQuery(expr, queryStr, sortStr, orderStr, ceiling)
+	sq.RandomSeed, sq.Page, sq.Limit = randomSeed, page, pageSize
+	expr = sq.Expr
 	// Checked after ceiling.Apply: the cached count ignores the ceiling.
 	if expr == nil {
 		if cx := s.active(); cx != nil {
@@ -151,6 +139,15 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 				sq.PresetTotal = &n
 			}
 		}
+	}
+
+	if at, err := strconv.ParseInt(q.Get("at"), 10, 64); err == nil && pageStr == "" && pageSize > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), rankPageBudget)
+		if rank, err := search.RankInQuery(ctx, s.source(), sq, at); err == nil && rank >= 0 {
+			page = rank/pageSize + 1
+			sq.Page = page
+		}
+		cancel()
 	}
 
 	htmxGridTarget := isHTMXRequest(r) && r.Header.Get("HX-Target") == "gallery-grid"
@@ -163,6 +160,19 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	firstElapsed := time.Since(firstStart)
+
+	// The detail back link's page is a slot counted from the grid, which a
+	// walk off the listing or a changed result set leaves pointing elsewhere.
+	if at, err := strconv.ParseInt(q.Get("at"), 10, 64); err == nil && pageStr != "" && pageSize > 0 && !isHTMXRequest(r) &&
+		!slices.ContainsFunc(result.Results, func(img models.Image) bool { return img.ID == at }) {
+		if held := s.pageHoldingImage(r.Context(), sq, at, page, pageSize); held > 0 && held != page {
+			movedQ := r.URL.Query()
+			movedQ.Set("page", strconv.Itoa(held))
+			movedQ.Del("at")
+			http.Redirect(w, r, "/?"+movedQ.Encode(), http.StatusSeeOther)
+			return
+		}
+	}
 
 	totalPages := 1
 	if pageSize > 0 {
@@ -206,9 +216,11 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case firstElapsed < galleryHiddenIndicatorBudget:
-			if n, err := search.HiddenByCeiling(s.source(), bareExpr, ceiling.Level()); err == nil {
+			ctx, cancel := context.WithTimeout(r.Context(), galleryHiddenIndicatorBudget)
+			if n, err := search.HiddenByCeiling(ctx, s.source(), queryStr, ceiling.Level()); err == nil {
 				hiddenByCeiling = n
 			}
+			cancel()
 		}
 	}
 
@@ -288,6 +300,22 @@ type sidebarBundle struct {
 	Folders      []gallery.FolderNode
 	SourceLabels []gallery.SourceLabelCount
 	Saved        []models.SavedSearch
+}
+
+func (s *Server) pageHoldingImage(ctx context.Context, sq search.Query, id int64, arrived, pageSize int) int {
+	if page, listed := search.PageOf(s.source(), sq, id, pageSize); listed {
+		return page
+	}
+	ctx, cancel := context.WithTimeout(ctx, rankPageBudget)
+	defer cancel()
+	if page, ok := s.pageHoldingMatch(ctx, sq, id, arrived, pageSize); ok {
+		return page
+	}
+	rank, err := search.RankInQuery(ctx, s.source(), sq, id)
+	if err != nil || rank < 0 {
+		return 0
+	}
+	return rank/pageSize + 1
 }
 
 // Only the reads that always hit the DB fan out: a goroutine per cached
@@ -386,23 +414,35 @@ type PageSizeChoice struct {
 	Selected bool
 }
 
-// The Default button is the only way back to a configured size the ramp lacks.
+// The Default button is the only way back to a configured size the ramp
+// lacks; it sits among the sizes in order and stands in for an equal one.
 func (s *Server) pageSizeChoices(r *http.Request) []PageSizeChoice {
 	s.cfgMu.RLock()
 	configured := s.cfg.UI.PageSize
 	s.cfgMu.RUnlock()
 
 	override := pageSizeOverride(r)
-	out := make([]PageSizeChoice, 0, len(PageSizeOptions)+1)
-	out = append(out, PageSizeChoice{
+	def := PageSizeChoice{
 		Value:    "default",
-		Label:    "Def",
-		Title:    fmt.Sprintf("Default (%d)", configured),
-		Selected: override == 0,
-	})
+		Label:    strconv.Itoa(configured),
+		Title:    "Default, set in Settings",
+		Selected: override == 0 || override == configured,
+	}
+	out := make([]PageSizeChoice, 0, len(PageSizeOptions)+1)
+	placed := false
 	for _, n := range PageSizeOptions {
+		if !placed && configured <= n {
+			out = append(out, def)
+			placed = true
+			if configured == n {
+				continue
+			}
+		}
 		label := strconv.Itoa(n)
 		out = append(out, PageSizeChoice{Value: label, Label: label, Selected: override == n})
+	}
+	if !placed {
+		out = append(out, def)
 	}
 	return out
 }

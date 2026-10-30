@@ -12,7 +12,7 @@
     <button id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
     <a href="/" id="logo">
       <img src="{{.BooruLogo}}" alt="" class="topbar-logo">
-      <span>{{.BooruName}}</span>
+      <span>{{wordmark .BooruName}}</span>
     </a>
     <nav id="nav">
       <a href="/" class="nav-images{{if and (eq .ActiveNav "gallery") (not .InboxNavActive)}} active{{end}}">Images</a>
@@ -22,12 +22,14 @@
       <a href="/collections" class="nav-collections{{if eq .ActiveNav "collections"}} active{{end}}">Collections</a>
       <a href="/relations" class="nav-relations{{if eq .ActiveNav "relations"}} active{{end}}">Relations</a>
       <a href="/settings" class="nav-settings{{if eq .ActiveNav "settings"}} active{{end}}">Settings</a>
+      {{template "webui/pair_notice" .PairNotice}}
     </nav>
     <div id="topbar-right">
       <div id="job-status"
            hx-get="/internal/job/status"
            hx-trigger="load, every 2s"
-           hx-swap="outerHTML"></div>
+           hx-swap="outerHTML"
+           hx-vals='{"pair":"{{.PairNotice.Key}}"}'></div>
       {{if not .Degraded}}
       <span id="sync-flash"></span>
       <form id="sync-form" hx-post="/internal/sync" hx-swap="none"
@@ -35,7 +37,7 @@
             hx-on:sync-started="document.getElementById('job-status').setAttribute('hx-trigger','every 2s');htmx.process('#job-status')"
             hx-on:htmx:response-error="document.getElementById('sync-flash').innerHTML=event.detail.xhr.responseText;refreshJobStatus();setTimeout(function(){var el=document.getElementById('sync-flash');if(el)el.innerHTML='';},5000)"
             style="display:inline">
-        <button type="submit" class="topbar-action" title="Sync gallery">[⟳ sync]</button>
+        <button type="submit" class="topbar-action" title="Look for files added, moved or deleted in the gallery folder (Y)">[⟳ sync]</button>
       </form>
       {{end}}
       {{if .AuthEnabled}}
@@ -68,6 +70,12 @@
     <main id="content">
 {{end}}
 
+{{define "footer_version"}}<span id="footer-version"{{if .OOB}} hx-swap-oob="true"{{end}} title="page loaded in {{pageLoadMs .D.RequestStart}} ms"><a href="{{.D.RepoURL}}" target="_blank" rel="noopener">monbooru{{if .D.Build}} ({{.D.Build}}){{end}}</a> {{.D.Version}}</span>{{end}}
+
+{{define "footer_counts"}}<span id="footer-count-images" hx-swap-oob="true">{{.VisibleCount}} img</span>
+<span id="footer-count-tags" hx-swap-oob="true">{{.TagCount}} tags</span>
+<span id="footer-count-collections" hx-swap-oob="true">{{.CollectionsCount}} collections</span>{{end}}
+
 {{define "layout_end"}}
     </main>
   </div>
@@ -79,31 +87,33 @@
       {{else}}
       <span class="footer-gallery">[{{$.ActiveGallery}}]</span>
       {{end}}{{end}}
+      <span class="footer-wide">
       <span class="footer-sep">·</span>
       <span id="footer-count-images">{{.VisibleCount}} img</span>
       <span class="footer-sep">·</span>
       <span id="footer-count-tags">{{.TagCount}} tags</span>
       <span class="footer-sep">·</span>
       <span id="footer-count-collections">{{.CollectionsCount}} collections</span>
+      </span>
       {{if .Degraded}}<span class="footer-sep">·</span><span class="footer-degraded">degraded</span>{{end}}
       <span class="footer-sep-strong">::</span>
-      <span class="footer-rating-label">rating:</span>
-      {{$active := .ActiveRating}}{{range $i, $lv := .RatingLevels}}{{if $i}}<span class="footer-sep">·</span>{{end}}{{if eq $lv.Value $active}}<span class="footer-rating-active">[{{$lv.Label}}]</span>{{else}}<form hx-post="/internal/rating-ceiling?level={{$lv.Value}}" hx-swap="none" hx-on::after-request="if(event.detail.successful){clearSelection();window.location.reload()}" style="display:inline"><button type="submit" class="footer-rating-link">{{$lv.Label}}</button></form>{{end}}{{end}}
-      <span id="footer-hidden" class="footer-hidden">{{with .HiddenByCeiling}}<span class="footer-sep-strong">::</span>{{.}} hidden {{plural . "image" "images"}} in the current search{{end}}</span>
+      <span class="footer-rating-label footer-wide">show up to:</span>
+      {{$active := .ActiveRating}}{{range $i, $lv := .RatingLevels}}{{if $i}}<span class="footer-sep">·</span>{{end}}{{$title := printf "Hide images rated above %s (this browser only)" $lv.Label}}{{if eq $lv.Value "explicit"}}{{$title = "Show every rating (this browser only)"}}{{end}}{{if eq $lv.Value $active}}<span class="footer-rating-active" title="{{$title}}">[{{$lv.Label}}]</span>{{else}}<form hx-post="/internal/rating-ceiling?level={{$lv.Value}}" hx-swap="none" hx-on::after-request="if(event.detail.successful){clearSelection();window.location.reload()}" style="display:inline"><button type="submit" class="footer-rating-link" title="{{$title}}">{{$lv.Label}}</button></form>{{end}}{{end}}
+      <span id="footer-hidden" class="footer-hidden">{{with .HiddenByCeiling}}<span class="footer-sep-strong">::</span><span class="footer-hidden-n">{{.}} hidden<span class="footer-wide"> {{plural . "image" "images"}} in the current search</span></span>{{end}}</span>
     </div>
     <div id="footer-right">
-      {{if .MonloaderPaired}}{{template "webui/peer_light" .MonloaderLight}} · {{end}}page loaded in <span id="page-load-ms">{{pageLoadMs .RequestStart}}</span> ms · <a href="{{.RepoURL}}" target="_blank" rel="noopener">monbooru{{if .Build}} ({{.Build}}){{end}}</a> {{.Version}} · <a href="#" id="footer-shortcuts" onclick="openShortcutSheet();return false">shortcuts</a> · <a href="{{.DocURL}}" target="_blank" rel="noopener">help</a> · <a href="/api/v1/docs" target="_blank" rel="noopener">API</a>
+      {{template "webui/peer_light" .MonloaderLight}}<span class="footer-peer-sep"> · </span><span class="footer-wide">{{template "footer_version" dict "D" .}} · <a href="#" id="footer-shortcuts" onclick="openShortcutSheet();return false">shortcuts</a> · </span><a href="{{.DocURL}}" target="_blank" rel="noopener">help</a><span class="footer-wide"> · <a href="/api/v1/docs" target="_blank" rel="noopener">API</a></span>
     </div>
   </footer>
   {{template "webui/confirm_dialog"}}
   <dialog id="shortcuts-help">
-    <h3>Keyboard Shortcuts</h3>
+    <h3 class="dlg-title">Keyboard Shortcuts{{template "webui/dialog_x"}}</h3>
     <div class="shortcuts-help-grid">
       <section data-surface="anywhere">
         <h4>Anywhere</h4>
         <ul>
           <li><kbd>?</kbd><span>Toggle this overlay</span></li>
-          <li><kbd>s</kbd><kbd>/</kbd><span>Focus search</span></li>
+          <li data-when="#search-input, #sidebar-inner input[name=&#34;q&#34;]"><kbd>s</kbd><kbd>/</kbd><span>Focus search</span></li>
           <li><kbd>b</kbd><span>Show / hide sidebar</span></li>
           <li><kbd>Esc</kbd><span>Close dialog &middot; back</span></li>
           <li><kbd>g</kbd><kbd>g</kbd><span>Gallery</span></li>
@@ -133,6 +143,7 @@
           <li><kbd>Home</kbd><kbd>End</kbd><span>First / last visible</span></li>
           <li><kbd>F</kbd><span>Toggle favorites filter</span></li>
           <li><kbd>R</kbd><span>Random sort</span></li>
+          <li data-when="#slideshow-btn"><kbd>w</kbd><span>Slideshow</span></li>
           <li><kbd>O</kbd><span>Cycle sort</span></li>
           <li><kbd>D</kbd><span>Flip direction</span></li>
           <li data-when="#thumb-size-ramp"><kbd>-</kbd><kbd>=</kbd><span>Thumbnail size</span></li>
@@ -166,6 +177,8 @@
         <h4>Image detail</h4>
         <ul>
           <li><kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>h</kbd><kbd>l</kbd><kbd>j</kbd><kbd>k</kbd><span>Previous / next</span></li>
+          <li data-when=".coll-nav-keyed .coll-step"><kbd>[</kbd><kbd>]</kbd><span>Previous / next in collection</span></li>
+          <li data-when="#slideshow-btn"><kbd>w</kbd><span>Slideshow from here</span></li>
           <li><kbd>Esc</kbd><kbd>Backspace</kbd><span>Back to gallery</span></li>
           <li><kbd>o</kbd><span>Open in tab</span></li>
           <li data-when=".detail-actions a[download]"><kbd>d</kbd><span>Download</span></li>
@@ -182,7 +195,7 @@
           <li><kbd>e</kbd><kbd>n</kbd><span>Edit Note</span></li>
           <li data-when=".btn-add-annotation"><kbd>e</kbd><kbd>a</kbd><span>Add annotation</span></li>
           <li data-when="[data-relations-add]"><kbd>e</kbd><kbd>r</kbd><span>Add a relation</span></li>
-          <li data-when="#remove-tags-btn"><kbd>e</kbd><kbd>t</kbd><span>Remove tag(s)</span></li>
+          <li data-when="#remove-tags-btn"><kbd>e</kbd><kbd>t</kbd><span>Remove tags</span></li>
           <li data-when="#transfer-image-btn"><kbd>e</kbd><kbd>g</kbd><span>Transfer gallery</span></li>
           <li data-when=".btn-edit-collection"><kbd>e</kbd><kbd>1-9</kbd><span>Edit Nth collection</span></li>
           <li data-when=".add-tag-form .btn-hash-lookup:not([disabled])"><kbd>L</kbd><span>Lookup online boorus</span></li>
@@ -204,6 +217,19 @@
           <li><kbd>Esc</kbd><kbd>Click outside</kbd><span>Close</span></li>
         </ul>
       </section>
+      <section data-surface="slideshow">
+        <h4>Slideshow</h4>
+        <ul>
+          <li><kbd>Space</kbd><span>Play / pause</span></li>
+          <li><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Previous / next</span></li>
+          <li><kbd>Home</kbd><kbd>End</kbd><span>First / last</span></li>
+          <li><kbd>r</kbd><span>Restart video</span></li>
+          <li><kbd>l</kbd><span>Loop videos</span></li>
+          <li><kbd>m</kbd><span>Sound on / off</span></li>
+          <li><kbd>f</kbd><span>Fullscreen</span></li>
+          <li><kbd>Esc</kbd><span>Exit slideshow</span></li>
+        </ul>
+      </section>
       <section data-surface="tags">
         <h4>Tags page</h4>
         <ul>
@@ -217,8 +243,10 @@
           <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-merge"><kbd>t</kbd><kbd>m</kbd><span>Merge</span></li>
           <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-alias"><kbd>t</kbd><kbd>a</kbd><span>Alias to</span></li>
           <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-imply"><kbd>t</kbd><kbd>i</kbd><span>Imply</span></li>
-          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-merge-folded"><kbd>t</kbd><kbd>f</kbd><span>Merge folded</span></li>
-          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-ptr"><kbd>t</kbd><kbd>p</kbd><span>Find aliases (PTR)</span></li>
+          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-merge-folded"><kbd>t</kbd><kbd>f</kbd><span>Merge old spellings</span></li>
+          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-distinct"><kbd>t</kbd><kbd>d</kbd><span>Mark distinct</span></li>
+          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-undistinct"><kbd>t</kbd><kbd>d</kbd><span>Unmark distinct</span></li>
+          <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-ptr:not([disabled])"><kbd>t</kbd><kbd>p</kbd><span>Find aliases (PTR)</span></li>
           <li data-when="#tag-batch-bar:not([hidden]) #btn-batch-delete"><kbd>Delete</kbd><span>Delete selected</span></li>
         </ul>
       </section>
@@ -238,6 +266,7 @@
         <h4>Categories page</h4>
         <ul>
           <li><kbd>n</kbd><span>Focus Add category</span></li>
+          <li><kbd>&uarr;</kbd><kbd>&darr;</kbd><span>Move the category whose &equiv; has focus</span></li>
         </ul>
       </section>
       <section data-surface="settings">
@@ -291,7 +320,7 @@
   </dialog>
   <dialog id="page-jump-dialog">
     <form id="page-jump-form" onsubmit="event.preventDefault(); submitPageJump();">
-      <p>Go to page (1–<span id="page-jump-total">1</span>):</p>
+      <p class="dlg-title">Go to page (1–<span id="page-jump-total">1</span>):{{template "webui/dialog_x"}}</p>
       <div class="field">
         <input type="number" id="page-jump-input" name="page" min="1" required>
       </div>
@@ -301,7 +330,7 @@
   {{template "partials/image_lightbox.html" .}}
   {{with .Galleries}}{{if gt (len .) 1}}
   <dialog id="gallery-switch-dialog">
-    <p>Switch gallery</p>
+    <p class="dlg-title">Switch gallery{{template "webui/dialog_x"}}</p>
     <ul class="gallery-switch-list">
       {{range .}}
       <li>

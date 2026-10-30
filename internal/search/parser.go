@@ -4,6 +4,7 @@ package search
 import (
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/searchkw"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -280,11 +281,6 @@ func QuoteValue(s string) string {
 	return s
 }
 
-var comparisonKeys = map[string]bool{
-	"width": true, "height": true, "pages": true, "size": true, "ratio": true,
-	"tagcount": true, "duration": true, "date": true,
-}
-
 // Unreadable names what in query matches nothing as typed: a quote left
 // open, and a comparison or date filter whose value does not parse.
 func Unreadable(query string) []string {
@@ -293,7 +289,7 @@ func Unreadable(query string) []string {
 		out = append(out, "unterminated quote")
 	}
 	WalkLeaves(Parse(query), func(e Expr) bool {
-		if f, ok := e.(FilterExpr); ok && comparisonKeys[f.Key] && filterBuilders[f.Key](&whereBuilder{}, f) == "1=0" {
+		if f, ok := e.(FilterExpr); ok && searchkw.IsOrdinal(f.Key) && filterBuilders[f.Key](&whereBuilder{}, f) == "1=0" {
 			out = append(out, f.Key+":"+f.Val)
 		}
 		return true

@@ -1,5 +1,57 @@
 # Changelog
 
+## [v1.23.0] - 2026-10-30
+### Added
+- Mark same-name tags in different categories as distinct so they no longer show as conflicts. ([#120](https://github.com/monbooru/monbooru/issues/120))
+- Settings -> Maintenance -> Apply destination moves and renames existing images to match the destination template. ([#121](https://github.com/monbooru/monbooru/issues/121))
+- `tagcount:<category>=N` filters by the number of tags in a category, e.g. `tagcount:character=1` for solo characters. ([#125](https://github.com/monbooru/monbooru/issues/125))
+- Settings -> Maintenance -> Unused tags and Reset tags, and a Clean up dialog for each category. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- Create or imply several tags at once, strip unwanted characters from tag names, and edit implications from the Tags page. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- Moving a tag to another category can keep its old name as an alias, and renaming onto an existing tag offers a merge. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- The image page can list implied tags in their own category instead of under their parent. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- Reorder tag categories by dragging them in Tags -> Categories; the sidebars follow the same order. ([#133](https://github.com/monbooru/monbooru/issues/133))
+- Slideshow of a search or a selection, images on a timer and videos played to the end (`w` from an image). ([#135](https://github.com/monbooru/monbooru/issues/135))
+- ComfyUI generation data is read from WebM, MP4 and WebP files. ([#136](https://github.com/monbooru/monbooru/issues/136))
+- Prev / next through a collection from the image page's Same collection panel (`[` / `]`). ([#144](https://github.com/monbooru/monbooru/issues/144))
+- Swipe between images on touch screens, in the slideshow and in the reader.
+- The Inbox is marked NEW when images arrived since you last opened it.
+- A pending monloader pairing request is flagged in the header until it is approved or denied.
+- API: list taggers, collections and the running job, auto-tag existing images, and propagate implications.
+
+### Changed
+- API uploads with auto-tag are queued while another job runs instead of being skipped. ([#149](https://github.com/monbooru/monbooru/issues/149))
+- New dark and light themes and logo; legacy-dark and legacy-light keep the previous one.
+- Refreshed interface: buttons, dialogs, selecter thumbnails and flash messages.
+- Inbox images get a corner mark instead of a label.
+- Some wording change across menus and dialogs.
+- Better layouts on phones.
+- JetBrains Mono is bundled, so text looks the same on every device.
+- pixai-v1 auto-tagging uses much less memory on CPU and GPU.
+- An invalid `schedule.time` or `tagger.execution_provider` falls back to the default with a warning instead of stopping startup.
+- Collections, the Tags page and searches are faster on large libraries.
+- Smaller CUDA Docker image, which also runs on drivers older than CUDA 12.9.
+
+### Fixed
+- Tag inputs autocomplete every word, not only the first. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- A `category:` prefix typed when creating, aliasing or renaming a tag now picks that category. ([#129](https://github.com/monbooru/monbooru/issues/129))
+- `ai:a1111,comfyui` matches images from either tool instead of only both.
+- Collection names ignore case, so typing one differently no longer creates a duplicate.
+- The Same collection panel no longer shows images hidden by the rating filter.
+- A merge import no longer switches the active gallery, and creates the categories it needs.
+- Leftover temp files from an interrupted export or import are cleaned up.
+- PTR: batch lookups no longer time out on a cold index, and the highest rating wins on image with multiple ratings.
+- "Due again" and `lookup:due` only count lookups a scheduled run will actually retry.
+- Deleting a tagger or changing its provider during a run no longer hangs.
+
+Thanks to @CeareDelafont for the suggestions (https://github.com/monbooru/monbooru/issues/120, https://github.com/monbooru/monbooru/issues/121, https://github.com/monbooru/monbooru/issues/125, https://github.com/monbooru/monbooru/issues/129, https://github.com/monbooru/monbooru/issues/144).
+Thanks to @IZA09 for the suggestion (https://github.com/monbooru/monbooru/issues/133).
+Thanks to @drunkenpeleg for the slideshow viewer (https://github.com/monbooru/monbooru/issues/135) and the suggestion (https://github.com/monbooru/monbooru/issues/136).
+Thanks to @koyumeishi for the report (https://github.com/monbooru/monbooru/issues/149).
+
+Thanks to tamaki for the cute mon-chan visuals.
+
+Co-authored-by: drunkenpeleg <6716940+drunkenpeleg@users.noreply.github.com>
+
 ## [v1.22.3] - 2026-10-23
 ### Changed
 - A loopback bind answers only loopback names and the `server.base_url` host.

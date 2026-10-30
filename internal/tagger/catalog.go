@@ -1,9 +1,7 @@
 package tagger
 
 import (
-	"cmp"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"os"
 	"path"
@@ -122,33 +120,18 @@ func regularFile(p string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// $HF_TOKEN sits in double quotes so the shell running the snippet expands it.
-func (c CatalogEntry) curlSteps(targetDir string) []string {
+// HostCommand's paths are relative to the model path. $HF_TOKEN sits in
+// double quotes so the shell running the snippet expands it.
+func (c CatalogEntry) HostCommand() string {
 	auth := ""
 	if c.Gated {
 		auth = `-H "Authorization: Bearer $HF_TOKEN" `
 	}
-	steps := []string{"mkdir -p " + shellSingleQuote(targetDir)}
+	steps := []string{"mkdir -p " + shellSingleQuote(c.Name)}
 	for _, f := range c.Files {
-		dst := targetDir + "/" + f.Filename
-		steps = append(steps, "curl -L "+auth+"-o "+shellSingleQuote(dst)+" "+shellSingleQuote(f.URL))
+		steps = append(steps, "curl -L "+auth+"-o "+shellSingleQuote(c.Name+"/"+f.Filename)+" "+shellSingleQuote(f.URL))
 	}
-	return steps
-}
-
-// HostCommand's paths are relative to the model path.
-func (c CatalogEntry) HostCommand() string { return strings.Join(c.curlSteps(c.Name), " && \\\n") }
-
-// The host shell expands HF_TOKEN into -e; the single-quoted inner script
-// leaves its own $HF_TOKEN to the container's shell.
-func (c CatalogEntry) DockerCommand(containerName string) string {
-	containerName = cmp.Or(containerName, "monbooru")
-	env := ""
-	if c.Gated {
-		env = `-e HF_TOKEN="$HF_TOKEN" `
-	}
-	inner := strings.Join(c.curlSteps("/models/"+c.Name), " && ")
-	return fmt.Sprintf("docker exec %s%s sh -c %s", env, containerName, shellSingleQuote(inner))
+	return strings.Join(steps, " && \\\n")
 }
 
 func shellSingleQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

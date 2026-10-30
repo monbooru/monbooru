@@ -1,10 +1,14 @@
 {{define "notfound.html"}}
 {{template "layout_head_bare" .}}
 
-<div id="notfound-page">
-  <h2>404 - not found</h2>
-  <p class="field-hint">The page or image you asked for doesn't exist (anymore).</p>
-  <p><a href="/">← Back to gallery</a></p>
+<div id="notfound-page" class="mascot-page">
+  {{with .Mascot.lost}}<img src="{{.}}" alt="" class="mascot">{{end}}
+  <div class="mascot-page-text">
+    <h2 class="mascot-page-code">404</h2>
+    <p class="mascot-page-title">Nothing here. (￣～￣;)</p>
+    <p class="field-hint">The page or image you asked for doesn't exist (anymore). It may have been deleted, moved to another gallery, or it never existed in the first place.</p>
+    <div class="mascot-page-actions"><a href="/">← Back to gallery</a><span class="field-hint">or press <kbd>g</kbd> <kbd>g</kbd></span></div>
+  </div>
 </div>
 
 {{template "layout_end" .}}

@@ -28,6 +28,8 @@ var (
 	ErrChainTooDeep = errors.New("relations: chain would exceed the depth limit")
 
 	ErrNotInGroup = errors.New("relations: image is not a member of the group")
+
+	ErrUnknownKind = errors.New("relations: unknown kind")
 )
 
 // CrossConflictError names a pair, other than the one being related, that
@@ -85,10 +87,7 @@ func nowISO() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // not_related_pairs and the queue store each pair once, as (lo, hi).
 func canonicalPair(a, b int64) (int64, int64) {
-	if a < b {
-		return a, b
-	}
-	return b, a
+	return min(a, b), max(a, b)
 }
 
 func (s *Service) inWriteTx(work func(*sql.Tx) error) error {
@@ -704,12 +703,28 @@ var overwriteRelationTx = map[string]func(tx *sql.Tx, a, b int64) error{
 	"not_related": addNotRelatedTx,
 }
 
+var relationAdders = map[string]func(s *Service, a, b int64) error{
+	"duplicate":   (*Service).AddDuplicate,
+	"alternate":   (*Service).AddAlternate,
+	"version":     (*Service).AddVersionEdge,
+	"derivative":  (*Service).AddDerivativeEdge,
+	"not_related": (*Service).AddNotRelated,
+}
+
+func (s *Service) Add(kind string, a, b int64) error {
+	add, ok := relationAdders[kind]
+	if !ok {
+		return fmt.Errorf("%w %q", ErrUnknownKind, kind)
+	}
+	return add(s, a, b)
+}
+
 // Overwrite replaces whatever relates a and b with kind in one
 // transaction, so a refused add leaves the old relation in place.
 func (s *Service) Overwrite(kind string, a, b int64) error {
 	add, ok := overwriteRelationTx[kind]
 	if !ok {
-		return fmt.Errorf("relations: unknown kind %q", kind)
+		return fmt.Errorf("%w %q", ErrUnknownKind, kind)
 	}
 	return s.pairTx(a, b, func(tx *sql.Tx) error {
 		if err := clearBetweenTx(tx, a, b); err != nil {
@@ -1165,11 +1180,7 @@ func mergeIntoGroupTx(tx *sql.Tx, a, b int64, cfg groupMerge) error {
 	case groupA.Int64 == groupB.Int64:
 		// Already in the same group.
 	default:
-		lo, hi := groupA.Int64, groupB.Int64
-		if hi < lo {
-			lo, hi = hi, lo
-		}
-		return cfg.mergeGroups(tx, []int64{lo, hi})
+		return cfg.mergeGroups(tx, []int64{min(groupA.Int64, groupB.Int64), max(groupA.Int64, groupB.Int64)})
 	}
 	return nil
 }

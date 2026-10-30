@@ -4,12 +4,13 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/db"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 // FlagColumn is per backend: the PTR is free and the boorus spend a quota,
 // so an image can be worth one and not the other.
 func FlagColumn(backend string) string {
-	if backend == BackendPTR {
+	if backend == contract.LookupPTR {
 		return "scheduled_lookup_ptr"
 	}
 	return "scheduled_lookup"
@@ -31,7 +32,7 @@ func CandidateClause(backend string) string {
 func DueClause(backend string, now time.Time) (string, []any) {
 	blocked := `l.queued_at IS NOT NULL OR l.next_due_at IS NULL OR l.next_due_at > ?`
 	args := []any{backend, stamp(now)}
-	if backend == BackendPTR {
+	if backend == contract.LookupPTR {
 		// A cold cursor drops the index gate rather than block every row:
 		// over-counting is recoverable, never looking again is not.
 		if cursor := PTRCursor.Load(); cursor > 0 {

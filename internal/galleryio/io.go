@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -47,7 +48,7 @@ func SafeArchiveDest(root, rel string) (string, error) {
 
 // Bump ExportVersion when the document gains a field; loadExportStream
 // must still read every version down to ExportMinSupported.
-const ExportVersion = 12
+const ExportVersion = 14
 
 const ExportMinSupported = 1
 
@@ -137,40 +138,42 @@ type Export struct {
 	Version          int                  `json:"version"`
 	GalleryName      string               `json:"gallery_name"`
 	GalleryPath      string               `json:"gallery_path"`
-	TagCategories    []TagCategoryRow     `json:"tag_categories"`
-	Tags             []TagRow             `json:"tags"`
-	TagImplications  []TagImplicationRow  `json:"tag_implications"`
-	TagNotes         []TagNoteRow         `json:"tag_notes,omitempty"`
-	Images           []ImageRow           `json:"images"`
-	ImageCollections []ImageCollectionRow `json:"image_collections,omitempty"`
-	FindRelations    []FindRelationsRow   `json:"collection_find_relations,omitempty"`
-	ImageSources     []ImageSourceRow     `json:"image_sources,omitempty"`
-	ImageAnnotations []ImageAnnotationRow `json:"image_annotations,omitempty"`
-	ImagePaths       []ImagePathRow       `json:"image_paths"`
-	ImageTags        []ImageTagRow        `json:"image_tags"`
-	ImageTagSources  []ImageTagSourceRow  `json:"image_tag_sources,omitempty"`
-	SDMetadata       []SDMetadataRow      `json:"sd_metadata"`
-	ComfyUIMetadata  []ComfyMetadataRow   `json:"comfyui_metadata"`
-	MangaMetadata    []MangaMetadataRow   `json:"manga_metadata,omitempty"`
-	DupGroups        []DupGroupRow        `json:"dup_groups,omitempty"`
-	DupGroupMembers  []DupGroupMemberRow  `json:"dup_group_members,omitempty"`
-	AltGroups        []AltGroupRow        `json:"alt_groups,omitempty"`
-	AltGroupMembers  []AltGroupMemberRow  `json:"alt_group_members,omitempty"`
-	VersionEdges     []VersionEdgeRow     `json:"version_edges,omitempty"`
-	DerivativeEdges  []DerivativeEdgeRow  `json:"derivative_edges,omitempty"`
-	NotRelatedPairs  []NotRelatedPairRow  `json:"not_related_pairs,omitempty"`
-	SavedSearches    []SavedSearchRow     `json:"saved_searches"`
-	ImageLookups     []ImageLookupRow     `json:"image_lookups,omitempty"`
+	TagCategories    []tagCategoryRow     `json:"tag_categories"`
+	Tags             []tagRow             `json:"tags"`
+	TagImplications  []tagImplicationRow  `json:"tag_implications"`
+	TagNotes         []tagNoteRow         `json:"tag_notes,omitempty"`
+	TagDistinctPairs []tagDistinctPairRow `json:"tag_distinct_pairs,omitempty"`
+	Images           []imageRow           `json:"images"`
+	ImageCollections []imageCollectionRow `json:"image_collections,omitempty"`
+	FindRelations    []findRelationsRow   `json:"collection_find_relations,omitempty"`
+	ImageSources     []imageSourceRow     `json:"image_sources,omitempty"`
+	ImageAnnotations []imageAnnotationRow `json:"image_annotations,omitempty"`
+	ImagePaths       []imagePathRow       `json:"image_paths"`
+	ImageTags        []imageTagRow        `json:"image_tags"`
+	ImageTagSources  []imageTagSourceRow  `json:"image_tag_sources,omitempty"`
+	SDMetadata       []sdMetadataRow      `json:"sd_metadata"`
+	ComfyUIMetadata  []comfyMetadataRow   `json:"comfyui_metadata"`
+	MangaMetadata    []mangaMetadataRow   `json:"manga_metadata,omitempty"`
+	DupGroups        []dupGroupRow        `json:"dup_groups,omitempty"`
+	DupGroupMembers  []dupGroupMemberRow  `json:"dup_group_members,omitempty"`
+	AltGroups        []altGroupRow        `json:"alt_groups,omitempty"`
+	AltGroupMembers  []altGroupMemberRow  `json:"alt_group_members,omitempty"`
+	VersionEdges     []versionEdgeRow     `json:"version_edges,omitempty"`
+	DerivativeEdges  []derivativeEdgeRow  `json:"derivative_edges,omitempty"`
+	NotRelatedPairs  []notRelatedPairRow  `json:"not_related_pairs,omitempty"`
+	SavedSearches    []savedSearchRow     `json:"saved_searches"`
+	ImageLookups     []imageLookupRow     `json:"image_lookups,omitempty"`
 }
 
-type TagCategoryRow struct {
+type tagCategoryRow struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Color     string `json:"color"`
 	IsBuiltin int    `json:"is_builtin"`
+	Position  int    `json:"position"`
 }
 
-type TagRow struct {
+type tagRow struct {
 	ID             int64          `json:"id"`
 	Name           string         `json:"name"`
 	CategoryID     int64          `json:"category_id"`
@@ -183,7 +186,7 @@ type TagRow struct {
 	Stale          int            `json:"stale,omitempty"`
 }
 
-type ImageRow struct {
+type imageRow struct {
 	ID                 int64           `json:"id"`
 	SHA256             string          `json:"sha256"`
 	MD5                string          `json:"md5,omitempty"`
@@ -215,11 +218,11 @@ type ImageRow struct {
 	ScheduledLookupPTR int             `json:"scheduled_lookup_ptr"`
 }
 
-type FindRelationsRow struct {
+type findRelationsRow struct {
 	Name string `json:"name"`
 }
 
-type ImageLookupRow struct {
+type imageLookupRow struct {
 	ImageID    int64          `json:"image_id"`
 	Backend    string         `json:"backend"`
 	Attempts   int            `json:"attempts"`
@@ -231,13 +234,13 @@ type ImageLookupRow struct {
 	PTRCursor  sql.NullInt64  `json:"ptr_cursor"`
 }
 
-type ImageCollectionRow struct {
+type imageCollectionRow struct {
 	ImageID  int64         `json:"image_id"`
 	Name     string        `json:"name"`
 	Position sql.NullInt64 `json:"position"`
 }
 
-type ImageSourceRow struct {
+type imageSourceRow struct {
 	ImageID     int64   `json:"image_id"`
 	Site        string  `json:"site"`
 	PostID      string  `json:"post_id"`
@@ -257,7 +260,7 @@ type ImageSourceRow struct {
 	FetchedAt   string  `json:"fetched_at"`
 }
 
-type ImageAnnotationRow struct {
+type imageAnnotationRow struct {
 	ImageID   int64  `json:"image_id"`
 	Site      string `json:"site"`
 	PostID    string `json:"post_id"`
@@ -270,7 +273,7 @@ type ImageAnnotationRow struct {
 	FetchedAt string `json:"fetched_at"`
 }
 
-type ImagePathRow struct {
+type imagePathRow struct {
 	ID          int64  `json:"id"`
 	ImageID     int64  `json:"image_id"`
 	Path        string `json:"path"`
@@ -279,7 +282,7 @@ type ImagePathRow struct {
 	MtimeNsec   int64  `json:"mtime_nsec,omitempty"`
 }
 
-type ImageTagRow struct {
+type imageTagRow struct {
 	ImageID    int64           `json:"image_id"`
 	TagID      int64           `json:"tag_id"`
 	IsAuto     int             `json:"is_auto"`
@@ -290,16 +293,16 @@ type ImageTagRow struct {
 	Stale      int             `json:"stale,omitempty"`
 }
 
-// ImageTagSourceRow travels on its own: image_tags.tagger_name keeps only
+// imageTagSourceRow travels on its own: image_tags.tagger_name keeps only
 // the first source, so the ledger can't be rebuilt from it.
-type ImageTagSourceRow struct {
+type imageTagSourceRow struct {
 	ImageID   int64  `json:"image_id"`
 	TagID     int64  `json:"tag_id"`
 	Source    string `json:"source"`
 	CreatedAt string `json:"created_at"`
 }
 
-type TagImplicationRow struct {
+type tagImplicationRow struct {
 	ParentTagID  int64  `json:"parent_tag_id"`
 	ImpliedTagID int64  `json:"implied_tag_id"`
 	CreatedAt    string `json:"created_at"`
@@ -307,13 +310,19 @@ type TagImplicationRow struct {
 	Stale        int    `json:"stale,omitempty"`
 }
 
-type TagNoteRow struct {
+type tagDistinctPairRow struct {
+	ATagID    int64  `json:"a_tag_id"`
+	BTagID    int64  `json:"b_tag_id"`
+	CreatedAt string `json:"created_at"`
+}
+
+type tagNoteRow struct {
 	TagID int64  `json:"tag_id"`
 	Body  string `json:"body"`
 	Links string `json:"links"`
 }
 
-type SDMetadataRow struct {
+type sdMetadataRow struct {
 	ImageID        int64           `json:"image_id"`
 	Prompt         sql.NullString  `json:"prompt"`
 	NegativePrompt sql.NullString  `json:"negative_prompt"`
@@ -326,7 +335,7 @@ type SDMetadataRow struct {
 	GenerationHash sql.NullString  `json:"generation_hash"`
 }
 
-type ComfyMetadataRow struct {
+type comfyMetadataRow struct {
 	ImageID         int64           `json:"image_id"`
 	Prompt          sql.NullString  `json:"prompt"`
 	ModelCheckpoint sql.NullString  `json:"model_checkpoint"`
@@ -338,7 +347,7 @@ type ComfyMetadataRow struct {
 	GenerationHash  sql.NullString  `json:"generation_hash"`
 }
 
-type MangaMetadataRow struct {
+type mangaMetadataRow struct {
 	ImageID         int64           `json:"image_id"`
 	Title           sql.NullString  `json:"title"`
 	Series          sql.NullString  `json:"series"`
@@ -370,7 +379,7 @@ type MangaMetadataRow struct {
 	RawXML          sql.NullString  `json:"raw_xml"`
 }
 
-type SavedSearchRow struct {
+type savedSearchRow struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Query     string `json:"query"`
@@ -380,42 +389,42 @@ type SavedSearchRow struct {
 	CreatedAt string `json:"created_at"`
 }
 
-type DupGroupRow struct {
+type dupGroupRow struct {
 	ID              int64  `json:"id"`
 	OriginalImageID int64  `json:"original_image_id"`
 	CreatedAt       string `json:"created_at"`
 }
 
-type DupGroupMemberRow struct {
+type dupGroupMemberRow struct {
 	ImageID   int64  `json:"image_id"`
 	GroupID   int64  `json:"group_id"`
 	CreatedAt string `json:"created_at"`
 }
 
-type AltGroupRow struct {
+type altGroupRow struct {
 	ID        int64  `json:"id"`
 	CreatedAt string `json:"created_at"`
 }
 
-type AltGroupMemberRow struct {
+type altGroupMemberRow struct {
 	ImageID   int64  `json:"image_id"`
 	GroupID   int64  `json:"group_id"`
 	CreatedAt string `json:"created_at"`
 }
 
-type VersionEdgeRow struct {
+type versionEdgeRow struct {
 	ChildImageID  int64  `json:"child_image_id"`
 	ParentImageID int64  `json:"parent_image_id"`
 	CreatedAt     string `json:"created_at"`
 }
 
-type DerivativeEdgeRow struct {
+type derivativeEdgeRow struct {
 	DerivativeImageID int64  `json:"derivative_image_id"`
 	SourceImageID     int64  `json:"source_image_id"`
 	CreatedAt         string `json:"created_at"`
 }
 
-type NotRelatedPairRow struct {
+type notRelatedPairRow struct {
 	AImageID  int64  `json:"a_image_id"`
 	BImageID  int64  `json:"b_image_id"`
 	CreatedAt string `json:"created_at"`
@@ -531,163 +540,120 @@ func (t table[T]) load(tx *sql.Tx, dec *json.Decoder) error {
 		verb = `INSERT OR IGNORE`
 	}
 	marks := strings.TrimSuffix(strings.Repeat("?, ", strings.Count(t.cols, ",")+1), ", ")
-	return insertStream(tx, dec, t.label, verb+` INTO `+t.name+` (`+t.cols+`) VALUES (`+marks+`)`, t.args)
+	args := t.args
+	if args == nil {
+		args = func(r T) []any { return t.fields(&r) }
+	}
+	return insertStream(tx, dec, t.label, verb+` INTO `+t.name+` (`+t.cols+`) VALUES (`+marks+`)`, args)
 }
 
 // In the document's section order.
 var exportTables = []tableIO{
-	table[TagCategoryRow]{name: "tag_categories", label: "tag_category", cols: `id, name, color, is_builtin`, order: `id`,
-		fields: func(r *TagCategoryRow) []any { return []any{&r.ID, &r.Name, &r.Color, &r.IsBuiltin} },
-		args: func(r TagCategoryRow) []any {
+	table[tagCategoryRow]{name: "tag_categories", label: "tag_category", cols: `id, name, color, is_builtin, position`, order: `id`,
+		fields: func(r *tagCategoryRow) []any { return []any{&r.ID, &r.Name, &r.Color, &r.IsBuiltin, &r.Position} },
+		args: func(r tagCategoryRow) []any {
 			// The color lands in an inline style attribute: don't trust it.
 			safeColor := tags.SafeCategoryColor(r.Color)
 			if safeColor != r.Color {
 				logx.Warnf("import: replaced invalid color %q for tag_category %q with %s", r.Color, r.Name, safeColor)
 			}
-			return []any{r.ID, r.Name, safeColor, r.IsBuiltin}
+			return []any{r.ID, r.Name, safeColor, r.IsBuiltin, r.Position}
 		}},
-	table[TagRow]{name: "tags", label: "tag", cols: `id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at, origin, last_used_at, stale`, order: `id`,
-		fields: func(r *TagRow) []any {
+	table[tagRow]{name: "tags", label: "tag", cols: `id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at, origin, last_used_at, stale`, order: `id`,
+		fields: func(r *tagRow) []any {
 			return []any{&r.ID, &r.Name, &r.CategoryID, &r.UsageCount, &r.IsAlias, &r.CanonicalTagID, &r.CreatedAt, &r.Origin, &r.LastUsedAt, &r.Stale}
-		},
-		args: func(r TagRow) []any {
-			return []any{r.ID, r.Name, r.CategoryID, r.UsageCount, r.IsAlias, r.CanonicalTagID, r.CreatedAt, r.Origin, r.LastUsedAt, r.Stale}
 		}},
-	table[TagImplicationRow]{name: "tag_implications", label: "tag_implication", cols: `parent_tag_id, implied_tag_id, created_at, origin, stale`, order: `parent_tag_id, implied_tag_id`,
-		fields: func(r *TagImplicationRow) []any {
+	table[tagImplicationRow]{name: "tag_implications", label: "tag_implication", cols: `parent_tag_id, implied_tag_id, created_at, origin, stale`, order: `parent_tag_id, implied_tag_id`,
+		fields: func(r *tagImplicationRow) []any {
 			return []any{&r.ParentTagID, &r.ImpliedTagID, &r.CreatedAt, &r.Origin, &r.Stale}
-		},
-		args: func(r TagImplicationRow) []any {
-			return []any{r.ParentTagID, r.ImpliedTagID, r.CreatedAt, r.Origin, r.Stale}
 		}},
-	table[TagNoteRow]{name: "tag_notes", label: "tag_note", cols: `tag_id, body, links`, order: `tag_id`,
-		fields: func(r *TagNoteRow) []any { return []any{&r.TagID, &r.Body, &r.Links} },
-		args:   func(r TagNoteRow) []any { return []any{r.TagID, r.Body, r.Links} }},
-	table[ImageRow]{name: "images", label: "image", scope: "id", order: `id`,
+	table[tagNoteRow]{name: "tag_notes", label: "tag_note", cols: `tag_id, body, links`, order: `tag_id`,
+		fields: func(r *tagNoteRow) []any { return []any{&r.TagID, &r.Body, &r.Links} }},
+	table[tagDistinctPairRow]{name: "tag_distinct_pairs", label: "tag_distinct_pair", cols: `a_tag_id, b_tag_id, created_at`, order: `a_tag_id, b_tag_id`, orIgnore: true,
+		fields: func(r *tagDistinctPairRow) []any { return []any{&r.ATagID, &r.BTagID, &r.CreatedAt} },
+		args: func(r tagDistinctPairRow) []any {
+			return []any{min(r.ATagID, r.BTagID), max(r.ATagID, r.BTagID), r.CreatedAt}
+		}},
+	table[imageRow]{name: "images", label: "image", scope: "id", order: `id`,
 		cols: `id, sha256, md5, canonical_path, folder_path, file_type, width, height,
 		       file_size, is_missing, is_favorited, is_inbox, auto_tagged_at, source_type, origin, source, url, page_count, duration_seconds, series, series_order, note, original_source,
 		       phash, last_read_page, upload_batch, scheduled_lookup, scheduled_lookup_ptr, ingested_at`,
-		fields: func(r *ImageRow) []any {
+		fields: func(r *imageRow) []any {
 			return []any{&r.ID, &r.SHA256, &r.MD5, &r.CanonicalPath, &r.FolderPath, &r.FileType,
 				&r.Width, &r.Height, &r.FileSize, &r.IsMissing, &r.IsFavorited, &r.IsInbox,
 				&r.AutoTaggedAt, &r.SourceType, &r.Origin, &r.Source, &r.URL, &r.PageCount, &r.DurationSeconds, &r.Series, &r.SeriesOrder, &r.Note, &r.OriginalSource,
 				&r.Phash, &r.LastReadPage, &r.UploadBatch, &r.ScheduledLookup, &r.ScheduledLookupPTR, &r.IngestedAt}
-		},
-		args: func(r ImageRow) []any {
-			return []any{r.ID, r.SHA256, r.MD5, r.CanonicalPath, r.FolderPath, r.FileType, r.Width, r.Height,
-				r.FileSize, r.IsMissing, r.IsFavorited, r.IsInbox, r.AutoTaggedAt, r.SourceType, r.Origin, r.Source, r.URL, r.PageCount, r.DurationSeconds, r.Series, r.SeriesOrder, r.Note, r.OriginalSource,
-				r.Phash, r.LastReadPage, r.UploadBatch, r.ScheduledLookup, r.ScheduledLookupPTR, r.IngestedAt}
 		}},
-	table[ImageCollectionRow]{name: "image_collections", label: "image_collection", cols: `image_id, name, position`, scope: "image_id", order: `image_id, name`, orIgnore: true,
-		fields: func(r *ImageCollectionRow) []any { return []any{&r.ImageID, &r.Name, &r.Position} },
-		args:   func(r ImageCollectionRow) []any { return []any{r.ImageID, r.Name, r.Position} }},
-	table[FindRelationsRow]{name: "collection_find_relations", label: "collection_find_relations", cols: `name`, order: `name`, orIgnore: true,
-		fields: func(r *FindRelationsRow) []any { return []any{&r.Name} },
-		args:   func(r FindRelationsRow) []any { return []any{r.Name} }},
-	table[ImageSourceRow]{name: "image_sources", label: "image_source", scope: "image_id", order: `rowid`, orIgnore: true,
+	table[imageCollectionRow]{name: "image_collections", label: "image_collection", cols: `image_id, name, position`, scope: "image_id", order: `image_id, name`, orIgnore: true,
+		fields: func(r *imageCollectionRow) []any { return []any{&r.ImageID, &r.Name, &r.Position} }},
+	table[findRelationsRow]{name: "collection_find_relations", label: "collection_find_relations", cols: `name`, order: `name`, orIgnore: true,
+		fields: func(r *findRelationsRow) []any { return []any{&r.Name} }},
+	table[imageSourceRow]{name: "image_sources", label: "image_source", scope: "image_id", order: `rowid`, orIgnore: true,
 		cols: `image_id, site, post_id, url, md5, commentary, commentary_translated, original, similarity,
 		       md5_match, parent_url, upgrade_kept, post_width, post_height, post_size, post_ext, fetched_at`,
-		fields: func(r *ImageSourceRow) []any {
+		fields: func(r *imageSourceRow) []any {
 			return []any{&r.ImageID, &r.Site, &r.PostID, &r.URL, &r.MD5, &r.Commentary, &r.Translated, &r.Original, &r.Similarity,
 				&r.MD5Match, &r.ParentURL, &r.UpgradeKept, &r.PostWidth, &r.PostHeight, &r.PostSize, &r.PostExt, &r.FetchedAt}
-		},
-		args: func(r ImageSourceRow) []any {
-			return []any{r.ImageID, r.Site, r.PostID, r.URL, r.MD5, r.Commentary, r.Translated, r.Original, r.Similarity,
-				r.MD5Match, r.ParentURL, r.UpgradeKept, r.PostWidth, r.PostHeight, r.PostSize, r.PostExt, r.FetchedAt}
 		}},
-	table[ImageAnnotationRow]{name: "image_annotations", label: "image_annotation (image)", cols: `image_id, site, post_id, x, y, w, h, body, manual, fetched_at`, scope: "image_id", order: `id`,
-		fields: func(r *ImageAnnotationRow) []any {
+	table[imageAnnotationRow]{name: "image_annotations", label: "image_annotation (image)", cols: `image_id, site, post_id, x, y, w, h, body, manual, fetched_at`, scope: "image_id", order: `id`,
+		fields: func(r *imageAnnotationRow) []any {
 			return []any{&r.ImageID, &r.Site, &r.PostID, &r.X, &r.Y, &r.W, &r.H, &r.Body, &r.Manual, &r.FetchedAt}
-		},
-		args: func(r ImageAnnotationRow) []any {
-			return []any{r.ImageID, r.Site, r.PostID, r.X, r.Y, r.W, r.H, r.Body, r.Manual, r.FetchedAt}
 		}},
-	table[ImagePathRow]{name: "image_paths", label: "image_path", cols: `id, image_id, path, is_canonical, mtime_unix, mtime_nsec`, scope: "image_id", order: `id`,
-		fields: func(r *ImagePathRow) []any {
+	table[imagePathRow]{name: "image_paths", label: "image_path", cols: `id, image_id, path, is_canonical, mtime_unix, mtime_nsec`, scope: "image_id", order: `id`,
+		fields: func(r *imagePathRow) []any {
 			return []any{&r.ID, &r.ImageID, &r.Path, &r.IsCanonical, &r.MtimeUnix, &r.MtimeNsec}
-		},
-		args: func(r ImagePathRow) []any {
-			return []any{r.ID, r.ImageID, r.Path, r.IsCanonical, r.MtimeUnix, r.MtimeNsec}
 		}},
-	table[ImageTagRow]{name: "image_tags", label: "image_tag", cols: `image_id, tag_id, is_auto, is_implied, confidence, tagger_name, created_at, stale`, scope: "image_id",
-		fields: func(r *ImageTagRow) []any {
+	table[imageTagRow]{name: "image_tags", label: "image_tag", cols: `image_id, tag_id, is_auto, is_implied, confidence, tagger_name, created_at, stale`, scope: "image_id",
+		fields: func(r *imageTagRow) []any {
 			return []any{&r.ImageID, &r.TagID, &r.IsAuto, &r.IsImplied, &r.Confidence, &r.TaggerName, &r.CreatedAt, &r.Stale}
-		},
-		args: func(r ImageTagRow) []any {
-			return []any{r.ImageID, r.TagID, r.IsAuto, r.IsImplied, r.Confidence, r.TaggerName, r.CreatedAt, r.Stale}
 		}},
-	table[ImageTagSourceRow]{name: "image_tag_sources", label: "image_tag_source", cols: `image_id, tag_id, source, created_at`, scope: "image_id", order: `image_id, tag_id, source`, orIgnore: true,
-		fields: func(r *ImageTagSourceRow) []any { return []any{&r.ImageID, &r.TagID, &r.Source, &r.CreatedAt} },
-		args:   func(r ImageTagSourceRow) []any { return []any{r.ImageID, r.TagID, r.Source, r.CreatedAt} }},
-	table[SDMetadataRow]{name: "sd_metadata", label: "sd_metadata", cols: `image_id, prompt, negative_prompt, model, seed, sampler, steps, cfg_scale, raw_params, generation_hash`, scope: "image_id",
-		fields: func(r *SDMetadataRow) []any {
+	table[imageTagSourceRow]{name: "image_tag_sources", label: "image_tag_source", cols: `image_id, tag_id, source, created_at`, scope: "image_id", order: `image_id, tag_id, source`, orIgnore: true,
+		fields: func(r *imageTagSourceRow) []any { return []any{&r.ImageID, &r.TagID, &r.Source, &r.CreatedAt} }},
+	table[sdMetadataRow]{name: "sd_metadata", label: "sd_metadata", cols: `image_id, prompt, negative_prompt, model, seed, sampler, steps, cfg_scale, raw_params, generation_hash`, scope: "image_id",
+		fields: func(r *sdMetadataRow) []any {
 			return []any{&r.ImageID, &r.Prompt, &r.NegativePrompt, &r.Model, &r.Seed, &r.Sampler, &r.Steps, &r.CFGScale, &r.RawParams, &r.GenerationHash}
-		},
-		args: func(r SDMetadataRow) []any {
-			return []any{r.ImageID, r.Prompt, r.NegativePrompt, r.Model, r.Seed, r.Sampler, r.Steps, r.CFGScale, r.RawParams, r.GenerationHash}
 		}},
-	table[ComfyMetadataRow]{name: "comfyui_metadata", label: "comfyui_metadata", cols: `image_id, prompt, model_checkpoint, seed, sampler, steps, cfg_scale, raw_workflow, generation_hash`, scope: "image_id",
-		fields: func(r *ComfyMetadataRow) []any {
+	table[comfyMetadataRow]{name: "comfyui_metadata", label: "comfyui_metadata", cols: `image_id, prompt, model_checkpoint, seed, sampler, steps, cfg_scale, raw_workflow, generation_hash`, scope: "image_id",
+		fields: func(r *comfyMetadataRow) []any {
 			return []any{&r.ImageID, &r.Prompt, &r.ModelCheckpoint, &r.Seed, &r.Sampler, &r.Steps, &r.CFGScale, &r.RawWorkflow, &r.GenerationHash}
-		},
-		args: func(r ComfyMetadataRow) []any {
-			return []any{r.ImageID, r.Prompt, r.ModelCheckpoint, r.Seed, r.Sampler, r.Steps, r.CFGScale, r.RawWorkflow, r.GenerationHash}
 		}},
-	table[MangaMetadataRow]{name: "manga_metadata", label: "manga_metadata", scope: "image_id",
+	table[mangaMetadataRow]{name: "manga_metadata", label: "manga_metadata", scope: "image_id",
 		cols: `image_id, title, series, number, volume, count, summary, notes,
 		       year, month, day, writer, penciller, inker, colorist, letterer, cover_artist, editor, publisher,
 		       imprint, genre, web, language_iso, format, manga, age_rating, community_rating, xml_page_count, raw_xml`,
-		fields: func(r *MangaMetadataRow) []any {
+		fields: func(r *mangaMetadataRow) []any {
 			return []any{&r.ImageID, &r.Title, &r.Series, &r.Number, &r.Volume, &r.Count, &r.Summary, &r.Notes,
 				&r.Year, &r.Month, &r.Day, &r.Writer, &r.Penciller, &r.Inker, &r.Colorist, &r.Letterer, &r.CoverArtist,
 				&r.Editor, &r.Publisher, &r.Imprint, &r.Genre, &r.Web, &r.LanguageISO, &r.Format, &r.Manga, &r.AgeRating,
 				&r.CommunityRating, &r.XMLPageCount, &r.RawXML}
-		},
-		args: func(r MangaMetadataRow) []any {
-			return []any{r.ImageID, r.Title, r.Series, r.Number, r.Volume, r.Count, r.Summary, r.Notes,
-				r.Year, r.Month, r.Day, r.Writer, r.Penciller, r.Inker, r.Colorist, r.Letterer, r.CoverArtist,
-				r.Editor, r.Publisher, r.Imprint, r.Genre, r.Web, r.LanguageISO, r.Format, r.Manga, r.AgeRating,
-				r.CommunityRating, r.XMLPageCount, r.RawXML}
 		}},
-	table[DupGroupRow]{name: "dup_groups", label: "dup_group", cols: `id, original_image_id, created_at`, order: `id`,
-		fields: func(r *DupGroupRow) []any { return []any{&r.ID, &r.OriginalImageID, &r.CreatedAt} },
-		args:   func(r DupGroupRow) []any { return []any{r.ID, r.OriginalImageID, r.CreatedAt} }},
-	table[DupGroupMemberRow]{name: "dup_group_members", label: "dup_group_member", cols: `image_id, group_id, created_at`, scope: "image_id", order: `image_id`,
-		fields: func(r *DupGroupMemberRow) []any { return []any{&r.ImageID, &r.GroupID, &r.CreatedAt} },
-		args:   func(r DupGroupMemberRow) []any { return []any{r.ImageID, r.GroupID, r.CreatedAt} }},
-	table[AltGroupRow]{name: "alt_groups", label: "alt_group", cols: `id, created_at`, order: `id`,
-		fields: func(r *AltGroupRow) []any { return []any{&r.ID, &r.CreatedAt} },
-		args:   func(r AltGroupRow) []any { return []any{r.ID, r.CreatedAt} }},
-	table[AltGroupMemberRow]{name: "alt_group_members", label: "alt_group_member", cols: `image_id, group_id, created_at`, scope: "image_id", order: `image_id`,
-		fields: func(r *AltGroupMemberRow) []any { return []any{&r.ImageID, &r.GroupID, &r.CreatedAt} },
-		args:   func(r AltGroupMemberRow) []any { return []any{r.ImageID, r.GroupID, r.CreatedAt} }},
-	table[VersionEdgeRow]{name: "version_edges", label: "version_edge", cols: `child_image_id, parent_image_id, created_at`, scope: "child_image_id", order: `child_image_id`,
-		fields: func(r *VersionEdgeRow) []any { return []any{&r.ChildImageID, &r.ParentImageID, &r.CreatedAt} },
-		args:   func(r VersionEdgeRow) []any { return []any{r.ChildImageID, r.ParentImageID, r.CreatedAt} }},
-	table[DerivativeEdgeRow]{name: "derivative_edges", label: "derivative_edge", cols: `derivative_image_id, source_image_id, created_at`, scope: "derivative_image_id", order: `derivative_image_id, source_image_id`,
-		fields: func(r *DerivativeEdgeRow) []any { return []any{&r.DerivativeImageID, &r.SourceImageID, &r.CreatedAt} },
-		args:   func(r DerivativeEdgeRow) []any { return []any{r.DerivativeImageID, r.SourceImageID, r.CreatedAt} }},
+	table[dupGroupRow]{name: "dup_groups", label: "dup_group", cols: `id, original_image_id, created_at`, order: `id`,
+		fields: func(r *dupGroupRow) []any { return []any{&r.ID, &r.OriginalImageID, &r.CreatedAt} }},
+	table[dupGroupMemberRow]{name: "dup_group_members", label: "dup_group_member", cols: `image_id, group_id, created_at`, scope: "image_id", order: `image_id`,
+		fields: func(r *dupGroupMemberRow) []any { return []any{&r.ImageID, &r.GroupID, &r.CreatedAt} }},
+	table[altGroupRow]{name: "alt_groups", label: "alt_group", cols: `id, created_at`, order: `id`,
+		fields: func(r *altGroupRow) []any { return []any{&r.ID, &r.CreatedAt} }},
+	table[altGroupMemberRow]{name: "alt_group_members", label: "alt_group_member", cols: `image_id, group_id, created_at`, scope: "image_id", order: `image_id`,
+		fields: func(r *altGroupMemberRow) []any { return []any{&r.ImageID, &r.GroupID, &r.CreatedAt} }},
+	table[versionEdgeRow]{name: "version_edges", label: "version_edge", cols: `child_image_id, parent_image_id, created_at`, scope: "child_image_id", order: `child_image_id`,
+		fields: func(r *versionEdgeRow) []any { return []any{&r.ChildImageID, &r.ParentImageID, &r.CreatedAt} }},
+	table[derivativeEdgeRow]{name: "derivative_edges", label: "derivative_edge", cols: `derivative_image_id, source_image_id, created_at`, scope: "derivative_image_id", order: `derivative_image_id, source_image_id`,
+		fields: func(r *derivativeEdgeRow) []any { return []any{&r.DerivativeImageID, &r.SourceImageID, &r.CreatedAt} }},
 	// The relations service only matches a < b, which an older or
 	// hand-written document may not follow; OR IGNORE for one that names
 	// both orientations.
-	table[NotRelatedPairRow]{name: "not_related_pairs", label: "not_related_pair", cols: `a_image_id, b_image_id, created_at`, scope: "a_image_id", order: `a_image_id, b_image_id`, orIgnore: true,
-		fields: func(r *NotRelatedPairRow) []any { return []any{&r.AImageID, &r.BImageID, &r.CreatedAt} },
-		args: func(r NotRelatedPairRow) []any {
+	table[notRelatedPairRow]{name: "not_related_pairs", label: "not_related_pair", cols: `a_image_id, b_image_id, created_at`, scope: "a_image_id", order: `a_image_id, b_image_id`, orIgnore: true,
+		fields: func(r *notRelatedPairRow) []any { return []any{&r.AImageID, &r.BImageID, &r.CreatedAt} },
+		args: func(r notRelatedPairRow) []any {
 			return []any{min(r.AImageID, r.BImageID), max(r.AImageID, r.BImageID), r.CreatedAt}
 		}},
-	table[SavedSearchRow]{name: "saved_searches", label: "saved_search", cols: `id, name, query, sort, sort_order, seed, created_at`, order: `id`,
-		fields: func(r *SavedSearchRow) []any {
+	table[savedSearchRow]{name: "saved_searches", label: "saved_search", cols: `id, name, query, sort, sort_order, seed, created_at`, order: `id`,
+		fields: func(r *savedSearchRow) []any {
 			return []any{&r.ID, &r.Name, &r.Query, &r.Sort, &r.Order, &r.Seed, &r.CreatedAt}
-		},
-		args: func(r SavedSearchRow) []any {
-			return []any{r.ID, r.Name, r.Query, r.Sort, r.Order, r.Seed, r.CreatedAt}
 		}},
-	table[ImageLookupRow]{name: "image_lookups", label: "image_lookup", cols: `image_id, backend, attempts, queued_at, job_id, last_at, last_result, next_due_at, ptr_cursor`, scope: "image_id", order: `image_id, backend`,
-		fields: func(r *ImageLookupRow) []any {
+	table[imageLookupRow]{name: "image_lookups", label: "image_lookup", cols: `image_id, backend, attempts, queued_at, job_id, last_at, last_result, next_due_at, ptr_cursor`, scope: "image_id", order: `image_id, backend`,
+		fields: func(r *imageLookupRow) []any {
 			return []any{&r.ImageID, &r.Backend, &r.Attempts, &r.QueuedAt, &r.JobID, &r.LastAt, &r.LastResult, &r.NextDueAt, &r.PTRCursor}
-		},
-		args: func(r ImageLookupRow) []any {
-			return []any{r.ImageID, r.Backend, r.Attempts, r.QueuedAt, r.JobID, r.LastAt, r.LastResult, r.NextDueAt, r.PTRCursor}
 		}},
 }
 
@@ -1144,9 +1110,9 @@ func rebaseImagePaths(database *db.DB, b *gallery.Boundary) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Imported rows can arrive after Bootstrap's one-shot ran, so
-	// normalise here: before the scan reads folder_path, and before the
-	// rewrite erases the backslashes that mark a Windows row.
+	// A library written on Windows stores backslash folders: normalise
+	// them before the scan reads folder_path, and before the rewrite
+	// erases the backslashes that mark a Windows row.
 	if _, err := tx.Exec(db.NormalizeWindowsFolderPathSQL); err != nil {
 		return fmt.Errorf("normalize folder paths: %w", err)
 	}
@@ -1335,7 +1301,11 @@ func insertStream[T any](tx *sql.Tx, dec *json.Decoder, label, query string, arg
 	return streamArray(dec, func(r T) error {
 		a := args(r)
 		if _, err := stmt.Exec(a...); err != nil {
-			return fmt.Errorf("insert %s %v: %w", label, a[:min(2, len(a))], err)
+			key := make([]any, min(2, len(a)))
+			for i := range key {
+				key[i] = reflect.Indirect(reflect.ValueOf(a[i])).Interface()
+			}
+			return fmt.Errorf("insert %s %v: %w", label, key, err)
 		}
 		return nil
 	})
@@ -1352,30 +1322,8 @@ func loadExportTx(tx *sql.Tx, r io.Reader) error {
 	}
 
 	// Clears what Bootstrap seeded, which would collide with the imported ids.
-	for _, stmt := range []string{
-		`DELETE FROM image_tags`,
-		`DELETE FROM image_tag_sources`,
-		`DELETE FROM tag_implications`,
-		`DELETE FROM image_paths`,
-		`DELETE FROM image_collections`,
-		`DELETE FROM image_sources`,
-		`DELETE FROM image_annotations`,
-		`DELETE FROM sd_metadata`,
-		`DELETE FROM comfyui_metadata`,
-		`DELETE FROM manga_metadata`,
-		`DELETE FROM saved_searches`,
-		`DELETE FROM dup_group_members`,
-		`DELETE FROM dup_groups`,
-		`DELETE FROM alt_group_members`,
-		`DELETE FROM alt_groups`,
-		`DELETE FROM version_edges`,
-		`DELETE FROM derivative_edges`,
-		`DELETE FROM not_related_pairs`,
-		`DELETE FROM images`,
-		`DELETE FROM tags`,
-		`DELETE FROM tag_categories`,
-	} {
-		if _, err := tx.Exec(stmt); err != nil {
+	for i := len(exportTables) - 1; i >= 0; i-- {
+		if _, err := tx.Exec(`DELETE FROM ` + exportTables[i].key()); err != nil {
 			return fmt.Errorf("reset table: %w", err)
 		}
 	}
@@ -1411,11 +1359,7 @@ func loadExportTx(tx *sql.Tx, r io.Reader) error {
 	}
 
 	if version < 3 {
-		// Pre-v3 documents hold collections only in images.series.
-		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO image_collections (image_id, name, position)
-			 SELECT id, series, series_order FROM images WHERE series != ''`,
-		); err != nil {
+		if err := seedCollectionsFromSeries(tx); err != nil {
 			return fmt.Errorf("seed image_collections: %w", err)
 		}
 	}
@@ -1435,8 +1379,39 @@ func loadExportTx(tx *sql.Tx, r io.Reader) error {
 			return fmt.Errorf("backfill image_tag_sources: %w", err)
 		}
 	}
+	if version < 14 {
+		if _, err := tx.Exec(db.ResetCategoryPositions); err != nil {
+			return fmt.Errorf("order tag_categories: %w", err)
+		}
+	}
 	if rederive {
 		if err := db.RederiveTriggerColumns(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Pre-v3 documents hold collections only in images.series. A case variant
+// of a spelling seeded first joins it, home mirror included.
+func seedCollectionsFromSeries(tx *sql.Tx) error {
+	spellings, err := db.QueryStrings(tx, `SELECT series FROM images WHERE series != '' GROUP BY series ORDER BY MIN(id)`)
+	if err != nil {
+		return err
+	}
+	for _, spelling := range spellings {
+		label, err := gallery.ExistingLabelTx(tx, spelling)
+		if err != nil {
+			return err
+		}
+		if label != spelling {
+			if _, err := tx.Exec(`UPDATE images SET series = ? WHERE series = ?`, label, spelling); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO image_collections (image_id, name, position)
+			 SELECT id, ?, series_order FROM images WHERE series = ?`, label, label); err != nil {
 			return err
 		}
 	}

@@ -92,10 +92,10 @@ func alreadyExistsBody(msg string) string {
 
 func lookupMissBody(trail, hashes string) string {
 	var b strings.Builder
+	ptr, online := monloader.SplitTrail(trail)
 	if trail == "" {
 		b.WriteString("No source found; no tags found.")
 	} else {
-		ptr, online := monloader.SplitTrail(trail)
 		for _, entry := range ptr {
 			// A PTR match sets no source URL, so the lookup reports a
 			// miss even though its tags landed.
@@ -117,7 +117,12 @@ func lookupMissBody(trail, hashes string) string {
 		b.WriteString(`<span class="field-hint">Searched ` + html.EscapeString(hashes) + `</span>`)
 	}
 	if !monloader.SimilarityRan(trail) {
-		b.WriteString(`<div class="field-hint">A miss can happen when the file was compressed or re-encoded, since its hash no longer matches the original. Set up a similarity lookup service in monloader so it can still find such copies.</div>`)
+		b.WriteString(`<div class="field-hint">A miss can happen when the file was compressed or re-encoded, since its hash no longer matches the original.`)
+		// Similarity services serve the online walk; the PTR is hash-only.
+		if trail == "" || len(online) > 0 {
+			b.WriteString(` Set up a similarity lookup service in monloader so it can still find such copies.`)
+		}
+		b.WriteString(`</div>`)
 	}
 	return b.String()
 }

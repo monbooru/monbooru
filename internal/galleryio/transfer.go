@@ -178,7 +178,7 @@ func transferTagGroups(srcCx, dstCx gallery.Handle, id int64) ([]transferTagGrou
 		var name, cat, color string
 		var builtin, isAuto int
 		var taggerName sql.NullString
-		var conf sql.NullFloat64
+		var conf *float64
 		if err := rows.Scan(&name, &cat, &color, &builtin, &isAuto, &taggerName, &conf); err != nil {
 			return nil, err
 		}
@@ -194,13 +194,8 @@ func transferTagGroups(srcCx, dstCx gallery.Handle, id int64) ([]transferTagGrou
 			idx[k] = i
 			groups = append(groups, transferTagGroup{isAuto: k.isAuto, taggerName: k.taggerName})
 		}
-		var c *float64
-		if conf.Valid {
-			v := conf.Float64
-			c = &v
-		}
 		groups[i].tokens = append(groups[i].tokens, compatibility.TagToken(cat, name))
-		groups[i].confs = append(groups[i].confs, c)
+		groups[i].confs = append(groups[i].confs, conf)
 	}
 	return groups, rows.Err()
 }

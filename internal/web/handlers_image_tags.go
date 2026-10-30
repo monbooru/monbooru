@@ -233,11 +233,8 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 // A non-nil input replaces the add box's text; nil leaves it as typed.
 func (s *Server) renderTagListWithSidebar(w http.ResponseWriter, r *http.Request, id int64, errMsg, warnMsg, okMsg string, input *string) {
 	folderPath, imageTags, _ := s.tagSvc().GetImageTags(id)
-	tagMode := readTagModeCookie(r)
-	if requested := r.URL.Query().Get("tagmode"); requested != "" {
-		tagMode = normalizeTagMode(requested)
-		writeTagModeCookie(w, r, tagMode)
-	}
+	tagMode := tagModePref.resolve(w, r, "tagmode")
+	impliedMode := impliedModePref.resolve(w, r, "implied")
 	hasUserTags, hasStaleTags := userAndStaleTags(imageTags)
 	// The tag routes carry no back context; the page they were sent from does.
 	pageQuery := r.URL.Query()
@@ -267,7 +264,7 @@ func (s *Server) renderTagListWithSidebar(w http.ResponseWriter, r *http.Request
 	s.renderTemplate(w, "partials/tag_list.html", map[string]any{
 		"ImageID":          id,
 		"ImageTags":        imageTags,
-		"TagSidebar":       s.buildTagSidebar(id, tagMode, imageTags),
+		"TagSidebar":       s.buildTagSidebar(id, tagMode, impliedMode, imageTags),
 		"SidebarTags":      true,
 		"SidebarCollapsed": sidebarCollapsed(r),
 		"DangerZone":       true,
@@ -483,11 +480,20 @@ func (s *Server) changeTagCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad category_id", http.StatusBadRequest)
 		return
 	}
+	before, err := s.tagSvc().GetTag(id)
+	if err != nil {
+		externalErr(w, r, err.Error(), tagCategoryStatus(err))
+		return
+	}
+	keep := r.FormValue("keep_alias") == "1"
 	var svcErr error
 	merged := false
-	if r.FormValue("merge") == "1" {
-		merged, svcErr = s.tagSvc().ChangeTagCategoryMerge(id, catID)
-	} else {
+	switch {
+	case r.FormValue("merge") == "1":
+		merged, svcErr = s.tagSvc().ChangeTagCategoryMerge(id, catID, keep)
+	case keep:
+		svcErr = s.tagSvc().ChangeTagCategoryKeepAlias(id, catID)
+	default:
 		svcErr = s.tagSvc().ChangeTagCategory(id, catID)
 	}
 	if svcErr != nil {
@@ -507,7 +513,16 @@ func (s *Server) changeTagCategory(w http.ResponseWriter, r *http.Request) {
 			writeInlineFlash(w, "ok", "Merged into the existing tag.")
 			return
 		}
-		writeInlineFlash(w, "ok", "Category updated.")
+		if keep || before.IsAlias || before.CategoryID == catID {
+			writeInlineFlash(w, "ok", "Category updated.")
+			return
+		}
+		// The move already happened, so keeping the old spelling is an alias
+		// create on it rather than a second move.
+		old := before.CategoryName + ":" + before.Name
+		writeInlineFlashHTML(w, "ok", fmt.Sprintf(
+			`Category updated. <button type="button" class="btn-sm" hx-post="/tags/%d/aliases?name=%s" hx-target="#tag-flash">Keep %s as an alias</button>`,
+			id, template.HTMLEscapeString(url.QueryEscape(old)), template.HTMLEscapeString(old)))
 		return
 	}
 	http.Redirect(w, r, "/tags", http.StatusSeeOther)

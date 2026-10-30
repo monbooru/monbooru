@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/jobs"
@@ -28,6 +29,11 @@ type Handler struct {
 	lock        func() (unlock func())
 	fetchStatus func(galleryName string, imageID int64, state, message string)
 	memoryMark  func() func(scope string)
+	done        <-chan struct{}
+
+	autotagMu       sync.Mutex
+	autotagQueue    []queuedAutotag
+	autotagDraining bool
 }
 
 func New(cfg func() *config.Config, jobManager *jobs.Manager, resolver ResolverFunc, version string) *Handler {
@@ -54,6 +60,13 @@ func (h *Handler) refuse(w http.ResponseWriter, g *library.Gallery, imageID int6
 // returns logs the peak.
 func (h *Handler) WithMemoryMark(mark func() func(scope string)) *Handler {
 	h.memoryMark = mark
+	return h
+}
+
+// WithDone stops the queued auto-tag uploads from starting a job once done
+// closes.
+func (h *Handler) WithDone(done <-chan struct{}) *Handler {
+	h.done = done
 	return h
 }
 
@@ -153,6 +166,8 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/images/{id}/tags", h.auth(h.removeImageTags))
 	mux.HandleFunc("POST /api/v1/images/{id}/enrich", h.auth(h.enrichImage))
 	mux.HandleFunc("POST /api/v1/images/{id}/fetch-status", h.auth(h.fetchStatusReport))
+	mux.HandleFunc("POST /api/v1/images/autotag", h.auth(h.autotagImages))
+	mux.HandleFunc("POST /api/v1/images/{id}/autotag", h.auth(h.autotagImage))
 
 	mux.HandleFunc("GET /api/v1/images/{id}/file", h.auth(h.serveImageFile))
 	mux.HandleFunc("POST /api/v1/images/{id}/file", h.auth(h.bodyThenLock(h.replaceImageFile)))
@@ -177,7 +192,11 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/categories/{id}", h.auth(h.patchCategory))
 	mux.HandleFunc("DELETE /api/v1/categories/{id}", h.auth(h.deleteCategory))
 
+	mux.HandleFunc("GET /api/v1/collections", h.auth(h.listCollections))
+
 	mux.HandleFunc("GET /api/v1/galleries", h.auth(h.listGalleries))
+	mux.HandleFunc("GET /api/v1/taggers", h.auth(h.listTaggers))
+	mux.HandleFunc("GET /api/v1/jobs/current", h.auth(h.currentJob))
 
 	mux.HandleFunc("GET /api/v1/images/{id}/relations", h.auth(h.relationsForImage))
 	mux.HandleFunc("POST /api/v1/relations", h.auth(h.addRelation))

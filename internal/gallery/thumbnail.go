@@ -222,7 +222,7 @@ func mangaCoverRefusal(path string) string {
 }
 
 func ffmpegRefusal() string {
-	if !ffmpegAvailable() {
+	if !FFmpegAvailable() {
 		return "needs ffmpeg"
 	}
 	return "ffmpeg could not decode it"

@@ -24,6 +24,8 @@ type tagDetailData struct {
 	IsRating       bool
 	Canonical      *models.Tag
 	Aliases        []models.Tag
+	SameName       []models.Tag
+	DistinctFrom   map[int64]bool
 	Implications   []models.Implication
 	ImpliedBy      []models.Implication
 	RecentImageIDs []int64
@@ -93,6 +95,21 @@ func (s *Server) tagDetailHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data.Aliases = aliases[id]
+		if data.SameName, err = s.tagSvc().SameNameTags(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(data.SameName) > 0 {
+			partners, err := s.tagSvc().DistinctPartners([]int64{id})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			data.DistinctFrom = map[int64]bool{}
+			for _, p := range partners[id] {
+				data.DistinctFrom[p.ID] = true
+			}
+		}
 		if data.Implications, err = s.tagSvc().ListImplications(id); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -156,7 +173,7 @@ func (s *Server) setTagNote(w http.ResponseWriter, r *http.Request) {
 	}
 	switch err := s.tagSvc().SetTagNote(id, body, links); {
 	case errors.Is(err, tags.ErrTagNotFound):
-		externalErr(w, r, "tag not found", http.StatusNotFound)
+		externalErr(w, r, "Tag not found.", http.StatusNotFound)
 	case errors.Is(err, tags.ErrAliasNote):
 		externalErr(w, r, err.Error(), http.StatusBadRequest)
 	case err != nil:

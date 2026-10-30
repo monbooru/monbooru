@@ -1,125 +1,302 @@
 # Contributing
 
-This file covers monbooru and its companion repos (monloader,
-monsender, mondocs, monbooru-plugins, ffmpeg-builds). Open issues and pull requests in the repo relevant to the change: app behavior here, downloading and site support in
-[monloader](https://github.com/monbooru/monloader), the browser
-extension in [monsender](https://github.com/monbooru/monsender),
-documentation in [mondocs](https://github.com/monbooru/mondocs),
-plugin and theme listings in
-[monbooru-plugins](https://github.com/monbooru/monbooru-plugins),
-the trimmed ffmpeg and ffprobe builds in
-[ffmpeg-builds](https://github.com/monbooru/ffmpeg-builds).
+This file covers monbooru and its companion repos. Start from what you want to do and follow the arrows.
 
-## Bug reports and feature requests
+AI-generated contributions that their author has obviously not reviewed or put effort into are closed without review.
 
-Open an issue. For a bug, include the version, how you run it
-(binary or Docker), steps to reproduce, what you expected, and any
-relevant log lines/screenshots. For a feature, describe the problem or workflow
-first, not only the solution you have in mind.
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart LR
+    start(["`**You want to...**`"])
+    start --> a["`**report a bug** or **suggest a feature**
+    → Report it`"]
+    start --> f["`**ask a question** or **share your setup**
+    → Ask a question`"]
+    start --> b["`**change the code**
+    → Change the code`"]
+    start --> c["`**add a tagger model**, or fix a shipped one
+    → Taggers`"]
+    start --> d["`**add a site** to monloader, or fix one
+    → Sites`"]
+    start --> e["`**share a plugin or theme**
+    → Plugins and themes`"]
 
-A report or request that turns into a shipped change is credited in the changelog of the release that ships it.
+    class start hub;
+    class a,b,c,d,e,f case;
 
-## Pull requests
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
 
-1. Open an issue describing what you want to change and why. For
-   anything beyond a small fix, do this before writing code (it
-   avoids wasted work if the change does not fit the project).
-2. Push the code to a branch on your fork, then link the branch from the issue. 
-3. This repo publishes squashed release snapshots, so pull requests
-   are never merged through the GitHub UI. The review outcome lands
-   in the issue or PR: accepted as-is, accepted in part, needs
-   changes, or declined, with reasons.
-4. Accepted work is applied upstream and appears here on the next
-   release, at which point the PR is closed.
+## Ask a question
 
-What review expects:
+Questions, workflows, setups and general talk go to [Discussions](https://github.com/monbooru/monbooru/discussions), for every repo. There is no Discord or other chat server, so answers stay public and the next person can find them.
 
-- Match the existing code style and search for a similar case before inventing a new pattern.
-- Stdlib first. A new dependency needs a strong justification and
-  should be discussed in the issue before any code is written.
-- Small, focused changes review fast. Cross-cutting changes that
-  touch many templates or handlers need discussion first.
+## Report it
 
-Make sure you have reviewed every line of the diff yourself, and that you have carefully tested your code live.
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart TD
+    want{{"You want to..."}}
+    want -->|"report a bug"| bug["`**Give the details**
+    version, binary or Docker, steps to reproduce, what you expected, log lines or screenshots`"]
+    want -->|"suggest a feature"| idea["`**Start from the problem**
+    describe the problem or workflow first, then the solution you have in mind`"]
+    bug & idea --> issue["`**Open an issue in the repo it is about**
+    see the graph below`"]
+    issue -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
 
-## Auto-tagger configurations (monbooru)
+    class ship hub;
+    class bug,idea,issue step;
+    class want ask;
 
-Support for an ONNX tagger model lives in
-[monbooru-plugins](https://github.com/monbooru/monbooru-plugins), one
-folder per model under `taggers/<name>/`:
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
 
-- `model.json`: description, download URLs for the model and label
-  files, default thresholds;
-- `profile_default.json`, a preprocessing profile, only when the
-  defaults inferred from the label file are wrong (input size,
-  layout, channels, normalization, padding, activation, label
-  format, category scheme);
-- `dispatch_default.json`, a label dispatch table routing
-  model-specific labels into tag categories (a rule can also rename
-  a label or drop it).
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart LR
+    about{{"It is about..."}}
+    about -->|"the app, the plugin contract"| booru["`**monbooru**`"]
+    about -->|"downloading, sites, reverse lookup"| loader["`**monloader**`"]
+    about -->|"the browser extension"| sender["`**monsender**`"]
+    about -->|"the documentation"| docs["`**mondocs**`"]
+    about -->|"the listings, a shipped tagger"| plugins["`**monbooru-plugins**`"]
+    about -->|"a plugin or theme someone else listed"| third["`**that plugin's own tracker**`"]
 
-To propose a new model, get it working locally first: drop it under
-`<model_path>/<name>/` and tune it with `tagger.json` and
-`dispatch.json` sidecars, which use the same format as the stock
-files. Dispatch rules can be edited in the app, in the tagger's mapping tab. Once it works, make a PR to add the folder with those files
-verbatim and a `model.json` with public download URLs; see
-[TAGGERS.md](https://github.com/monbooru/monbooru-plugins/blob/main/TAGGERS.md),
-[Your own models](https://monbooru.github.io/mondocs/advanced/auto-tagger.html#your-own-models)
-and the
-[auto-tagger guide](https://monbooru.github.io/mondocs/guides/auto-tagger.html).
+    class about ask;
+    class booru,loader,sender,docs,plugins,third repo;
 
-Edits to the shipped configurations are welcome the same way: a
-better threshold, a label dispatched to the wrong category, a
-missing rename. If you would rather not touch the repo, an issue
-with the model link and the settings that worked for you is enough.
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
 
-A model whose label-file format or category scheme the app does not already read needs code changes; open an issue first.
+Repos: [monbooru](https://github.com/monbooru/monbooru) · [monloader](https://github.com/monbooru/monloader) · [monsender](https://github.com/monbooru/monsender) · [mondocs](https://github.com/monbooru/mondocs) · [monbooru-plugins](https://github.com/monbooru/monbooru-plugins)
 
-## Site profiles (monloader)
+References:
 
-Which sites monloader can map, and which sites monsender recognizes,
-is defined by one JSON file per gallery-dl category in the monloader
-repo, at `internal/mapping/profiles/<category>.json`: URL templates,
-auth kind, rating and category mappings, per-site tag rules,
-gallery-dl options.
+- [Troubleshooting (monbooru)](https://monbooru.github.io/mondocs/advanced/troubleshooting.html)
+- [Troubleshooting (monsender)](https://monbooru.github.io/mondocs/addons/monsender/troubleshooting.html)
 
-To propose a new site or improve/fix an existing one, build the profile in
-the app: add the site under Settings -> sites and tune it in the
-site dialog. Monloader saves your version as
-`profiles/<category>.json` next to your `monloader.toml`; it is the
-exact same schema as the shipped files, so contributing is a PR in
-monloader that adds
-your file as `internal/mapping/profiles/<category>.json` as-is (or
-an issue with the JSON pasted in). Include an example post URL that
-works without an account when possible.
+## Change the code
 
-See [site profiles](https://monbooru.github.io/mondocs/addons/monloader/development.html)
-in the monloader docs.
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart TD
+    size{{"How big is it?"}}
+    size -->|"a small fix"| branch
+    size -->|"anything bigger, a new dependency, or changes across many templates or handlers"| ask["`**Open an issue first**
+    say what and why, wait for a go-ahead`"]
+    ask --> branch["`**Write it on a branch of your fork**
+    follow the existing style, reuse the patterns the code already has, and follow any instructions given in the issue`"]
+    branch --> self["`**Read every line of your diff and test it live**`"]
+    self --> link["`**Link the branch from the issue**
+    a small fix opens its issue now`"]
+    link --> review{{"Review answers in the issue or PR"}}
+    review -->|"needs changes"| branch
+    review -->|"declined"| declined["`Closed, with the reasons`"]
+    review -->|"accepted, whole or in part"| ship(["`**Applied upstream, ships in the next release**
+    the PR is closed then, never merged in the GitHub UI → Credit`"])
 
-## Plugins and themes (monbooru-plugins)
+    class ship hub;
+    class ask,branch,self,link,declined step;
+    class size,review ask;
 
-A plugin is a program of your own that pairs with monbooru and can add buttons in the interfaces;
-a theme is a folder of CSS. Neither needs a change in monbooru.
-The pairing exchange, the button slots, the relay payload and the
-theme variable names are (in theory) a stable contract, so the plugin can be built against
-that, in any language, by anyone.
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
 
-Listings live in [monbooru-plugins](https://github.com/monbooru/monbooru-plugins): PR one
-row to `PLUGINS.md` or `THEMES.md` pointing at your repo. Listing is not
-review. Bugs in a listed plugin belong on that plugin's tracker.
+This repo publishes squashed release snapshots, which is why accepted work lands through a release rather than a merge.
 
-What belongs to monbooru instead is the contract itself: issues about pairing, relay calls, theme variables, proposals for new
-surface...
+References:
+
+- [Building monbooru from source](https://monbooru.github.io/mondocs/advanced/building.html)
+- [Building monloader from source](https://monbooru.github.io/mondocs/addons/monloader/development.html#building-from-source)
+- [REST API and tokens](https://monbooru.github.io/mondocs/advanced/api.html)
+- [monloader API and error codes](https://monbooru.github.io/mondocs/addons/monloader/development.html#api-tokens)
+
+## Taggers
+
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart TD
+    want{{"You want to..."}}
+    want -->|"ask for a new model"| req["`**Issue in monbooru-plugins**
+    a link to the model`"]
+    want -->|"report a shipped one that tags badly"| bug["`→ Report it`"]
+    want -->|"add or fix it yourself"| fmt
+    fmt{{"Does monbooru already read its label-file format and category scheme?"}}
+    fmt -->|"no"| code["`**Needs code**
+    open a monbooru issue first → Change the code`"]
+    fmt -->|"yes"| tune["`**Get it working locally**
+    put it under model_path/*name*/ and tune its tagger.json and dispatch.json sidecars; dispatch rules can be edited in the tagger's mapping tab`"]
+    tune -->|"PR"| pr["`**PR to monbooru-plugins**
+    taggers/*name*/ with your sidecars as profile_default.json and dispatch_default.json, and a model.json with public download URLs`"]
+    tune -->|"rather not touch the repo"| issue["`**Issue in monbooru-plugins**
+    the model link and the settings that worked`"]
+    req & pr & issue --> ship(["`**Ships** → Credit`"])
+
+    class ship hub;
+    class code,tune,pr,issue,req step;
+    class bug case;
+    class want,fmt ask;
+
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
+
+References:
+
+- [TAGGERS.md: the model.json, profile and dispatch formats](https://github.com/monbooru/monbooru-plugins/blob/main/TAGGERS.md)
+- [The shipped tagger folders, as examples](https://github.com/monbooru/monbooru-plugins/tree/main/taggers)
+- [Your own models](https://monbooru.github.io/mondocs/advanced/auto-tagger.html#your-own-models)
+- [Label rules (dispatch.json)](https://monbooru.github.io/mondocs/advanced/auto-tagger.html#label-rules-dispatchjson)
+- [Auto-tagger guide: installing and tuning a model](https://monbooru.github.io/mondocs/guides/auto-tagger.html)
+
+## Sites
+
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart TD
+    want{{"You want to..."}}
+    want -->|"ask for a new site"| req["`**Issue in monloader**
+    the site and an example post URL that works without an account; it has to be a site gallery-dl supports`"]
+    want -->|"report a site that maps badly"| bug["`→ Report it`"]
+    want -->|"add or fix it yourself"| build
+    build["`**Build the profile in monloader**
+    Settings → Sites, add the site, tune it in the site dialog; monloader saves profiles/*category*.json next to monloader.toml`"]
+    build -->|"PR"| pr["`**PR to monloader**
+    your file as-is under internal/mapping/profiles/`"]
+    build -->|"rather not touch the repo"| issue["`**Issue in monloader**
+    the JSON pasted in`"]
+    pr & issue --> url["`Add an example post URL that works without an account, when there is one`"]
+    url & req --> ship(["`**Ships** → Credit`"])
+
+    class ship hub;
+    class build,pr,issue,url,req step;
+    class bug case;
+    class want ask;
+
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
+
+References:
+
+- [Site profiles: the file format](https://monbooru.github.io/mondocs/addons/monloader/development.html#site-profiles)
+- [Editing a site's profile in the app](https://monbooru.github.io/mondocs/addons/monloader/guides/mapping.html#editing-a-sites-profile)
+- [Setting up a site and its credentials](https://monbooru.github.io/mondocs/addons/monloader/guides/sites.html#setting-up-a-site)
+- [The shipped profiles, as examples](https://github.com/monbooru/monloader/tree/main/internal/mapping/profiles)
+
+## Plugins and themes
+
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart TD
+    want{{"You want to..."}}
+    want -->|"share a plugin or theme"| own["`**Publish it in your own repo**
+    it needs no change in monbooru: build it against the plugin contract, in any language`"]
+    own --> list["`**PR one row to PLUGINS.md or THEMES.md** in monbooru-plugins
+    listing is not a review`"]
+    want -->|"report a bug in a listed plugin or theme"| third["`**Its own tracker**`"]
+    want -->|"report a contract problem, or ask for new surface"| booru["`**Issue in monbooru**`"]
+
+    class own,list,third,booru step;
+    class want ask;
+
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
+
+References:
+
+- [Writing a plugin](https://monbooru.github.io/mondocs/advanced/api.html#writing-a-plugin)
+- [Pairing](https://monbooru.github.io/mondocs/addons/pairing.html)
+- [Plugins: button kinds and installing](https://monbooru.github.io/mondocs/addons/plugins.html)
+- [Themes: making your own and the variables](https://monbooru.github.io/mondocs/advanced/themes.html)
+- [simple-edit, an example plugin](https://github.com/monbooru/monbooru-plugins/tree/main/examples/simple-edit)
+- [The shipped themes, as examples](https://github.com/monbooru/monbooru-plugins/tree/main/themes)
 
 ## Credit
 
-Contributors are credited in the changelog entry of the release that
-ships their work: a thanks line linking the issue, plus a
-co-authored mention on the release commit for contributed code. 
+```mermaid
+---
+config:
+  layout: dagre
+  flowchart:
+    wrappingWidth: 220
+---
+flowchart LR
+    ship(["`**Your report, request or code ships**`"]) --> log["`**Credited in that release's changelog**
+    a thanks line linking the issue, plus a co-author mention on the release commit for code`"]
+    log -->|"credited in several releases: a long-standing contributor"| ack(["`**A line in the README Acknowledgements**`"])
 
-The Acknowledgements section of the monbooru README is for sustained
-involvement: a contributor whose work
-(reports, requests, or code) has been credited in multiple releases  across these repos gets a line there. 
+    class ship,ack hub;
+    class log step;
+
+    classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
+    classDef case fill:#3a161c,stroke:#ef8f99,stroke-width:1.5px,color:#ffffff;
+    classDef step fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
+    classDef ask  fill:#1a1818,stroke:#a09898,stroke-width:1px,stroke-dasharray:4 3,color:#e8e4e2;
+    classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
+```
 
 ## License
 

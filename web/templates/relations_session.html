@@ -16,13 +16,13 @@
     <form method="get" action="/relations/session" class="session-order-form session-detector-form">
       <span class="field-hint">Found by</span>
       <label><input type="radio" name="detector" value="both" onchange="this.form.submit()" {{if eq .Detector "both"}}checked{{end}}> Both</label>
-      <label><input type="radio" name="detector" value="phash" onchange="this.form.submit()" {{if eq .Detector "phash"}}checked{{end}}> Near duplicate (pHash)</label>
-      <label><input type="radio" name="detector" value="tags" onchange="this.form.submit()" {{if eq .Detector "tags"}}checked{{end}}> Rare tag similarity</label>
+      <label><input type="radio" name="detector" value="phash" onchange="this.form.submit()" {{if eq .Detector "phash"}}checked{{end}}> Looks alike</label>
+      <label><input type="radio" name="detector" value="tags" onchange="this.form.submit()" {{if eq .Detector "tags"}}checked{{end}}> Shares rare tags</label>
     </form>
     {{end}}
     <form method="get" action="/relations/session" class="session-order-form">
       <span class="field-hint">Order</span>
-      <label><input type="radio" name="order" value="smallest_distance_first" onchange="this.form.submit()" {{if eq .Order "smallest_distance_first"}}checked{{end}}> Smallest distance</label>
+      <label><input type="radio" name="order" value="smallest_distance_first" onchange="this.form.submit()" {{if eq .Order "smallest_distance_first"}}checked{{end}}> Most alike</label>
       <label><input type="radio" name="order" value="largest_file_first" onchange="this.form.submit()" {{if eq .Order "largest_file_first"}}checked{{end}}> Largest file</label>
       <label><input type="radio" name="order" value="random" onchange="this.form.submit()" {{if eq .Order "random"}}checked{{end}}> Random</label>
     </form>
@@ -82,13 +82,13 @@
           <span class="session-distance-label">rare tag similarity <strong class="session-source-tags">~{{.Pair.ScorePercent}}%</strong></span>
           <span class="session-distance-sub">{{.SharedTagsTotal}} shared {{plural .SharedTagsTotal "tag" "tags"}}</span>
           {{else if eq .Pair.Source "both"}}
-          <span class="session-distance-label">phash distance <strong>{{.Pair.Distance}}</strong> &middot;</span>
+          <span class="session-distance-label">difference <strong>{{.Pair.Distance}}</strong> &middot;</span>
           <span class="session-distance-label">rare tag similarity <strong class="session-source-tags">~{{.Pair.ScorePercent}}%</strong></span>
           <span class="session-distance-sub">both detectors agree</span>
           {{else if eq .Pair.Source "review"}}
           <span class="session-distance-label">reopened <strong class="session-source-review">by you</strong></span>
           {{else}}
-          <span class="session-distance-label">distance <strong>{{.Pair.Distance}}</strong></span>
+          <span class="session-distance-label">difference <strong>{{.Pair.Distance}}</strong> (0 = identical)</span>
           {{end}}
           <span class="session-distance-line"></span>
         </div>
@@ -118,7 +118,7 @@
       </div>
     </div>
 
-    <p class="session-prompt"><span id="session-prompt-text" data-default="Hover a decision below to preview what it commits.">Hover a decision below to preview what it commits.</span></p>
+    <p class="session-prompt"><span id="session-prompt-text" data-default="How is the right image related to the left one? Hover a choice to see what it does.">How is the right image related to the left one? Hover a choice to see what it does.</span></p>
 
     <form id="session-decision-form" hx-post="/relations/session/decide" hx-target="#flash-relations" hx-swap="innerHTML"
           hx-on::after-request="onSessionDecideResponse(event)">
@@ -128,7 +128,6 @@
       <input type="hidden" name="order" value="{{.Order}}">
       {{if .TagPairs}}<input type="hidden" name="detector" value="{{.Detector}}">{{end}}
 
-      <p class="session-hint">Use the buttons below to commit the decision, or swap sides first.</p>
       <div class="session-buttons">
         <button type="submit" name="type" value="duplicate"
                 data-prompt-sentence="{right} is the same image as {left} ({left} is the original)."
@@ -179,7 +178,7 @@
     </dialog>
 
     <dialog id="session-postdecide-delete-dialog">
-      <h4><span id="postdecide-dup-id">#?</span> has been marked as a duplicate of <span id="postdecide-original-id">#?</span></h4>
+      <h4 class="dlg-title"><span id="postdecide-dup-id">#?</span> has been marked as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
       <p>Delete <span id="postdecide-dup-id-body">#?</span> from the gallery now?</p>
       <p class="field-hint">The original stays; the duplicate leaves the gallery and its file is removed from disk. This cannot be undone.</p>
       <label id="postdecide-copy-tags-label" hidden>
@@ -436,7 +435,7 @@
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.defaultPrevented) return;
+    if (e.defaultPrevented || document.querySelector('.chord-leader-hint')) return;
     // preventDefault tells the global Escape handler this Esc is used.
     if (compareDlg && compareDlg.open) {
       if (e.key === 'Escape') { e.preventDefault(); compareDlg.close(); }

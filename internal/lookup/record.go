@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/db"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 type Row struct {
@@ -61,7 +62,7 @@ func Record(database *db.DB, imageID int64, backend, result string, cursor uint6
 		}
 	}
 	var ptrCursor any
-	if backend == BackendPTR && cursor > 0 {
+	if backend == contract.LookupPTR && cursor > 0 {
 		ptrCursor = int64(cursor)
 	}
 	_, err = database.Write.Exec(
@@ -161,7 +162,7 @@ func ForImage(database *db.DB, imageID int64) (map[string]Row, error) {
 // Exhausted is derived rather than stored, so a schedule that never ran
 // cannot show "nothing found".
 func (r Row) Exhausted() bool {
-	return r.Backend == BackendBooru && r.LastResult == ResultMiss && r.NextDueAt.IsZero()
+	return r.Backend == contract.LookupBooru && r.LastResult == ResultMiss && r.NextDueAt.IsZero()
 }
 
 func parseStamp(v sql.NullString) time.Time {

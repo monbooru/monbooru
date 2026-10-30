@@ -129,8 +129,8 @@ func comicInt(s string) *int {
 
 // A decimal comma, as a European locale writes 4,5, reads as 4.5.
 func comicFloat(s string) *float64 {
-	f, err := strconv.ParseFloat(strings.Replace(strings.TrimSpace(s), ",", ".", 1), 64)
-	if err != nil {
+	f, ok := parseFinite(strings.Replace(strings.TrimSpace(s), ",", ".", 1))
+	if !ok {
 		return nil
 	}
 	return &f

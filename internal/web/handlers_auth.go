@@ -15,7 +15,7 @@ import (
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 	if !s.authEnabled() {
 		s.renderTemplate(w, "webui/login_page", s.loginPageData(map[string]any{
-			"Error":        "Password authentication is disabled. Enable it from Settings → Authentication.",
+			"Error":        "Password authentication is disabled. Enable it from Settings -> Authentication.",
 			"AuthDisabled": true,
 		}))
 		return

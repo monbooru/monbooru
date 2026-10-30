@@ -113,6 +113,9 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 			); err != nil {
 				return err
 			}
+			if err := dropDistinctPairsTx(tx, existingID); err != nil {
+				return err
+			}
 		}
 		if gained, err = repointImplicationsToCanonicalTx(tx, existingID, canonicalID); err != nil {
 			return err
@@ -243,6 +246,9 @@ func (s *Service) MergeTags(aliasID, canonicalID int64) error {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM folded_tag_pairs WHERE old_id = ? OR new_id = ?`, aliasID, aliasID); err != nil {
+			return err
+		}
+		if err := dropDistinctPairsTx(tx, aliasID); err != nil {
 			return err
 		}
 

@@ -3,7 +3,6 @@ package web
 import (
 	"cmp"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"html/template"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/searchkw"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -185,7 +185,7 @@ func (s *Server) queryNameBasenames(prefix string, limit int) []string {
 	if d == nil || prefix == "" {
 		return nil
 	}
-	low := asciiLower(prefix)
+	low := db.ASCIILower(prefix)
 	return s.suggestLabels(d.Read, "name",
 		`SELECT DISTINCT basename_lower FROM images INDEXED BY idx_images_basename_lower_visible
 		 WHERE is_missing = 0 AND basename_lower != ''
@@ -293,7 +293,11 @@ func (s *Server) ambiguousGeneralNames(suggestions []models.Tag) map[string]bool
 func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	// Inputs submit under their own names; the batch-imply one uses target.
-	prefix := cmp.Or(q.Get("q"), q.Get("tag"), q.Get("canonical_id"), q.Get("target"))
+	prefix := cmp.Or(q.Get("q"), q.Get("tag"), q.Get("canonical_id"), q.Get("target"), q.Get("name"))
+	if prefix == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 
 	// Only a real category splits: "nier:automata" is one tag name.
 	catName, tagPrefix := "", prefix
@@ -302,6 +306,9 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	suggestions, _ := s.tagSvc().SuggestTags(tagPrefix, catName, 10)
+	if q.Has("name") {
+		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool { return t.CategoryName == "rating" })
+	}
 
 	if catName != "" {
 		for i := range suggestions {
@@ -346,8 +353,7 @@ func (s *Server) searchIDs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Search error.", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
+	contract.WriteJSON(w, http.StatusOK, struct {
 		IDs       []int64 `json:"ids"`
 		Truncated bool    `json:"truncated,omitempty"`
 	}{IDs: ids, Truncated: truncated})
@@ -508,20 +514,13 @@ func quotedSDLabelRows(key string, labels []string) []suggestItem {
 func (s *Server) systemSuggestLevel2(key, valPrefix string) []suggestItem {
 	switch key {
 	case "cat":
-		var rows []suggestItem
-		for _, cat := range s.systemCategoryRows() {
-			if !strings.HasPrefix(cat.Name, valPrefix) {
-				continue
-			}
-			rows = append(rows, suggestItem{
-				Name:  "cat:" + cat.Name,
-				Color: cat.Color,
-			})
-			if len(rows) >= 10 {
-				break
-			}
-		}
-		return rows
+		return s.categoryValueRows(valPrefix, func(cat systemCategoryRow) suggestItem {
+			return suggestItem{Name: "cat:" + cat.Name, Color: cat.Color}
+		})
+	case "tagcount":
+		return append(expansionRows(key, valPrefix), s.categoryValueRows(valPrefix, func(cat systemCategoryRow) suggestItem {
+			return suggestItem{Name: "tagcount:" + cat.Name + "=", Color: cat.Color, Description: "number of " + cat.Name + " tags"}
+		})...)
 	case "collection":
 		return quotedSDLabelRows("collection", s.queryCollectionLabels(valPrefix, 10))
 	case "source":
@@ -570,6 +569,16 @@ type systemCategoryRow struct {
 	Color string
 }
 
+func (s *Server) categoryValueRows(prefix string, row func(systemCategoryRow) suggestItem) []suggestItem {
+	var rows []suggestItem
+	for _, cat := range s.systemCategoryRows() {
+		if strings.HasPrefix(cat.Name, prefix) {
+			rows = append(rows, row(cat))
+		}
+	}
+	return rows
+}
+
 // A small table: filtering in Go spares a LIKE and escaping its underscores.
 func (s *Server) systemCategoryRows() []systemCategoryRow {
 	d := s.db()
@@ -580,7 +589,7 @@ func (s *Server) systemCategoryRows() []systemCategoryRow {
 		var name, color string
 		err := rows.Scan(&name, &color)
 		return systemCategoryRow{Name: name, Color: tags.SafeCategoryColor(color)}, err
-	}, `SELECT name, color FROM tag_categories ORDER BY name`)
+	}, `SELECT name, color FROM tag_categories ORDER BY position, id`)
 	if err != nil {
 		logx.Warnf("system category rows: %v", err)
 	}
@@ -620,17 +629,6 @@ func nextPrefix(prefix string) string {
 // Lowercased first: NOCASE folds to lower case, so a bound built from "Z"
 // would exclude every lower-case continuation.
 func nocasePrefixRange(prefix string) (lo, hi string) {
-	lo = asciiLower(prefix)
+	lo = db.ASCIILower(prefix)
 	return lo, nextPrefix(lo)
-}
-
-// NOCASE and SQLite's lower() fold A-Z only, so a bound folding "É" to "é"
-// would miss the stored "É".
-func asciiLower(s string) string {
-	return strings.Map(func(r rune) rune {
-		if 'A' <= r && r <= 'Z' {
-			return r + 'a' - 'A'
-		}
-		return r
-	}, s)
 }

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +20,7 @@ type setupData struct {
 	Title        string
 	BooruFavicon string
 	Theme        bool
+	Mascot       string
 	Err          string
 	GalleryPath  string
 	LAN          bool
@@ -54,9 +54,7 @@ func (s *Server) setupMiddleware(next http.Handler) http.Handler {
 		// An API client would take the wizard's HTML 200 for an answer,
 		// so it gets a JSON refusal.
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(contract.Error{Error: "monbooru has not been set up yet", Code: contract.CodeSetupRequired})
+			contract.WriteError(w, http.StatusConflict, contract.CodeSetupRequired, "monbooru has not been set up yet")
 			return
 		}
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -66,6 +64,9 @@ func (s *Server) setupMiddleware(next http.Handler) http.Handler {
 func setupExempt(path string) bool {
 	switch path {
 	case "/health", "/setup", "/internal/browse":
+		return true
+	}
+	if strings.HasPrefix(path, "/theme.mascot/") {
 		return true
 	}
 	// With auth on, the session gate sends /setup to /login, so gating
@@ -107,6 +108,7 @@ func (s *Server) renderSetup(w http.ResponseWriter, r *http.Request, d setupData
 	theme := s.activeTheme()
 	d.BooruFavicon = themeFaviconURL(theme)
 	d.Theme = theme.Path != ""
+	d.Mascot = themeMascots(theme)["hello"]
 	d.Port = port
 	d.BindPinned = s.envPinned("server.bind_address")
 	d.Integration = s.desktopIntegration()

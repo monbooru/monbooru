@@ -3,8 +3,11 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "embed"
+
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 // Bootstrap runs every step on every boot, so each must be idempotent.
@@ -33,6 +36,11 @@ func Bootstrap(db *DB) error {
 		b.exec("drop idx_images_source", `DROP INDEX IF EXISTS idx_images_source`)
 		b.exec("drop idx_images_source_visible", `DROP INDEX IF EXISTS idx_images_source_visible`)
 		b.exec("drop idx_images_source_nocase_visible", `DROP INDEX IF EXISTS idx_images_source_nocase_visible`)
+	}
+	if marker < 16 {
+		b.exec("null infinite sd cfg_scale", `UPDATE sd_metadata SET cfg_scale = NULL WHERE cfg_scale IN (9e999, -9e999)`)
+		b.exec("null infinite comfyui cfg_scale", `UPDATE comfyui_metadata SET cfg_scale = NULL WHERE cfg_scale IN (9e999, -9e999)`)
+		b.exec("null infinite community_rating", `UPDATE manga_metadata SET community_rating = NULL WHERE community_rating IN (9e999, -9e999)`)
 	}
 	b.ensureColumn("image_sources", "commentary_translated", `ALTER TABLE image_sources ADD COLUMN commentary_translated TEXT NOT NULL DEFAULT ''`)
 	b.exec("create idx_image_sources_parent_url", `CREATE INDEX IF NOT EXISTS idx_image_sources_parent_url ON image_sources(parent_url) WHERE parent_url != ''`)
@@ -221,6 +229,9 @@ func Bootstrap(db *DB) error {
 		`ALTER TABLE images ADD COLUMN rating_rank INTEGER NOT NULL DEFAULT -1`,
 		`UPDATE images SET rating_rank = `+ratingRankExpr("images.id")+``,
 		"backfill images.rating_rank")
+	b.backfillIfFreshColumn("tag_categories", "position",
+		`ALTER TABLE tag_categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`,
+		ResetCategoryPositions, "backfill tag_categories.position")
 	// The ComfyTermsVersion its terms were derived under; 0 = never indexed.
 	b.ensureColumn("comfyui_metadata", "terms_version",
 		`ALTER TABLE comfyui_metadata ADD COLUMN terms_version INTEGER NOT NULL DEFAULT 0`)
@@ -351,11 +362,13 @@ func Bootstrap(db *DB) error {
 		END`)
 	// ANALYZE runs once per marker bump: over image_tags it can blow the
 	// start-up budget on a cold cache, and PRAGMA optimize covers the
-	// drift in between. 400 is SQLite's recommended analysis_limit.
+	// drift in between. 400 is SQLite's recommended analysis_limit; images
+	// reads in full, as a sample makes its boolean indexes look selective.
 	if b.queryInt("read user_version", `PRAGMA user_version`) < bootstrapSchemaVersion {
 		b.exec("set analysis_limit", `PRAGMA analysis_limit = 400`)
-		b.exec("analyze images", `ANALYZE images`)
 		b.exec("analyze image_tags", `ANALYZE image_tags`)
+		b.exec("reset analysis_limit", `PRAGMA analysis_limit = 0`)
+		b.exec("analyze images", `ANALYZE images`)
 		b.exec("set user_version", fmt.Sprintf(`PRAGMA user_version = %d`, bootstrapSchemaVersion))
 	}
 	b.exec("pragma optimize", `PRAGMA optimize`)
@@ -383,10 +396,19 @@ func (b *bootstrapper) hasColumn(table, column string) bool {
 		`SELECT COUNT(*) FROM pragma_table_xinfo(?) WHERE name = ?`, table, column) > 0
 }
 
+const slowBootstrapStep = 100 * time.Millisecond
+
+func logSlowStep(label string, started time.Time) {
+	if took := time.Since(started); took >= slowBootstrapStep {
+		logx.Debugf("bootstrap: %s took %s", label, took.Round(time.Millisecond))
+	}
+}
+
 func (b *bootstrapper) exec(label, sql string) {
 	if b.err != nil {
 		return
 	}
+	defer logSlowStep(label, time.Now())
 	if _, err := b.db.Write.Exec(sql); err != nil {
 		b.err = fmt.Errorf("%s: %w", label, err)
 	}
@@ -398,6 +420,7 @@ func (b *bootstrapper) execTx(label, stmts string) {
 	if b.err != nil {
 		return
 	}
+	defer logSlowStep(label, time.Now())
 	if err := InWriteTx(b.db.Write, func(tx *sql.Tx) error {
 		_, err := tx.Exec(stmts)
 		return err

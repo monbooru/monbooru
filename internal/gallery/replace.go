@@ -23,7 +23,6 @@ import (
 func ApplyReplacedFile(h Handle, imageID int64, stagedPath, newSHA, newMD5, newType string) (*int64, error) {
 	database, b, thumbnailsPath := h.DB, h.Boundary(), h.ThumbnailsPath
 	galleryPath := b.Root()
-	var stored *int64
 	var oldPath string
 	var oldW, oldH *int
 	if err := database.Read.QueryRow(
@@ -47,7 +46,7 @@ func ApplyReplacedFile(h Handle, imageID int64, stagedPath, newSHA, newMD5, newT
 		newType = actual
 	}
 	newW, newH := stillDimensions(stagedPath, newType)
-	sdMeta, comfyMeta, sourceType := extractGenerationMeta(stagedPath, newType)
+	sdMeta, comfyMeta, sourceType := ExtractGenerationMeta(stagedPath, newType)
 
 	newPath := oldPath
 	if newExt := extForFileType(newType); newExt != "" && models.ExtFileType(oldPath) != newType {
@@ -148,13 +147,7 @@ func ApplyReplacedFile(h Handle, imageID int64, stagedPath, newSHA, newMD5, newT
 		logx.Warnf("replace: removing backup %q: %v", backupPath, err)
 	}
 
-	if err := generate(newPath, thumbnailsPath, imageID, newType); err != nil {
-		logx.Warnf("replace: thumbnail regen for %q: %v", newPath, err)
-	} else if h, err := RecomputeAndStorePhash(context.Background(), database, imageID, thumbnailsPath); err != nil {
-		logx.Warnf("replace: phash recompute for %q: %v", newPath, err)
-	} else {
-		stored = &h
-	}
+	stored := regenerateDerived(database, thumbnailsPath, newPath, imageID, newType, "replace")
 	if err := ApplyMetaTags(h, imageID); err != nil {
 		logx.Warnf("replace: meta tags for %q: %v", newPath, err)
 	}
@@ -172,6 +165,9 @@ func putOldFileBack(database *db.DB, galleryPath string, imageID int64, oldPath,
 			return repointCanonical(tx, imageID, oldPath, FolderPath(galleryPath, oldPath), newPath, 0, 0)
 		}); err != nil {
 			logx.Warnf("replace: pointing image %d back at %q: %v", imageID, oldPath, err)
+		}
+		if err := os.Remove(newPath); err != nil && !os.IsNotExist(err) {
+			logx.Warnf("replace: removing reservation %q: %v", newPath, err)
 		}
 	}
 	if !hadOld {

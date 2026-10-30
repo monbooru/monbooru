@@ -15,6 +15,7 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/galleryio"
 	"github.com/monbooru/monbooru/internal/library"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
@@ -55,7 +56,7 @@ func (s *Server) batchDownload(w http.ResponseWriter, r *http.Request) {
 		// as whole.
 		panic(http.ErrAbortHandler)
 	}
-	logx.Infof("batch download: %d file(s) as %q, %d skipped", written, plan.zipName, skipped)
+	logx.Infof("batch download: %d %s as %q, %d skipped", written, models.Plural(written, "file", "files"), plan.zipName, skipped)
 }
 
 // The read lock is released before the first byte: the stream reads files

@@ -54,7 +54,7 @@ type taggerCacheStats struct {
 	IdleFor          time.Duration
 	IdleReleaseAfter time.Duration
 	WorkerPID        int
-	WorkerPSS        int64
+	WorkerRSS        int64
 	WorkerAnon       int64
 	WorkerFile       int64
 }
@@ -166,7 +166,7 @@ func gatherTaggerStats(s *Server) taggerCacheStats {
 	if pid, ok := tagger.WorkerPID(); ok {
 		out.WorkerPID = pid
 		if r, rok := procRSSAt(pid); rok {
-			out.WorkerPSS = int64(r.total)
+			out.WorkerRSS = int64(r.total)
 			out.WorkerAnon = int64(r.anon)
 			out.WorkerFile = int64(r.file)
 		}
