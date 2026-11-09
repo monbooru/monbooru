@@ -229,7 +229,6 @@ func (cx *Gallery) warmCaches() {
 	if cx == nil || cx.DB == nil {
 		return
 	}
-	cx.folderTree()        //nolint:errcheck
 	cx.SourceLabelCounts() //nolint:errcheck
 	cx.VisibleCount()
 	cx.InboxCount()

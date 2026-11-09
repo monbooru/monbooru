@@ -50,7 +50,7 @@ services:
       # Monbooru browser URL (The one you use to reach monbooru from the browser)
       - MONBOORU_SERVER_BASE_URL=http://localhost:8455
       # How you reach monloader in the browser.
-      # - MONBOORU_SERVER_MONLOADER_URL=http://localhost:8456
+      - MONBOORU_SERVER_MONLOADER_URL=http://localhost:8456
       # - TZ=Etc/UTC
     restart: unless-stopped
 
@@ -70,7 +70,7 @@ services:
       - ALL
     volumes:
       - /path/to/monloader/config:/config
-      # Required to enable the Public Tag Repository syncing (>70GB required)
+      # Required to enable the Public Tag Repository syncing (about 80 GB; 90 GiB free to start)
       # - /path/to/monloader/ptr:/ptr
     environment:
       - MONLOADER_SERVER_BIND_ADDRESS=0.0.0.0:8456

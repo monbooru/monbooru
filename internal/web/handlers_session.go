@@ -6,7 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -175,12 +175,12 @@ func loadNextPair(cx *library.Gallery, order, detector string, ceiling *Ceiling,
 		A: sessionImageView{
 			ID: pair.A.ID, Width: pair.A.Width, Height: pair.A.Height,
 			FileSize: pair.A.FileSize, FileType: pair.A.FileType,
-			Filename: path.Base(pair.A.CanonicalPath),
+			Filename: filepath.Base(pair.A.CanonicalPath),
 		},
 		B: sessionImageView{
 			ID: pair.B.ID, Width: pair.B.Width, Height: pair.B.Height,
 			FileSize: pair.B.FileSize, FileType: pair.B.FileType,
-			Filename: path.Base(pair.B.CanonicalPath),
+			Filename: filepath.Base(pair.B.CanonicalPath),
 		},
 	}
 	// The larger file is the likelier original; a tag match is more
@@ -206,6 +206,7 @@ type relationCompareFacts struct {
 	UniqueTagsTotal int
 	Format          string
 	Collection      string
+	PageCount       int
 }
 
 type compareTag struct {
@@ -232,9 +233,9 @@ func loadCompareFacts(cx *library.Gallery, leftID, rightID int64) (relationCompa
 func scanCompareFacts(cx *library.Gallery, id int64, dst *relationCompareFacts) error {
 	var addedAt, canonical string
 	if err := cx.DB.Read.QueryRow(
-		`SELECT COALESCE(width, 0), COALESCE(height, 0), file_size, ingested_at, canonical_path, series
+		`SELECT COALESCE(width, 0), COALESCE(height, 0), file_size, ingested_at, canonical_path, series, COALESCE(page_count, 0)
 		 FROM images WHERE id = ?`, id,
-	).Scan(&dst.ResolutionW, &dst.ResolutionH, &dst.FileSize, &addedAt, &canonical, &dst.Collection); err != nil {
+	).Scan(&dst.ResolutionW, &dst.ResolutionH, &dst.FileSize, &addedAt, &canonical, &dst.Collection, &dst.PageCount); err != nil {
 		return err
 	}
 	dst.AddedAt = humanISODate(addedAt)
@@ -328,7 +329,7 @@ func (s *Server) sessionDecidePost(w http.ResponseWriter, r *http.Request) {
 	if decision == "skip" {
 		if err := cx.RelationsSvc.SkipPair(a, b, now); err != nil {
 			logx.Warnf("session skip: %v", err)
-			http.Error(w, "skip", http.StatusInternalServerError)
+			writeRelationError(w, err)
 			return
 		}
 		sessionRedirect(w, r)
@@ -344,7 +345,7 @@ func (s *Server) sessionDecidePost(w http.ResponseWriter, r *http.Request) {
 		err = cx.RelationsSvc.Add(decision, left, right)
 	}
 	if errors.Is(err, relations.ErrUnknownKind) {
-		flashStatus(w, http.StatusBadRequest, "Unknown decision.")
+		externalErr(w, r, "Unknown decision.", http.StatusBadRequest)
 		return
 	}
 	if err != nil {

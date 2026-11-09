@@ -1,6 +1,7 @@
 package search
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -23,6 +24,13 @@ type Query struct {
 	Limit       int
 	PresetTotal *int
 	SkipCount   bool
+	// DeferCount leaves Total unknown rather than run the exact COUNT, when
+	// the page itself can't tell it; Count answers it afterwards.
+	DeferCount bool
+	// After and Before read the page past or ahead of that image, under a
+	// sort CursorPaging allows; Page then only labels it.
+	After  int64
+	Before int64
 	// Cached opts into the adjacency cache. Text, the query as typed, and
 	// CeilingLevel key its list: Expr is already ceiling-wrapped.
 	Cached          bool
@@ -54,8 +62,26 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 
 	if key != "" && !q.SkipCount && q.PresetTotal == nil {
 		if ids, ok := src.Cache.get(key); ok {
-			return executeFromCachedIDs(ctx, database, ids, page, limit)
+			return executeFromCachedIDs(ctx, database, ids, page, limit, pageStart(ids, q, page, limit))
 		}
+	}
+
+	offset := (page - 1) * limit
+
+	var cursor *keyCursor
+	reverse := false
+	if cursorID := cmp.Or(q.After, q.Before); cursorID != 0 && CursorPaging(q) {
+		// A row deleted since the link was drawn falls back to the offset.
+		if row, err := readCursorRow(ctx, database, cursorID); err == nil {
+			c, _ := row.cursor(q.Sort, q.Order, 0)
+			cursor, reverse = &c, q.After == 0
+		}
+	}
+
+	var walkLegs [][]int64
+	walking := false
+	if cursor != nil || offset == 0 {
+		walkLegs, walking = tagWalkLegs(src, q)
 	}
 
 	driverLegs, _ := pickAndDriverTag(database, q.Expr, q.Sort == "random")
@@ -65,7 +91,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 	// the other end, and missing: rows fall outside that walk.
 	idBounded := false
 	var boundTotal int
-	if len(driverLegs) >= 2 &&
+	if len(driverLegs) >= 2 && !walking &&
 		(q.Sort == "" || q.Sort == "newest") &&
 		q.Order != "asc" &&
 		!containsMissingFilter(q.Expr) {
@@ -119,7 +145,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 		case len(ids) > 0 && len(ids) < adjacencyCacheMaxIDs:
 			src.Cache.releaseFan(key)
 			src.Cache.set(key, ids, gen)
-			return executeFromCachedIDs(ctx, database, ids, page, limit)
+			return executeFromCachedIDs(ctx, database, ids, page, limit, (page-1)*limit)
 		case overran:
 			go finishSimilarityFan(src, key, gen, rankSeed, q.Order, where, slices.Clone(args))
 		default:
@@ -128,33 +154,27 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 		}
 	}
 
-	offset := (page - 1) * limit
-
 	var total int
-	counted, totalIsBound := false, false
+	counted, totalIsBound, deferred := false, false, false
 	switch {
 	case q.SkipCount:
 	case q.PresetTotal != nil:
 		total = *q.PresetTotal
 	default:
 		counted = true
-		// The fast counts are visible-only, which a missing: filter
-		// doesn't want.
-		wrapped := ceilingWrapsLoneLiteral(q.Expr)
-		if !hasMissingFilter && !wrapped {
-			if n, ok := fastTagTotal(src, q.Expr); ok {
-				total, totalIsBound = n, !fastTotalExact(q.Expr)
-				break
-			}
+		var fast bool
+		if total, totalIsBound, fast = fastTotal(src, q.Expr, hasMissingFilter); fast {
+			break
 		}
-		countWhere, countArgs := where, args
-		if wrapped {
-			countWhere, countArgs = exactCountWhere(src, q.Expr)
+		if q.DeferCount {
+			counted, deferred = false, true
+			break
 		}
-		countSQL := "SELECT COUNT(*) FROM images i WHERE " + countWhere
-		if err := database.Read.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, fmt.Errorf("count query: %w", err)
+		n, err := exactTotal(ctx, src, q.Expr, where, args)
+		if err != nil {
+			return nil, err
 		}
+		total = n
 	}
 
 	if counted && total == 0 {
@@ -181,16 +201,53 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			dataHint, where, orderClause,
 		)
 		dataArgs := append(slices.Concat(args, orderArgs), limit, offset)
+		if cursor != nil {
+			cmpSQL, sort, cursorArgs := cursor.nextCmp, cursor.nextSort, cursor.nextArgs
+			if reverse {
+				cmpSQL, sort, cursorArgs = cursor.prevCmp, cursor.prevSort, cursor.prevArgs
+			}
+			dataSQL = fmt.Sprintf(
+				"SELECT "+models.ImageRowColumns+`
+				 FROM images i%s
+				 WHERE %s AND %s
+				 %s
+				 LIMIT ?`,
+				dataHint, where, cmpSQL, sort,
+			)
+			dataArgs = append(slices.Concat(args, cursorArgs), limit)
+		}
 		images, err := db.QueryAllContext(ctx, database.Read, scanImageRow, dataSQL, dataArgs...)
 		if err != nil {
 			return nil, fmt.Errorf("data query: %w", err)
 		}
+		if reverse {
+			slices.Reverse(images)
+		}
 		return images, nil
 	}
 
-	images, err := readPage()
-	if err != nil {
-		return nil, err
+	var images []models.Image
+	var err error
+	walked := false
+	if walking {
+		up := (q.Order == "asc") != reverse
+		var from int64
+		if cursor != nil {
+			from = cmp.Or(q.After, q.Before)
+		}
+		residual, residualArgs := buildWherePerRow(q.Expr, src)
+		w := newTagWalk(database, walkLegs, up, walkStart(from, up))
+		if images, walked, err = walkPage(ctx, database, w, residual, residualArgs, limit); err != nil {
+			return nil, err
+		}
+		if walked && reverse {
+			slices.Reverse(images)
+		}
+	}
+	if !walked {
+		if images, err = readPage(); err != nil {
+			return nil, err
+		}
 	}
 	// The fast total is an upper bound, so a window that holds too few rows
 	// may only mean the matches are older than it.
@@ -200,57 +257,120 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			return nil, err
 		}
 	}
-	// A short first page holds every match, so it is the exact total.
-	if counted && totalIsBound && offset == 0 && len(images) < limit {
+	// A short first page holds every match, so it is the exact total. A
+	// page read back from a cursor ends at the cursor, not at the last row.
+	if counted && totalIsBound && offset == 0 && len(images) < limit && !reverse {
 		total = len(images)
 	}
+	unknown := false
+	if deferred {
+		switch {
+		case len(images) < limit && (len(images) > 0 || offset == 0) && !reverse:
+			total = offset + len(images)
+		case len(images) == 0:
+			// A page past the end needs the total to clamp to.
+			if total, err = exactTotal(ctx, src, q.Expr, where, args); err != nil {
+				return nil, err
+			}
+		default:
+			unknown = true
+		}
+	}
 
-	// Page 1 fans synchronously: an async fan loses the race to the next
-	// page-flip or prev/next. The fan drops the recent-id bound, which only
-	// holds for this page, and a short fan corrects the fast counter's total.
-	if key != "" && total > 0 && total <= adjacencyCacheMaxIDs {
-		if len(images) == total {
+	// Page 1 fans after the answer: a page flip or prev/next that beats it
+	// takes the cursor path. The fan drops the recent-id bound, which only
+	// holds for this page.
+	if key != "" && (unknown || total > 0 && total <= adjacencyCacheMaxIDs) {
+		if !unknown && len(images) == total {
 			ids := make([]int64, len(images))
 			for i, img := range images {
 				ids[i] = img.ID
 			}
 			src.Cache.set(key, ids, gen)
-		} else if page == 1 && src.Cache.tryAcquireFan(key) {
-			defer src.Cache.releaseFan(key)
+		} else if page == 1 && src.Cache.tryAcquireBackgroundFan(key) {
 			if idBounded {
 				unbound()
 			}
-			budgetTotal := total
-			if totalIsBound {
-				budgetTotal = 0
+			n := total
+			if unknown {
+				n = adjacencyCacheMaxIDs + 1
 			}
-			fanCtx, cancel := context.WithTimeout(context.Background(), fanBudget(time.Since(started), budgetTotal))
-			ids := fetchSortedMatchIDs(fanCtx, database, indexHint, where, args, orderClause, orderArgs, total)
-			cancel()
-			if len(ids) > 0 {
-				src.Cache.set(key, ids, gen)
-				if len(ids) < min(total, adjacencyCacheMaxIDs) {
-					total = len(ids)
-				}
-			} else {
-				src.Cache.markFanOverBudget(key)
-			}
+			go finishFan(src, key, gen, indexHint, where, slices.Clone(args), orderClause, slices.Clone(orderArgs), n)
 		}
 	}
 
 	return &models.SearchResult{
-		Page:    page,
-		Limit:   limit,
-		Total:   total,
-		Results: images,
+		Page:         page,
+		Limit:        limit,
+		Total:        total,
+		TotalUnknown: unknown,
+		Results:      images,
 	}, nil
+}
+
+// fastTotal's ok is false when only the exact COUNT can answer.
+func fastTotal(src Source, expr Expr, hasMissingFilter bool) (total int, bound, ok bool) {
+	// The fast counts are visible-only, which a missing: filter doesn't
+	// want.
+	if hasMissingFilter || ceilingWrapsLoneLiteral(expr) {
+		return 0, false, false
+	}
+	n, ok := fastTagTotal(src, expr)
+	return n, ok && !fastTotalExact(expr), ok
+}
+
+func exactTotal(ctx context.Context, src Source, expr Expr, where string, args []any) (int, error) {
+	if ceilingWrapsLoneLiteral(expr) {
+		where, args = exactCountWhere(src, expr)
+	}
+	var total int
+	if err := src.DB.Read.QueryRowContext(ctx, "SELECT COUNT(*) FROM images i WHERE "+where, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count query: %w", err)
+	}
+	return total, nil
+}
+
+// CursorPaging reports whether q's sort can read a page from a row's key:
+// random and similarity have none to seek on, and a pinned collection sorts
+// by a position only its own legs walk.
+func CursorPaging(q Query) bool {
+	switch q.Sort {
+	case "", "newest", "filesize":
+		return true
+	case "order":
+		return q.OrderCollection == ""
+	}
+	return false
+}
+
+// pageStart is where q's page begins in its cached list: next to its cursor
+// when the list holds it, else at the page's offset.
+func pageStart(ids []int64, q Query, page, limit int) int {
+	if CursorPaging(q) {
+		if i := slices.Index(ids, q.After); q.After != 0 && i >= 0 {
+			return i + 1
+		}
+		if i := slices.Index(ids, q.Before); q.Before != 0 && i >= 0 {
+			return max(i-limit, 0)
+		}
+	}
+	return (page - 1) * limit
+}
+
+// Count is the total an Execute under DeferCount left unknown: the cached
+// list's length once a fan has filled it, else the exact COUNT.
+func Count(ctx context.Context, src Source, q Query) (int, error) {
+	if ids, ok := src.Cache.get(q.listKey(src)); ok {
+		return len(ids), nil
+	}
+	where, args := exactCountWhere(src, q.Expr)
+	return exactTotal(ctx, src, q.Expr, where, args)
 }
 
 func scanImageRow(rows *sql.Rows) (models.Image, error) { return models.ScanImageRow(rows) }
 
-func executeFromCachedIDs(ctx context.Context, database *db.DB, ids []int64, page, limit int) (*models.SearchResult, error) {
+func executeFromCachedIDs(ctx context.Context, database *db.DB, ids []int64, page, limit, offset int) (*models.SearchResult, error) {
 	total := len(ids)
-	offset := (page - 1) * limit
 	if offset >= total {
 		return &models.SearchResult{Page: page, Limit: limit, Total: total}, nil
 	}
@@ -283,10 +403,24 @@ func executeFromCachedIDs(ctx context.Context, database *db.DB, ids []int64, pag
 	}, nil
 }
 
+// finishFan releases the background fan its caller took. An empty fan holds
+// the key off like an overrun: either way the next page 1 would pay it again.
+func finishFan(src Source, key string, gen uint64, indexHint, where string, args []any, orderClause string, orderArgs []any, n int) {
+	defer src.Cache.releaseBackgroundFan(key)
+	ctx, cancel := context.WithTimeout(context.Background(), fanBackgroundBudget)
+	defer cancel()
+	ids := fetchSortedMatchIDs(ctx, src.DB, indexHint, where, args, orderClause, orderArgs, n)
+	if len(ids) == 0 || len(ids) > adjacencyCacheMaxIDs {
+		src.Cache.markFanOverBudget(key)
+		return
+	}
+	src.Cache.set(key, ids, gen)
+}
+
 // fetchSortedMatchIDs returns nil on any error, a cancelled ctx included:
 // a truncated list would shrink the total and cut prev/next off mid-set.
 func fetchSortedMatchIDs(ctx context.Context, database *db.DB, indexHint, where string, args []any, orderClause string, orderArgs []any, total int) []int64 {
-	n := min(total, adjacencyCacheMaxIDs)
+	n := min(total, adjacencyCacheMaxIDs+1)
 	sql := fmt.Sprintf(
 		`SELECT i.id FROM images i%s WHERE %s %s LIMIT ?`,
 		indexHint, where, orderClause,
@@ -381,11 +515,85 @@ func collectionCursor(pos sql.NullInt64, id int64, desc bool) (prev, next []coll
 	return prev, next
 }
 
+// keyCursor holds the rows before and after one image in a view order: the
+// predicate each side seeks with and the ORDER BY that walks away from it.
+type keyCursor struct {
+	keyCol   string
+	prevCmp  string
+	nextCmp  string
+	prevSort string
+	nextSort string
+	prevArgs []any
+	nextArgs []any
+}
+
+type cursorRow struct {
+	id          int64
+	ingestedAt  string
+	fileSize    int64
+	series      string
+	seriesOrder sql.NullInt64
+}
+
+func readCursorRow(ctx context.Context, database *db.DB, id int64) (cursorRow, error) {
+	r := cursorRow{id: id}
+	err := database.Read.QueryRowContext(ctx,
+		`SELECT ingested_at, file_size, series, series_order FROM images WHERE id = ?`, id,
+	).Scan(&r.ingestedAt, &r.fileSize, &r.series, &r.seriesOrder)
+	return r, err
+}
+
+// cursor's ok is false for an unseeded random sort, which has no key.
+func (r cursorRow) cursor(sort, order string, seed int64) (keyCursor, bool) {
+	var c keyCursor
+	if sort == "order" {
+		before, after, fwd, rev, bArgs, aArgs := orderCursor(r.series, r.seriesOrder, r.id, order == "desc")
+		c.prevCmp, c.prevSort, c.prevArgs = before, rev, bArgs
+		c.nextCmp, c.nextSort, c.nextArgs = after, fwd, aArgs
+		return c, true
+	}
+	var keyVal any
+	switch sort {
+	case "random":
+		if seed == 0 {
+			return c, false
+		}
+		// %d emits only digits, so the seed interpolation is
+		// injection-safe. db.RandomSortKey must hash as random_key()
+		// does, or the cursor compares two key spaces.
+		c.keyCol = fmt.Sprintf("random_key(i.id, %d)", seed)
+		keyVal = int64(db.RandomSortKey(r.id, seed))
+	case "filesize":
+		c.keyCol = "i.file_size"
+		keyVal = r.fileSize
+	default: // "newest"
+		c.keyCol = "i.ingested_at"
+		keyVal = r.ingestedAt
+	}
+
+	// Row values, not the equivalent OR: only `(A, id) < (?, ?)`
+	// seeks the (A, id) index.
+	if order == "asc" || sort == "random" {
+		c.prevCmp = fmt.Sprintf("(%s, i.id) < (?, ?)", c.keyCol)
+		c.nextCmp = fmt.Sprintf("(%s, i.id) > (?, ?)", c.keyCol)
+		c.prevSort = fmt.Sprintf("ORDER BY %s DESC, i.id DESC", c.keyCol)
+		c.nextSort = fmt.Sprintf("ORDER BY %s ASC, i.id ASC", c.keyCol)
+	} else {
+		c.prevCmp = fmt.Sprintf("(%s, i.id) > (?, ?)", c.keyCol)
+		c.nextCmp = fmt.Sprintf("(%s, i.id) < (?, ?)", c.keyCol)
+		c.prevSort = fmt.Sprintf("ORDER BY %s ASC, i.id ASC", c.keyCol)
+		c.nextSort = fmt.Sprintf("ORDER BY %s DESC, i.id DESC", c.keyCol)
+	}
+	c.prevArgs = []any{keyVal, r.id}
+	c.nextArgs = []any{keyVal, r.id}
+	return c, true
+}
+
 type adjacencyPlan struct {
+	keyCursor
 	where        string
 	args         []any
 	indexHint    string
-	keyCol       string
 	folderActive bool
 	folderEq     string
 	folderLo     string
@@ -394,25 +602,14 @@ type adjacencyPlan struct {
 	collName     string
 	collPrev     []collectionLeg
 	collNext     []collectionLeg
-	prevCmp      string
-	nextCmp      string
-	prevSort     string
-	nextSort     string
-	prevArgs     []any
-	nextArgs     []any
 	ok           bool // false for an unseeded random sort
 }
 
 func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int64, driverLegs []andDriverLeg, bucketed bool, bucketLo, bucketHi int64) (adjacencyPlan, error) {
 	database := src.DB
 	var p adjacencyPlan
-	var ingestedAt string
-	var fileSize int64
-	var series string
-	var seriesOrder sql.NullInt64
-	if err := database.Read.QueryRowContext(ctx,
-		`SELECT ingested_at, file_size, series, series_order FROM images WHERE id = ?`, currentID,
-	).Scan(&ingestedAt, &fileSize, &series, &seriesOrder); err != nil {
+	row, err := readCursorRow(ctx, database, currentID)
+	if err != nil {
 		return p, err
 	}
 
@@ -458,45 +655,12 @@ func buildAdjacencyPlan(ctx context.Context, src Source, q Query, currentID int6
 	if p.collOrder {
 		p.collName = q.OrderCollection
 		p.collPrev, p.collNext = collectionCursor(pcPos, currentID, q.Order == "desc")
-	} else if q.Sort == "order" {
-		before, after, fwd, rev, bArgs, aArgs := orderCursor(series, seriesOrder, currentID, q.Order == "desc")
-		p.prevCmp, p.prevSort, p.prevArgs = before, rev, bArgs
-		p.nextCmp, p.nextSort, p.nextArgs = after, fwd, aArgs
 	} else {
-		var keyVal any
-		switch q.Sort {
-		case "random":
-			if q.RandomSeed == 0 {
-				return p, nil
-			}
-			// %d emits only digits, so the seed interpolation is
-			// injection-safe. db.RandomSortKey must hash as random_key()
-			// does, or the cursor compares two key spaces.
-			p.keyCol = fmt.Sprintf("random_key(i.id, %d)", q.RandomSeed)
-			keyVal = int64(db.RandomSortKey(currentID, q.RandomSeed))
-		case "filesize":
-			p.keyCol = "i.file_size"
-			keyVal = fileSize
-		default: // "newest"
-			p.keyCol = "i.ingested_at"
-			keyVal = ingestedAt
+		c, ok := row.cursor(q.Sort, q.Order, q.RandomSeed)
+		if !ok {
+			return p, nil
 		}
-
-		// Row values, not the equivalent OR: only `(A, id) < (?, ?)`
-		// seeks the (A, id) index.
-		if q.Order == "asc" || q.Sort == "random" {
-			p.prevCmp = fmt.Sprintf("(%s, i.id) < (?, ?)", p.keyCol)
-			p.nextCmp = fmt.Sprintf("(%s, i.id) > (?, ?)", p.keyCol)
-			p.prevSort = fmt.Sprintf("ORDER BY %s DESC, i.id DESC", p.keyCol)
-			p.nextSort = fmt.Sprintf("ORDER BY %s ASC, i.id ASC", p.keyCol)
-		} else {
-			p.prevCmp = fmt.Sprintf("(%s, i.id) > (?, ?)", p.keyCol)
-			p.nextCmp = fmt.Sprintf("(%s, i.id) < (?, ?)", p.keyCol)
-			p.prevSort = fmt.Sprintf("ORDER BY %s ASC, i.id ASC", p.keyCol)
-			p.nextSort = fmt.Sprintf("ORDER BY %s DESC, i.id DESC", p.keyCol)
-		}
-		p.prevArgs = []any{keyVal, currentID}
-		p.nextArgs = []any{keyVal, currentID}
+		p.keyCursor = c
 	}
 
 	p.indexHint = sortIndexHint(q.Expr, q.Sort, hasMissingFilter, ceilingRewrote)
@@ -549,6 +713,12 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 		}
 		prev, next := findInAdjacencyList(ids, currentID)
 		return prev, next, nil
+	}
+
+	if legs, ok := tagWalkLegs(src, q); ok {
+		if prev, next, walked, err := walkAdjacent(ctx, src, q, legs, currentID); err != nil || walked {
+			return prev, next, err
+		}
 	}
 
 	if anyLeaf(q.Expr, isTagCountCategory) {
@@ -642,7 +812,7 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 // finishSimilarityFan releases the fan lock its caller took.
 func finishSimilarityFan(src Source, key string, gen uint64, seed tags.OverlapSeed, order, where string, args []any) {
 	defer src.Cache.releaseFan(key)
-	ctx, cancel := context.WithTimeout(context.Background(), similarityFanBackgroundBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), fanBackgroundBudget)
 	defer cancel()
 	ids := fanSimilarityIDs(ctx, src, seed, order, where, args)
 	if len(ids) == 0 || len(ids) >= adjacencyCacheMaxIDs {
@@ -783,12 +953,28 @@ func (sc Scope) InViewOrder(sort, order string, seed int64) Scope {
 }
 
 func (sc Scope) Stream(src Source, visit func(id int64) error) error {
+	expr, order, orderArgs := sc.ordered(src)
+	return streamScope(src, expr, order, orderArgs, visit)
+}
+
+// FirstIDs reads the scope's head under a LIMIT, so a sort without a
+// covering index keeps the top n rather than sorting the whole set out.
+func (sc Scope) FirstIDs(src Source, n int) ([]int64, error) {
+	expr, order, orderArgs := sc.ordered(src)
+	var ids []int64
+	return ids, streamScope(src, expr, order+" LIMIT ?", append(orderArgs, n), func(id int64) error {
+		ids = append(ids, id)
+		return nil
+	})
+}
+
+func (sc Scope) ordered(src Source) (Expr, string, []any) {
 	expr := ApplyCeiling(sc.expr, sc.level)
 	order, orderArgs := "ORDER BY i.id", []any(nil)
 	if sc.viewOrder {
 		order, orderArgs, _, _ = viewOrder(src, expr, sc.sort, sc.order, sc.randomSeed, sc.orderCollection)
 	}
-	return streamScope(src, expr, order, orderArgs, visit)
+	return expr, order, orderArgs
 }
 
 func (sc Scope) IDs(src Source) ([]int64, error) {

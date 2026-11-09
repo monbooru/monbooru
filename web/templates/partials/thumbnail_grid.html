@@ -1,7 +1,8 @@
 {{define "manga_pill"}}{{if eq .FileType "cbz"}}{{if .PageCount}}<span class="manga-pill">{{deref .PageCount}} pages</span>{{else}}<span class="manga-pill">manga</span>{{end}}{{end}}{{end}}
+{{define "gallery_pager"}}{{$d := .D}}{{$seed := ""}}{{if $d.RandomSeed}}{{$seed = printf "&seed=%d" $d.RandomSeed}}{{end}}
+<div id="gallery-pager-{{.Pos}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{template "partials/pagination.html" (dict "Base" (printf "/?q=%s&sort=%s&order=%s%s&page=" (urlQ $d.Query) (urlQ $d.Sort) (urlQ $d.Order) $seed) "Page" $d.Page "Total" $d.TotalPages "Unknown" $d.Result.TotalUnknown "PrevArg" $d.PagerPrev "NextArg" $d.PagerNext "MorePrev" $d.PagerMorePrev "MoreNext" $d.PagerMoreNext "Class" .Class "HX" "#gallery-grid")}}</div>
+{{end}}
 {{define "partials/thumbnail_grid.html"}}
-{{$seed := ""}}{{if .RandomSeed}}{{$seed = printf "&seed=%d" .RandomSeed}}{{end}}
-{{$pageBase := printf "/?q=%s&sort=%s&order=%s%s&page=" (urlQ .Query) (urlQ .Sort) (urlQ .Order) $seed}}
 {{if .InboxUploadActive}}
 <div id="inbox-upload" class="inbox-upload">
   {{if .Degraded}}
@@ -29,7 +30,7 @@
   {{end}}
 </div>
 {{end}}
-{{template "partials/pagination.html" (dict "Base" $pageBase "Page" .Page "Total" .TotalPages "Class" "pagination-top" "HX" "#gallery-grid")}}
+{{template "gallery_pager" (dict "D" . "Pos" "top" "Class" "pagination-top")}}
 <div class="thumb-grid{{if eq .ThumbnailFit "natural"}} fit-natural{{end}}{{if eq .ThumbSize "s"}} thumb-sm{{end}}{{if eq .ThumbSize "l"}} thumb-lg{{end}}">
   {{range $i, $_ := .Result.Results}}
   {{if $.InboxClusterAtIdx}}{{with index $.InboxClusterAtIdx $i}}
@@ -102,5 +103,5 @@
   {{end}}
 </div>
 
-{{template "partials/pagination.html" (dict "Base" $pageBase "Page" .Page "Total" .TotalPages "HX" "#gallery-grid")}}
+{{template "gallery_pager" (dict "D" . "Pos" "bottom")}}
 {{end}}

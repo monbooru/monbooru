@@ -1,17 +1,19 @@
 {{define "partials/pagination.html"}}
-{{if gt .Total 1}}
+{{if or (gt .Total 1) .Unknown}}
 <div class="pagination{{with .Class}} {{.}}{{end}}"{{with .HX}} hx-target="{{.}}" hx-push-url="true"{{end}}>
-  {{if and (gt .Page 2) (gt .Total 2)}}
+  {{if and (gt .Page 2) (or .Unknown (gt .Total 2))}}
   <a href="{{.Base}}1"{{if .HX}} hx-get="{{.Base}}1"{{end}}>« First</a>
   {{end}}
   {{if gt .Page 1}}
-  <a href="{{.Base}}{{sub .Page 1}}"{{if .HX}} hx-get="{{.Base}}{{sub .Page 1}}"{{end}}>← Prev</a>
+  <a href="{{.Base}}{{sub .Page 1}}{{.PrevArg}}"{{if .HX}} hx-get="{{.Base}}{{sub .Page 1}}{{.PrevArg}}"{{end}}>← Prev</a>
+  {{else if .MorePrev}}
+  <a href="{{.Base}}1"{{if .HX}} hx-get="{{.Base}}1"{{end}}>← Prev</a>
   {{end}}
-  <button type="button" class="page-jump current" data-current="{{.Page}}" data-total="{{.Total}}" title="Go to page…">Page {{.Page}} / {{.Total}}</button>
-  {{if lt .Page .Total}}
-  <a href="{{.Base}}{{add .Page 1}}"{{if .HX}} hx-get="{{.Base}}{{add .Page 1}}"{{end}}>Next →</a>
+  <button type="button" class="page-jump current" data-current="{{.Page}}" data-total="{{if not .Unknown}}{{.Total}}{{end}}" title="Go to page…">Page {{.Page}} / {{if .Unknown}}…{{else}}{{.Total}}{{end}}</button>
+  {{if or .Unknown (lt .Page .Total) .MoreNext}}
+  <a href="{{.Base}}{{add .Page 1}}{{.NextArg}}"{{if .HX}} hx-get="{{.Base}}{{add .Page 1}}{{.NextArg}}"{{end}}>Next →</a>
   {{end}}
-  {{if and (lt .Page .Total) (gt .Total 2)}}
+  {{if and (not .Unknown) (lt .Page .Total) (gt .Total 2)}}
   <a href="{{.Base}}{{.Total}}"{{if .HX}} hx-get="{{.Base}}{{.Total}}"{{end}}>Last »</a>
   {{end}}
 </div>

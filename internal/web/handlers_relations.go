@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -115,7 +116,13 @@ type collectionSibling struct {
 	ID     int64
 	Series string
 	Order  *int64
+	// On a collection's last shown tile: the members past the cap.
+	More    int
+	MoreURL string
+	total   int
 }
+
+const collectionSiblingCap = 200
 
 func loadCollectionSiblings(cx *library.Gallery, imageID int64, ceiling *Ceiling) ([]collectionSibling, error) {
 	under, args := "", []any{imageID, imageID}
@@ -123,15 +130,20 @@ func loadCollectionSiblings(cx *library.Gallery, imageID int64, ceiling *Ceiling
 		under, args = " AND i.rating_rank <= ?", append(args, rank)
 	}
 	return db.QueryAll(cx.DB.Read, db.ScanRow(func(sib *collectionSibling) []any {
-		return []any{&sib.ID, &sib.Series, &sib.Order}
-	}), `SELECT jc.image_id, jc.name, jc.position
-		 FROM image_collections self
-		 JOIN image_collections jc ON jc.name = self.name
-		 JOIN images i ON i.id = jc.image_id
-		 WHERE self.image_id = ? AND jc.image_id != ? AND i.is_missing = 0`+under+`
-		 ORDER BY jc.name, jc.position IS NULL, jc.position, jc.image_id
-		 LIMIT 200`,
-		args...)
+		return []any{&sib.ID, &sib.Series, &sib.Order, &sib.total}
+	}), `WITH ranked AS (
+			SELECT jc.image_id, jc.name, jc.position,
+			       ROW_NUMBER() OVER (PARTITION BY jc.name ORDER BY jc.position IS NULL, jc.position, jc.image_id) AS rn,
+			       COUNT(*) OVER (PARTITION BY jc.name) AS total
+			FROM image_collections self
+			JOIN image_collections jc ON jc.name = self.name
+			JOIN images i ON i.id = jc.image_id
+			WHERE self.image_id = ? AND jc.image_id != ? AND i.is_missing = 0`+under+`
+		)
+		SELECT image_id, name, position, total FROM ranked
+		WHERE rn <= ?
+		ORDER BY name, rn`,
+		append(args, collectionSiblingCap)...)
 }
 
 func flattenRelationsForPanel(rels *relations.ImageRelations, self int64) []relatedTile {
@@ -329,7 +341,27 @@ func collectionWithSelf(siblings []collectionSibling, self models.Image) []colle
 		}
 		return a.ID < b.ID
 	})
+	markCollectionCuts(merged)
 	return merged
+}
+
+// markCollectionCuts puts what the cap left out of each collection on its
+// last shown tile.
+func markCollectionCuts(rows []collectionSibling) {
+	shown, total, last := map[string]int{}, map[string]int{}, map[string]int{}
+	for i, r := range rows {
+		if r.total > 0 {
+			shown[r.Series]++
+			total[r.Series] = r.total
+			last[r.Series] = i
+		}
+	}
+	for name, n := range total {
+		if more := n - shown[name]; more > 0 {
+			q := url.Values{"q": {`collection:"` + search.QuoteValue(name) + `"`}, "sort": {"order"}, "order": {"asc"}}
+			rows[last[name]].More, rows[last[name]].MoreURL = more, "/?"+q.Encode()
+		}
+	}
 }
 
 type relationsImagePageData struct {
@@ -393,7 +425,7 @@ func (s *Server) relationsForm(w http.ResponseWriter, r *http.Request) (*library
 	}
 	cx := s.active()
 	if cx == nil || cx.RelationsSvc == nil {
-		http.Error(w, "no gallery", http.StatusServiceUnavailable)
+		externalErr(w, r, "No active gallery.", http.StatusServiceUnavailable)
 		return nil, false
 	}
 	return cx, true

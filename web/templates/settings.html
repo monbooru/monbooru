@@ -49,7 +49,7 @@
   {{if .DesktopProfile}}
   {{$dk := .Desktop}}
   <section id="desktop" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "Desktop" "Hint" "Folders, launch options and the tray icon."}}
+    {{template "webui/settings_section_header" dict "Title" "Desktop"}}
     <div id="flash-desktop"></div>
     <form id="desktop-switches" hx-post="/settings/desktop" hx-target="#flash-desktop" hx-swap="innerHTML">
       <div class="settings-cols">
@@ -91,7 +91,7 @@
   {{end}}
 
   <section id="general" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "General" "Hint" "File handling, display options and meta tags."}}
+    {{template "webui/settings_section_header" dict "Title" "General"}}
     <div id="flash-general"></div>
     <form hx-post="/settings/general" hx-target="#flash-general" hx-swap="innerHTML">
       <div class="settings-grid">
@@ -206,7 +206,7 @@
   </script>
 
   <section id="galleries" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "Galleries" "Hint" "Add, switch, export or import your galleries."}}
+    {{template "webui/settings_section_header" dict "Title" "Galleries"}}
     <div id="flash-galleries"></div>
     <div class="table-scroll">
     <table class="gallery-table stack-table">
@@ -532,7 +532,7 @@
   </script>
 
   <section id="plugins" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "Plugins" "Hint" "Plugins and themes."}}
+    {{template "webui/settings_section_header" dict "Title" "Plugins"}}
     <div id="flash-plugins"></div>
     <div class="settings-sub">
       <h4>Pairing requests</h4>
@@ -548,11 +548,9 @@
 
     {{$themes := .Themes}}
     <div class="settings-sub">
-      <div class="settings-sub-head">
-        <h4>Themes</h4>
-        <p class="field-hint">Put a theme folder in <code>{{.ThemesDir}}</code>.</p>
-      </div>
+      <h4>Themes</h4>
       {{template "webui/theme_cluster" (dict "Names" $themes.Names "Active" $themes.Active "PostURL" "/settings/plugins/theme")}}
+      <p class="field-hint">To add a theme, put its folder in <code>{{.ThemesDir}}</code>.</p>
     </div>
   </section>
 
@@ -771,6 +769,33 @@
     htmx.process(editor);
   });
 
+  // ?tagger=X&panel=mappings&q=label opens X's dialog on that panel, the
+  // search filled. Deferred to htmx's load: inline, the button is not yet wired.
+  document.body.addEventListener('htmx:load', function onLoad(e) {
+    if (e.detail.elt !== document.body) return;
+    document.body.removeEventListener('htmx:load', onLoad);
+    var params = new URLSearchParams(location.search);
+    var name = params.get('tagger');
+    if (!name) return;
+    var btn = Array.prototype.find.call(document.querySelectorAll('button[hx-get]'), function(b) {
+      return b.getAttribute('hx-get') === '/settings/tagger/' + name + '/config';
+    });
+    if (!btn) return;
+    var panel = params.get('panel'), q = params.get('q');
+    document.body.addEventListener('htmx:afterSwap', function onSwap(e) {
+      if (e.target.id !== 'tagger-config-' + name + '-body') return;
+      document.body.removeEventListener('htmx:afterSwap', onSwap);
+      var tab = panel && e.target.querySelector('.dialog-tab[data-panel="tc-' + panel + '-' + name + '"]');
+      if (tab) tab.click();
+      var search = q && e.target.querySelector('.tc-mappings input[name=q]');
+      if (search) {
+        search.value = q;
+        htmx.trigger(search, 'search');
+      }
+    });
+    btn.click();
+  });
+
   function taggerGalAllToggle(cb) {
     var form = cb.closest('form');
     if (!form) return;
@@ -873,7 +898,7 @@
   </section>
 
   <section id="auth" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "Authentication" "Hint" "UI password and API tokens."}}
+    {{template "webui/settings_section_header" dict "Title" "Authentication"}}
     <div id="flash-auth"></div>
     <div class="settings-cols">
       {{template "webui/auth_password_section" (dict "AuthEnabled" $cfg.Auth.EnablePassword "HasPassword" (ne $cfg.Auth.PasswordHash "") "Pinned" (or ($cfg.EnvPinned "auth.password_hash") ($cfg.EnvPinned "auth.enable_password")))}}
@@ -1170,7 +1195,7 @@
 
   {{$stats := .Stats}}
   <section id="stats" class="settings-section">
-    {{template "webui/settings_section_header" dict "Title" "Stats" "Hint" "Memory, database and disk usage."}}
+    {{template "webui/settings_section_header" dict "Title" "Stats"}}
     <div class="stats-cols">
     <div class="settings-sub">
       <h4>Process memory</h4>

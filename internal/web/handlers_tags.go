@@ -43,6 +43,7 @@ type tagsPageData struct {
 	FullyStaleTotal int
 	Folded          bool
 	FoldedTotal     int
+	RejectedTotal   int
 	OriginCounts    []tags.OriginCount
 	UsedBy          string
 	UsedByLabels    []string
@@ -104,6 +105,7 @@ type tagsSidebarCounts struct {
 	Stale      int
 	FullyStale int
 	Folded     int
+	Rejected   int
 	Origins    []tags.OriginCount
 	UsedBy     []string
 	Err        error
@@ -130,6 +132,7 @@ func (s *Server) tagsSidebarLoad(typeFilter string, full bool) tagsSidebarCounts
 		run(func() (err error) { c.Stale, err = svc.StaleUsageCount(); return })
 		run(func() (err error) { c.FullyStale, err = svc.FullyStaleCount(); return })
 		run(func() (err error) { c.Folded, err = svc.FoldedDuplicatesCount(); return })
+		run(func() (err error) { c.Rejected, err = svc.RejectedCount(); return })
 		run(func() (err error) { c.Origins, err = svc.OriginCounts(typeFilter); return })
 	}
 	run(func() (err error) { c.UsedBy, err = svc.UsedByLabels(); return })
@@ -231,6 +234,7 @@ func (s *Server) tagsHandler(w http.ResponseWriter, r *http.Request) {
 		FullyStaleTotal: counts.FullyStale,
 		Folded:          p.Folded,
 		FoldedTotal:     counts.Folded,
+		RejectedTotal:   counts.Rejected,
 		OriginCounts:    counts.Origins,
 		UsedBy:          p.UsedBy,
 		UsedByLabels:    counts.UsedBy,
@@ -509,7 +513,7 @@ func (s *Server) createTagPost(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[key] = true
-			if t, ferr := s.tagSvc().FindTag(name, catID); ferr == nil {
+			if t, ferr := s.tagSvc().FindTag(name, catID); ferr == nil && !t.Rejected {
 				existing = append(existing, s.existingTagNote(name, catID, t))
 				continue
 			}
@@ -675,7 +679,7 @@ func (s *Server) deleteTagHandler(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, tags.ErrTagNotFound) {
 			msg = "Tag not found."
 		}
-		flashHeaderErr(w, http.StatusBadRequest, msg)
+		hxRefuse(w, r, http.StatusBadRequest, msg)
 		return
 	}
 	// tag-relations-changed makes the tag page's PTR panel refetch its diff.
@@ -688,6 +692,10 @@ func (s *Server) deleteTagHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteTagsSearchPost(w http.ResponseWriter, r *http.Request) {
+	if r.FormValue("reject") == "1" {
+		s.startTagScopeRun(w, r, s.runRejectTagsByIDs)
+		return
+	}
 	s.startTagScopeRun(w, r, s.runDeleteTagsByIDs)
 }
 

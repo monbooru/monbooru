@@ -27,6 +27,15 @@
       <td>{{if $R.AddedAt}}{{$R.AddedAt}}{{else}}—{{end}}</td>
     </tr>
     {{end}}
+    {{if ne $L.PageCount $R.PageCount}}
+    {{- $lmore := and (gt $R.PageCount 0) (gt $L.PageCount $R.PageCount) -}}
+    {{- $rmore := and (gt $L.PageCount 0) (gt $R.PageCount $L.PageCount) -}}
+    <tr>
+      <th>Page count</th>
+      <td{{if $lmore}} class="cmp-win" title="More pages"{{end}}>{{if $L.PageCount}}{{$L.PageCount}}{{else}}—{{end}}{{if $lmore}} ←{{end}}</td>
+      <td{{if $rmore}} class="cmp-win" title="More pages"{{end}}>{{if $R.PageCount}}{{$R.PageCount}}{{else}}—{{end}}{{if $rmore}} ←{{end}}</td>
+    </tr>
+    {{end}}
     {{if ne $L.TagCount $R.TagCount}}
     <tr>
       <th>Tag count</th>

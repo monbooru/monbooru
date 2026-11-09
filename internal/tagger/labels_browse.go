@@ -1,8 +1,11 @@
 package tagger
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"sync"
 )
 
 // Rule is "" for the model's own routing, "default" for an embedded rule
@@ -22,7 +25,7 @@ func BrowseLabels(modelPath, taggerName, tagsFile string, catIDs map[string]int6
 	if err != nil {
 		return nil, err
 	}
-	labels, err := loadLabels(filepath.Join(modelPath, taggerName, tagsFile), profile)
+	labels, err := browsedLabels(filepath.Join(modelPath, taggerName, tagsFile), profile)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +61,40 @@ func BrowseLabels(modelPath, taggerName, tagsFile string, catIDs map[string]int6
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	return out, nil
+}
+
+// The tag page and the labels panel read a tagger's whole label file on
+// every view, so the parse is kept until the file or its profile changes.
+var labelFiles = struct {
+	sync.Mutex
+	byPath map[string]parsedLabels
+}{byPath: map[string]parsedLabels{}}
+
+type parsedLabels struct {
+	stamp  string
+	labels []tagLabel
+}
+
+func browsedLabels(path string, profile Profile) ([]tagLabel, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	stamp := fi.ModTime().String() + "/" + strconv.FormatInt(fi.Size(), 10) + "/" + profile.fingerprint()
+	labelFiles.Lock()
+	cached, ok := labelFiles.byPath[path]
+	labelFiles.Unlock()
+	if ok && cached.stamp == stamp {
+		return cached.labels, nil
+	}
+	labels, err := loadLabels(path, profile)
+	if err != nil {
+		return nil, err
+	}
+	labelFiles.Lock()
+	labelFiles.byPath[path] = parsedLabels{stamp, labels}
+	labelFiles.Unlock()
+	return labels, nil
 }
 
 func compileEntries(entries []DispatchEntry, catIDs map[string]int64) map[string]DispatchRule {

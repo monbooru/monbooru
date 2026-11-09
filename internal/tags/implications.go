@@ -166,14 +166,17 @@ func (s *Service) AddImplicationFrom(parentID, impliedID int64, origin string) (
 
 	return writeTx(s, func(tx *sql.Tx) (bool, error) {
 		for _, id := range [2]int64{parentID, impliedID} {
-			var isAlias int
-			if err := tx.QueryRow(`SELECT is_alias FROM tags WHERE id = ?`, id).Scan(&isAlias); err == sql.ErrNoRows {
+			var isAlias, rejected int
+			if err := tx.QueryRow(`SELECT is_alias, rejected FROM tags WHERE id = ?`, id).Scan(&isAlias, &rejected); err == sql.ErrNoRows {
 				return false, ErrTagNotFound
 			} else if err != nil {
 				return false, err
 			}
 			if isAlias == 1 {
 				return false, ErrImplicationAlias
+			}
+			if rejected == 1 {
+				return false, ErrTagRejected
 			}
 		}
 

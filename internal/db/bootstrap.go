@@ -232,6 +232,8 @@ func Bootstrap(db *DB) error {
 	b.backfillIfFreshColumn("tag_categories", "position",
 		`ALTER TABLE tag_categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`,
 		ResetCategoryPositions, "backfill tag_categories.position")
+	b.ensureColumn("tags", "rejected", `ALTER TABLE tags ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`)
+	b.ensureColumn("tags", "rejected_drops", `ALTER TABLE tags ADD COLUMN rejected_drops INTEGER NOT NULL DEFAULT 0`)
 	// The ComfyTermsVersion its terms were derived under; 0 = never indexed.
 	b.ensureColumn("comfyui_metadata", "terms_version",
 		`ALTER TABLE comfyui_metadata ADD COLUMN terms_version INTEGER NOT NULL DEFAULT 0`)

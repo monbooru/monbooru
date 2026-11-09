@@ -51,19 +51,19 @@ func (l *Link) runPTRLookupPhase(ctx context.Context, cx *library.Gallery) (chec
 		for i, c := range batch {
 			images[i] = contract.PTRLookupImage{ImageID: c.ImageID, SHA256: c.SHA256}
 		}
-		results, answered, lerr := l.ptrBatchLookup(ctx, cx.Name, true, images)
+		ans, lerr := l.ptrBatchLookup(ctx, cx.Name, true, images)
 		if lerr != nil {
 			return checked, matched, lerr
 		}
-		if answered > 0 {
-			cursor = answered
+		if ans.Index > 0 {
+			cursor = ans.Index
 			lookup.PTRCursor.Store(cursor)
 		}
 		byHash := make(map[string]int64, len(batch))
 		for _, c := range batch {
 			byHash[c.SHA256] = c.ImageID
 		}
-		hits, recorded, aerr := applyPTRResults(cx, byHash, results, cursor)
+		hits, recorded, aerr := applyPTRResults(cx, byHash, ans, cursor)
 		matched += hits
 		checked += recorded
 		if aerr != nil {
@@ -74,12 +74,13 @@ func (l *Link) runPTRLookupPhase(ctx context.Context, cx *library.Gallery) (chec
 	return checked, matched, nil
 }
 
-func applyPTRResults(cx *library.Gallery, byHash map[string]int64, results map[string][]string, cursor uint64) (matched, recorded int, err error) {
+func applyPTRResults(cx *library.Gallery, byHash map[string]int64, ans contract.PTRLookupResponse, cursor uint64) (matched, recorded int, err error) {
 	for sha, id := range byHash {
-		tags, hit := results[sha]
+		tags, hit := ans.Results[sha]
 		result := lookup.ResultMiss
 		if hit {
-			if aerr := cx.Edit(func(d *db.DB) error { return gallery.ApplyPTRTags(d, cx.TagSvc, id, tags) }); aerr != nil {
+			withheld := gallery.Withheld{Categories: ans.WithheldCategories, Tags: ans.WithheldTags[sha]}
+			if aerr := cx.Edit(func(d *db.DB) error { return gallery.ApplyPTRTags(d, cx.TagSvc, id, tags, withheld) }); aerr != nil {
 				logx.Warnf("ptr apply for image %d: %v", id, aerr)
 				continue
 			}

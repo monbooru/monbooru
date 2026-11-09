@@ -152,6 +152,33 @@ func buildFolderTree(flat []folderCount) []FolderNode {
 	return []FolderNode{toValue(rootP)}
 }
 
+// FindFolder returns the node at path in a tree from FolderTreeUnder, the
+// root for "", or nil when no visible image sits at or under it.
+func FindFolder(tree []FolderNode, path string) *FolderNode {
+	if len(tree) == 0 {
+		return nil
+	}
+	n := &tree[0]
+	if path == "" {
+		return n
+	}
+	for end := 0; end < len(path); {
+		if i := strings.IndexByte(path[end+1:], '/'); i >= 0 {
+			end += 1 + i
+		} else {
+			end = len(path)
+		}
+		i, ok := slices.BinarySearchFunc(n.Children, path[:end], func(c FolderNode, p string) int {
+			return strings.Compare(c.Path, p)
+		})
+		if !ok {
+			return nil
+		}
+		n = &n.Children[i]
+	}
+	return n
+}
+
 func FolderTreeUnder(database *db.DB, ceiling RankCeiling) ([]FolderNode, error) {
 	where, args := ceiling.and("i")
 	flat, err := db.QueryAll(database.Read, db.ScanRow(func(fc *folderCount) []any {

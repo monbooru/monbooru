@@ -326,7 +326,7 @@ func (s *Set) Remove(name string, removeFolder bool) (kept []string, err error) 
 		return nil, ErrJobRunning
 	}
 	defer r.Release()
-	cx, bound, err := s.removeMember(name)
+	cx, bound, err := s.removeMember(name, removeFolder)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (s *Set) Remove(name string, removeFolder bool) (kept []string, err error) 
 	return kept, nil
 }
 
-func (s *Set) removeMember(name string) (*Gallery, *gallery.Boundary, error) {
+func (s *Set) removeMember(name string, removeFolder bool) (*Gallery, *gallery.Boundary, error) {
 	s.Lock()
 	defer s.Unlock()
 	cx := s.Get(name)
@@ -361,6 +361,9 @@ func (s *Set) removeMember(name string) (*Gallery, *gallery.Boundary, error) {
 	}
 	if err := cx.exportBusy(); err != nil {
 		return nil, nil, err
+	}
+	if other := cx.Boundary().SharedWith(); removeFolder && other != "" {
+		return nil, nil, fmt.Errorf("gallery %q indexes the same folder; remove this gallery without its folder", other)
 	}
 	if err := s.host.Removed(name); err != nil {
 		return nil, nil, fmt.Errorf("persist gallery removal: %w", err)

@@ -73,6 +73,16 @@ func provenanceFromForm(r *http.Request) provenanceJSON {
 			p.Notes = nil
 		}
 	}
+	for field, list := range map[string]*[]string{
+		contract.FieldWithheldCategories: &p.WithheldCategories,
+		contract.FieldWithheldTags:       &p.WithheldTags,
+	} {
+		if raw := r.FormValue(field); raw != "" {
+			if err := json.Unmarshal([]byte(raw), list); err != nil {
+				*list = nil
+			}
+		}
+	}
 	return p
 }
 
@@ -86,6 +96,7 @@ type provenance struct {
 	original   string
 	notes      []models.Annotation
 	postFile   gallery.PostFile
+	withheld   gallery.Withheld
 }
 
 // The limits apply to what is stored, after a DText body has superseded
@@ -106,6 +117,7 @@ func (p provenanceJSON) read() (provenance, error) {
 		translated: commentaryFromInput(p.CommentaryTranslated, p.CommentaryTranslatedDText),
 		original:   strings.TrimSpace(p.Original),
 		postFile:   postFileFrom(p.PostWidth, p.PostHeight, p.PostSize, p.PostExt),
+		withheld:   gallery.Withheld{Categories: p.WithheldCategories, Tags: p.WithheldTags},
 	}
 	v.notes = annotationsFromInput(p.Notes, v.url)
 	if err := validateImageSource(v.source); err != nil {

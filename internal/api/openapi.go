@@ -53,6 +53,7 @@ func buildSpec(baseURL string) map[string]any {
 					"color":        map[string]any{"type": "string"},
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
+					"rejected":     map[string]any{"type": "boolean", "description": "True when the name is rejected: every add path drops it until it is un-rejected."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label: 'user', a booru site, 'ptr', an auto-tagger name, an import label. Empty on rows predating the column."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; most recent application to an image. Absent when never applied."},
 				}),
@@ -63,6 +64,7 @@ func buildSpec(baseURL string) map[string]any {
 					"color":        map[string]any{"type": "string"},
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
+					"rejected":     map[string]any{"type": "boolean", "description": "As on TagRow."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label, as on TagRow."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; absent when never applied."},
 					"note":         map[string]any{"type": "string", "description": "The operator's note on the tag, in annotation markup; empty when none. An alias has none."},
@@ -158,21 +160,23 @@ func buildSpec(baseURL string) map[string]any {
 				}),
 				"CreateImageResponse": map[string]any{
 					"type":        "object",
-					"description": "Bare Image on success; wrapped in {image, tag_warnings?, autotag?} when a tag was refused or autotag was requested.",
+					"description": "Bare Image on success; wrapped in {image, tag_warnings?, rejected_tags?, autotag?} when a tag was refused, a name is rejected in the gallery or autotag was requested.",
 					"properties": map[string]any{
-						"image":        map[string]any{"$ref": "#/components/schemas/Image"},
-						"tag_warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true},
-						"autotag":      map[string]any{"type": "string", "nullable": true, "description": "Human-readable status about the auto-tag job"},
+						"image":         map[string]any{"$ref": "#/components/schemas/Image"},
+						"tag_warnings":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true},
+						"rejected_tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true, "description": "Pushed names the gallery rejects, dropped and counted; the rest landed."},
+						"autotag":       map[string]any{"type": "string", "nullable": true, "description": "Human-readable status about the auto-tag job"},
 					},
 				},
 				"DuplicateImageResponse": map[string]any{
 					"type":        "object",
 					"description": "Returned when the posted file's SHA-256 is already known. The existing image is returned with the pushed tags and provenance merged in. A multipart upload's redundant copy is discarded; a JSON path-reference at a new path is recorded as an alias.",
 					"properties": map[string]any{
-						"image":        map[string]any{"$ref": "#/components/schemas/Image"},
-						"alias_added":  map[string]any{"type": "boolean", "description": "True when the posted path was recorded as an alias of the existing image (JSON path-reference); false when a redundant multipart upload was discarded"},
-						"merge":        map[string]any{"$ref": "#/components/schemas/MergeSummary"},
-						"tag_warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true},
+						"image":         map[string]any{"$ref": "#/components/schemas/Image"},
+						"alias_added":   map[string]any{"type": "boolean", "description": "True when the posted path was recorded as an alias of the existing image (JSON path-reference); false when a redundant multipart upload was discarded"},
+						"merge":         map[string]any{"$ref": "#/components/schemas/MergeSummary"},
+						"tag_warnings":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true},
+						"rejected_tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true, "description": "Pushed names the gallery rejects, dropped and counted."},
 					},
 				},
 				"MergeSummary": map[string]any{
@@ -183,6 +187,7 @@ func buildSpec(baseURL string) map[string]any {
 						"tags_retired":  map[string]any{"type": "integer", "description": "Tags this source contributed earlier and no longer lists, kept but flagged stale"},
 						"rating_filled": map[string]any{"type": "boolean", "description": "True when the push supplied a rating and the image had none; an existing rating is never displaced"},
 						"source_added":  map[string]any{"type": "boolean"},
+						"rejected_tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "nullable": true, "description": "Pushed names the gallery rejects, dropped and counted; absent when none."},
 					},
 				},
 				"ReplaceFileResponse": objectSchema(nil, map[string]any{
@@ -330,6 +335,7 @@ func buildSpec(baseURL string) map[string]any {
 								"schema": objectSchema([]string{"file"}, map[string]any{
 									"file":                        map[string]any{"type": "string", "format": "binary", "description": "Image, video, or cbz/zip archive"},
 									"tags":                        map[string]any{"type": "string", "description": "JSON-encoded array of tag names"},
+									"client_tags":                 map[string]any{"type": "string", "description": "Optional JSON array of the sender's own tags, attributed to via rather than the source, so a refetch of that source does not read them as dropped."},
 									"folder":                      map[string]any{"type": "string", "description": "Destination subfolder under the gallery root; missing directories are created. Blank uses gallery.default_upload_folder (the gallery root when that is unset)."},
 									"autotag":                     map[string]any{"type": "string", "description": "Set to \"true\" to auto-tag the new image, queued while another job runs"},
 									"tagger_name":                 map[string]any{"type": "string", "description": "Optional auto-tagger name; when set with autotag, restricts the job to that tagger"},
@@ -342,6 +348,8 @@ func buildSpec(baseURL string) map[string]any {
 									"post_height":                 map[string]any{"type": "string", "description": "The same for height."},
 									"post_size":                   map[string]any{"type": "string", "description": "The same for the file size in bytes."},
 									"post_ext":                    map[string]any{"type": "string", "description": "The same for the extension the post declares."},
+									"withheld_categories":         map[string]any{"type": "string", "description": "Optional JSON array of tag categories the sender left out of tags by choice: the source reconcile does not read their tags as gone from the post."},
+									"withheld_tags":               map[string]any{"type": "string", "description": "Optional JSON array of tags the post still lists that the sender left out of tags by choice: the source reconcile does not read them as gone from the post."},
 									"parent_url":                  map[string]any{"type": "string", "description": "Optional canonical URL of the post this post declares as its parent. Must start with http:// or https://. Recorded on the same origin as 'source'; when the parent's post lands in the gallery too, the pair is linked as a derivative relation."},
 									"commentary":                  map[string]any{"type": "string", "description": "Optional artist commentary for the pushed source (<=10000 chars)."},
 									"commentary_translated":       map[string]any{"type": "string", "description": "Optional translation of that commentary (<=10000 chars)."},
@@ -357,6 +365,7 @@ func buildSpec(baseURL string) map[string]any {
 								"schema": objectSchema([]string{"path"}, map[string]any{
 									"path":                        map[string]any{"type": "string", "description": "Path to a file already inside the gallery. Absolute paths are used as given; a relative path resolves under gallery/<folder> when folder is set, and otherwise against the server's working directory, so send an absolute path or a folder. The file must sit inside the gallery root, in a folder the gallery indexes, or the request is refused with 400."},
 									"tags":                        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+									"client_tags":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The sender's own tags, attributed to via rather than the source, so a refetch of that source does not read them as dropped."},
 									"folder":                      map[string]any{"type": "string", "description": "Destination subfolder for relative paths"},
 									"autotag":                     map[string]any{"type": "boolean", "description": "Auto-tag the new image, queued while another job runs"},
 									"tagger_name":                 map[string]any{"type": "string", "description": "Optional auto-tagger name"},
@@ -369,6 +378,8 @@ func buildSpec(baseURL string) map[string]any {
 									"post_height":                 map[string]any{"type": "integer", "description": "The same for height."},
 									"post_size":                   map[string]any{"type": "integer", "description": "The same for the file size in bytes."},
 									"post_ext":                    map[string]any{"type": "string", "description": "The same for the extension the post declares."},
+									"withheld_categories":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tag categories the sender left out of tags by choice: the source reconcile does not read their tags as gone from the post."},
+									"withheld_tags":               map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags the post still lists that the sender left out of tags by choice: the source reconcile does not read them as gone from the post."},
 									"parent_url":                  map[string]any{"type": "string", "description": "Optional canonical URL of the post this post declares as its parent. Must start with http:// or https://. Recorded on the same origin as 'source'; when the parent's post lands in the gallery too, the pair is linked as a derivative relation."},
 									"commentary":                  map[string]any{"type": "string", "description": "Optional artist commentary for the pushed source (<=10000 chars)."},
 									"commentary_translated":       map[string]any{"type": "string", "description": "Optional translation of that commentary (<=10000 chars)."},
@@ -468,6 +479,8 @@ func buildSpec(baseURL string) map[string]any {
 						"post_height":                 map[string]any{"type": "integer"},
 						"post_size":                   map[string]any{"type": "integer", "description": "Byte size the post declares. Used for the gain test when the post publishes no dimensions."},
 						"post_ext":                    map[string]any{"type": "string", "description": "File extension the post serves, no dot."},
+						"withheld_categories":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tag categories the sender left out of tags by choice: the source reconcile does not read their tags as gone from the post."},
+						"withheld_tags":               map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags the post still lists that the sender left out of tags by choice: the source reconcile does not read them as gone from the post."},
 						"verify":                      map[string]any{"type": "boolean", "description": "When true and source_md5 is non-empty, the stored file is hashed and compared first; a mismatch applies nothing and returns 409 - unless the origin is similarity-matched, whose file differs by design."},
 						"similarity":                  map[string]any{"type": "number", "description": "Similarity-service score when the post was found by image similarity rather than an exact hash: a percentage as the service reports it (0-100), not range-checked. Recorded on the origin row over the stored score; a matched origin's refetches skip the md5 verify. 0, negative or absent keeps the stored score."},
 						"commentary":                  map[string]any{"type": "string"},
@@ -546,15 +559,16 @@ func buildSpec(baseURL string) map[string]any {
 						"404": resp("Image not found", "#/components/schemas/Error"),
 						"500": resp("Database read failed", "#/components/schemas/Error"),
 						"200": map[string]any{
-							"description": "Bare TagArray on success; wrapped in {tags, tag_warnings} when any tag failed validation.",
+							"description": "Bare TagArray on success; wrapped in {tags, tag_warnings?, rejected_tags?} when any tag failed validation or a name is rejected in the gallery.",
 							"content": map[string]any{
 								"application/json": map[string]any{
 									"schema": map[string]any{
 										"oneOf": []map[string]any{
 											{"$ref": "#/components/schemas/TagArray"},
 											objectSchema(nil, map[string]any{
-												"tags":         map[string]any{"$ref": "#/components/schemas/TagArray"},
-												"tag_warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+												"tags":          map[string]any{"$ref": "#/components/schemas/TagArray"},
+												"tag_warnings":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+												"rejected_tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 											}),
 										},
 									},
@@ -607,6 +621,8 @@ func buildSpec(baseURL string) map[string]any {
 									"post_height":                 map[string]any{"type": "string", "description": "The same for height."},
 									"post_size":                   map[string]any{"type": "string", "description": "The same for the file size in bytes."},
 									"post_ext":                    map[string]any{"type": "string", "description": "The same for the extension the post declares."},
+									"withheld_categories":         map[string]any{"type": "string", "description": "Optional JSON array of tag categories the sender left out of tags by choice: the source reconcile does not read their tags as gone from the post."},
+									"withheld_tags":               map[string]any{"type": "string", "description": "Optional JSON array of tags the post still lists that the sender left out of tags by choice: the source reconcile does not read them as gone from the post."},
 									"parent_url":                  map[string]any{"type": "string"},
 									"commentary":                  map[string]any{"type": "string"},
 									"commentary_translated":       map[string]any{"type": "string"},
@@ -724,7 +740,7 @@ func buildSpec(baseURL string) map[string]any {
 						queryParam("page_size", "Synonym for limit"),
 						queryParam("show_zero", "'0' hides zero-usage non-alias tags; the default shows them so the API total matches the /tags page total."),
 						queryParam("origin", "Filter by stored creation origin ('user', a booru site, 'ptr', an auto-tagger name, ...). The legacy 'alias' value narrows to alias rows. Empty (default) returns every tag."),
-						queryParam("type", "Structural filter: 'tag' (non-alias rows), 'alias' (alias rows). Empty (default) returns both; any other value matches nothing."),
+						queryParam("type", "Structural filter: 'tag' (plain rows), 'alias' (alias rows), 'rejected' (rejected names). Empty (default) returns all; any other value matches nothing."),
 						queryParam("used_by", "Only tags this source applied to at least one image (an auto-tagger name, a booru site, 'user', a via label), whoever created the tag."),
 					},
 					map[string]any{
@@ -739,6 +755,7 @@ func buildSpec(baseURL string) map[string]any {
 					map[string]any{
 						"201": resp("The tag (created, or the existing row when the name already exists in the category)", "#/components/schemas/TagRow"),
 						"400": resp("Missing name, a name left empty by its category prefix, unknown category, or invalid tag name", "#/components/schemas/Error"),
+						"409": resp("rejected: the name is rejected in this gallery", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/{id}": map[string]any{
@@ -763,7 +780,7 @@ func buildSpec(baseURL string) map[string]any {
 				"delete": op("Delete a tag", "deleteTag",
 					[]map[string]any{pathParam("id", "Tag ID"), galleryParam()},
 					map[string]any{
-						"204": map[string]any{"description": "Deleted (rating-category rows are usage-stripped; the catalog row stays)"},
+						"204": map[string]any{"description": "Deleted (the four canonical rating rows are usage-stripped; the catalog row stays)"},
 						"404": resp("Tag not found", "#/components/schemas/Error"),
 					}),
 			},
@@ -779,7 +796,26 @@ func buildSpec(baseURL string) map[string]any {
 						"201": resp("The alias row", "#/components/schemas/TagRow"),
 						"400": resp("Missing fields or an invalid alias target", "#/components/schemas/Error"),
 						"404": resp("Canonical tag not found", "#/components/schemas/Error"),
-						"409": resp("The name already names a tag with image_tags rows; merge it instead", "#/components/schemas/Error"),
+						"409": resp("The name already names a tag with image_tags rows; merge it instead, or rejected for a rejected tag", "#/components/schemas/Error"),
+					}),
+			},
+			"/tags/resolve": map[string]any{
+				"post": opBody("What the gallery does with each name on arrival", "resolveTags",
+					[]map[string]any{galleryParam()},
+					jsonBodySchema(true, objectSchema([]string{"names"}, map[string]any{
+						"names": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "1 to 500 names as a push would spell them, a category:name prefix read as on create. Nothing is created."},
+					})),
+					map[string]any{
+						"200": map[string]any{"description": "One entry per name, in order", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{
+							"results": map[string]any{"type": "array", "items": objectSchema(nil, map[string]any{
+								"name":        map[string]any{"type": "string", "description": "As given"},
+								"status":      map[string]any{"type": "string", "description": "exists (the tag is held), alias (resolves_to names what it lands as), rejected (dropped on arrival), new (created on arrival), refused (an invalid name; reason says why)"},
+								"resolves_to": map[string]any{"type": "string"},
+								"implies":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What adding it also adds, general names bare and the rest category:name"},
+								"reason":      map[string]any{"type": "string"},
+							})},
+						})}}},
+						"400": resp("No names, or over 500", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/merge": map[string]any{
@@ -793,7 +829,7 @@ func buildSpec(baseURL string) map[string]any {
 						"200": resp("The canonical tag", "#/components/schemas/TagRow"),
 						"400": resp("Self-merge, missing ids, or a merge into an alias", "#/components/schemas/Error"),
 						"404": resp("alias_id or canonical_id names no tag", "#/components/schemas/Error"),
-						"409": resp("The merge would close an implication cycle", "#/components/schemas/Error"),
+						"409": resp("The merge would close an implication cycle, or rejected for a rejected tag", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/{id}/implications": map[string]any{
@@ -817,7 +853,7 @@ func buildSpec(baseURL string) map[string]any {
 						"202": resp("propagate=true: the edge is declared and the fan-out job started", "#/components/schemas/ImplicationJob"),
 						"400": resp("Missing implied_id, self-implication, or an alias on either side", "#/components/schemas/Error"),
 						"404": resp("Parent or implied tag not found", "#/components/schemas/Error"),
-						"409": resp("Edge would close a cycle, or propagate=true while another job runs (nothing is written)", "#/components/schemas/Error"),
+						"409": resp("Edge would close a cycle, rejected for a rejected tag, or propagate=true while another job runs (nothing is written)", "#/components/schemas/Error"),
 					},
 				},
 			},
@@ -844,7 +880,7 @@ func buildSpec(baseURL string) map[string]any {
 				"post": opBody("Create a category", "createCategory",
 					[]map[string]any{galleryParam()},
 					jsonBodySchema(true, objectSchema([]string{"name"}, map[string]any{
-						"name":  map[string]any{"type": "string", "description": "Lowercase letters, digits, underscore, or hyphen. Search-filter keywords are reserved."},
+						"name":  map[string]any{"type": "string", "description": "Lowercase letters, digits, underscore, or hyphen, not starting with a hyphen. Search-filter keywords are reserved."},
 						"color": map[string]any{"type": "string", "description": "#rgb or #rrggbb; defaults to #888888 when blank."},
 					})),
 					map[string]any{

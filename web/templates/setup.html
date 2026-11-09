@@ -24,13 +24,13 @@
         <button type="button" class="btn-sm dir-picker-open" data-into="setup-gallery-path"
                 hx-get="/internal/browse?into=setup-gallery-path" hx-target="#dir-picker-body">Browse</button>
       </div>
-      <p class="field-hint">Other folders can be added later as further galleries in the Settings.</p>
+      <p class="field-hint">Other folders can be added later as further galleries in Settings.</p>
     </div>
 
-    <h2>Who can reach it?</h2>
+    <h2>Who can open {{.BooruName}}?</h2>
     <div class="field">
       <label><input type="radio" name="reach" value="local" {{if not .LAN}}checked{{end}}{{if .BindPinned}} disabled{{end}}> Only this computer</label>
-      <p class="field-hint">{{.BooruName}} answers at http://localhost:{{.Port}} and at no other address.</p>
+      <p class="field-hint">Open it at http://localhost:{{.Port}}.</p>
       <label><input type="radio" name="reach" value="lan" {{if .LAN}}checked{{end}}{{if .BindPinned}} disabled{{end}}> Other devices on the LAN too</label>
       <p class="field-hint">Another device on the same network opens it at this machine's address, port {{.Port}}. Takes effect when {{.BooruName}} restarts.</p>
       {{if .BindPinned}}<p class="field-hint">Set by {{.BindPinned}} in the environment.</p>{{end}}

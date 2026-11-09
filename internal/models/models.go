@@ -223,6 +223,8 @@ type Tag struct {
 	Stale                  bool      // alias rows: the PTR's latest refresh no longer listed this spelling
 	StaleUsage             int       // count of this tag's image_tags rows a source dropped (stale=1)
 	FoldedInto             string    // corrected spelling on the folded-duplicates view; "" otherwise
+	Rejected               bool      // a name mapped to nothing: every add path drops it
+	RejectedDrops          int       // arrivals dropped since the reject
 }
 
 type TagCategory struct {
@@ -381,10 +383,11 @@ type JobState struct {
 }
 
 type SearchResult struct {
-	Page    int
-	Limit   int
-	Total   int
-	Results []Image
+	Page         int
+	Limit        int
+	Total        int
+	TotalUnknown bool
+	Results      []Image
 }
 
 type RowScanner interface {

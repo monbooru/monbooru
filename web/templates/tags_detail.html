@@ -24,20 +24,24 @@
   <h2 id="tag-detail-header">
     <span id="tag-detail-name" style="color:{{catColor .Tag.CategoryColor}}">{{.Tag.Name}}</span>
     {{if .Tag.IsAlias}}<span class="alias-badge">alias</span>{{end}}
+    {{if .Tag.Rejected}}<span class="alias-badge rejected-badge">rejected</span>{{end}}
     {{if .IsRating}}
     <span class="field-hint">(built-in rating)</span>
     {{else}}
     <span class="field-hint" id="tag-detail-cat">{{.Tag.CategoryName}}</span>
     {{end}}
     <span class="tag-detail-actions">
-      {{if not .IsRating}}
+      {{if .Tag.Rejected}}
+      <button type="button" id="btn-detail-unreject" class="btn-sm" hx-post="/tags/{{.Tag.ID}}/unreject" hx-swap="none"
+              title="Make the name a tag again: arrivals are kept from now on">Un-reject</button>
+      {{else if not .IsRating}}
       <button type="button" id="btn-detail-rename" class="btn-sm" data-id="{{.Tag.ID}}" data-name="{{.Tag.Name}}" onclick="openRenameDialog(this)">Rename</button>
       <button type="button" id="btn-detail-category" class="btn-sm" onclick="document.getElementById('detail-category-dialog').showModal()">Change category…</button>
       <button type="button" id="btn-detail-alias" class="btn-sm" onclick="openDetailAlias()">{{if .Tag.IsAlias}}Repoint to…{{else}}Alias to…{{end}}</button>
       {{end}}
       <button type="button" id="btn-detail-delete" class="btn-sm btn-danger" onclick="deleteThisTag(this)"
-              data-name="{{.Tag.Name}}" data-category="{{.Tag.CategoryName}}"
-              title="{{if .IsRating}}Remove this rating from every image. The rating itself stays.{{else}}Delete this tag from every image{{end}}">{{if .IsRating}}Clear{{else}}Delete{{end}}</button>
+              data-name="{{.Tag.Name}}" data-category="{{.Tag.CategoryName}}" data-rejected="{{if .Tag.Rejected}}1{{end}}" data-alias="{{if .Tag.IsAlias}}1{{end}}"
+              title="{{if .IsRating}}Remove this rating from every image. The rating itself stays.{{else if .Tag.Rejected}}Forget the name: it is no longer dropped on arrival{{else}}Delete this tag from every image{{end}}">{{if .IsRating}}Clear{{else}}Delete{{end}}</button>
     </span>
   </h2>
 
@@ -50,6 +54,7 @@
     {{else}}<span class="origin-none">—</span>{{end}}
     · created <strong>{{.Tag.CreatedAt.Format "2006-01-02"}}</strong>
     · last used {{if .Tag.LastUsedAt.IsZero}}<span class="origin-none">—</span>{{else}}<strong>{{.Tag.LastUsedAt.Format "2006-01-02"}}</strong>{{end}}
+    {{if .Tag.Rejected}}· dropped on arrival <strong>{{.Tag.RejectedDrops}}</strong>{{end}}
   </p>
 
   <div id="tag-flash" data-action-flash></div>
@@ -95,147 +100,155 @@
       · last used {{if .LastUsedAt.IsZero}}—{{else}}{{.LastUsedAt.Format "2006-01-02"}}{{end}}
       · <a href="/tags/{{.ID}}">details →</a>
     </div>
-    <p class="field-hint">This is another name for {{.Name}}: tagging or searching with it uses {{.Name}}.</p>
+    <p class="field-hint">This is another name for {{.Name}}: tagging or searching with it uses {{.Name}}. <a href="/tags/{{.ID}}#tag-path">[where it comes from ›]</a></p>
     {{else}}
     <p class="field-hint">Its target tag no longer exists.</p>
     {{end}}
   </section>
+  {{else if .Tag.Rejected}}
+  <section class="tag-detail-section" id="tag-rejected">
+    <h3>Rejected <span class="status-badge status-ok">this gallery</span><span class="status-badge status-off">on arrival</span></h3>
+    <p class="field-hint">A name mapped to nothing: it is kept off every image and dropped on arrival, whatever brings it. Un-reject it to make it a tag again.</p>
+    {{if .Aliases}}
+    <p class="field-hint">Dropped with it:</p>
+    <ul class="tag-list">
+      {{range .Aliases}}
+      <li class="tag-item"><a href="/tags/{{.ID}}" style="color:{{catColor .CategoryColor}}" title="Alias details">{{.Name}}</a></li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+
+  <div id="tag-path" hx-get="/tags/{{.Tag.ID}}/rules" hx-trigger="load, tag-relations-changed from:body, implication-added from:body, monloader-status-changed from:body, tag-path-resize" hx-vals='js:{w: this.clientWidth}' hx-swap="innerHTML"></div>
   {{else}}
-  <div class="tag-detail-cols">
-    <div>
-      <div class="tag-detail-inbound" style="border-color:{{catColor .Tag.CategoryColor}}">
-        <section class="tag-detail-section">
-          <h3>Aliases pointing here</h3>
-          {{if .Aliases}}
-          {{range groupTagsByOrigin .Aliases}}
-          <p class="relation-origin-sub">{{if .Stale}}stale, {{end}}added by {{originLabel $kinds .Origin}}
-            {{if gt (len .Tags) 1}}<button type="button" class="btn-link-accent"
-                    hx-delete="/tags/{{$.Tag.ID}}/aliases/group?origin={{urlQ .Origin}}&stale={{if .Stale}}1{{else}}0{{end}}"
-                    hx-confirm="Delete all {{len .Tags}} {{if .Stale}}stale {{end}}aliases added by {{originLabel $kinds .Origin}}?"
-                    data-confirm-danger="Nothing records which spellings they mapped."
-                    data-confirm-ok="Delete"
-                    hx-on::after-request="if(event.detail.successful){pruneRelationGroup(this)}"
-                    title="Delete every alias in this group">[×]</button>{{end}}</p>
-          <ul class="tag-list">
-            {{range .Tags}}
-            <li class="tag-item" data-spelling="{{.CategoryName}}:{{.Name}}">
-              <a href="/tags/{{.ID}}" style="color:{{catColor .CategoryColor}}" title="Alias details">{{.Name}}</a>
-              <button class="tag-remove-btn"
-                      hx-delete="/tags/{{.ID}}"
-                      hx-confirm="Delete the alias {{.Name}}?"
-                      data-confirm-ok="Delete"
-                      hx-on::after-request="if(event.detail.successful){pruneRelationRow(this)}"
-                      title="Delete this alias">×</button>
-            </li>
-            {{end}}
-          </ul>
-          {{end}}
-          {{else}}
-          <p class="field-hint">No aliases point at this tag.</p>
-          {{end}}
-          <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/aliases"
-                hx-target="#alias-add-flash" hx-swap="innerHTML">
-            <input type="text" name="name" placeholder="Alias name(s)..." required autocomplete="off">
-            <button type="submit" class="btn-sm">Add</button>
-          </form>
-          <div id="alias-add-flash"></div>
-        </section>
-
-        <section class="tag-detail-section">
-          <h3>Implied by</h3>
-          {{if .ImpliedBy}}
-          <p class="field-hint">These tags add {{.Tag.Name}} automatically.</p>
-          {{range groupImplicationsByOrigin .ImpliedBy}}
-          {{template "partials/implication_group_header.html" (dict "Group" . "OriginKinds" $kinds "BaseURL" (printf "/tags/%d/implied-by/group" $.Tag.ID))}}
-          <ul class="tag-list">
-            {{range .Implications}}
-            <li class="tag-item">
-              <a href="/tags/{{.ParentID}}" style="color:{{catColor .ParentCategoryColor}}">{{.ParentName}}</a>
-              <button class="tag-remove-btn"
-                      hx-delete="/tags/{{.ParentID}}/implications/{{$.Tag.ID}}"
-                      hx-target="#tag-flash"
-                      hx-confirm="Remove the implication that {{.ParentName}} implies {{$.Tag.Name}}?"
-                      data-confirm-ok="Remove"
-                      hx-on::after-request="if(event.detail.successful){pruneRelationRow(this)}"
-                      title="Remove this implication">×</button>
-            </li>
-            {{end}}
-          </ul>
-          {{end}}
-          {{else}}
-          <p class="field-hint">Nothing implies this tag.</p>
-          {{end}}
-          <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/implied-by"
-                hx-target="#implied-by-add-flash" hx-swap="innerHTML">
-            <div class="add-tag-input-wrap">
-              {{template "multi_tag_suggest_input" dict "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tags..." "Required" true "ValsKey" "q"}}
-            </div>
-            <button type="submit" class="btn-sm">Add</button>
-          </form>
-          <div id="implied-by-add-flash"></div>
-        </section>
+  <div class="tag-detail-top">
+    <section class="tag-detail-section" id="tag-note">
+      <h3>Note
+        {{if or .NoteBody .NoteLinks}}
+        <button type="button" id="btn-detail-note" class="btn-link-accent" data-note="{{.NoteBody}}" data-links="{{.NoteLinksText}}" title="Edit the note and links" onclick="openTagNote('tag-note-body')">[edit]</button>
+        {{else}}
+        <button type="button" id="btn-detail-note" class="btn-link-accent" title="Add a note" onclick="openTagNote('tag-note-body')">[+ add note]</button>
+        <button type="button" id="btn-detail-links" class="btn-link-accent" title="Add links" onclick="openTagNote('tag-note-links')">[+ add links]</button>
+        {{end}}
+      </h3>
+      {{if .NoteBody}}<div class="commentary-body tag-note-clamp" id="tag-note-text">{{.NoteHTML}}</div>
+      <p class="tag-note-more" hidden><button type="button" class="btn-link-accent" onclick="unclampTagNote(this)">[more]</button></p>{{end}}
+      {{if .NoteLinks}}
+      <ul class="tag-note-links">
+        {{range .NoteLinks}}
+        <li>{{if .URL}}<a href="{{.URL}}" target="_blank" rel="noopener noreferrer" title="{{if .Dead}}dead link: {{end}}{{.URL}}">{{if .Dead}}<s>{{.Label}}</s>{{else}}{{.Label}}{{end}}</a>{{else if .Dead}}<s>{{.Label}}</s>{{else}}{{.Label}}{{end}}{{if .Dead}}<span class="tag-note-dead">dead</span>{{end}}</li>
+        {{end}}
+      </ul>
+      {{end}}
+    </section>
+    <section class="tag-detail-section">
+      <h3>Recent images</h3>
+      {{if .RecentImageIDs}}
+      <div class="tag-recent-strip">
+        {{range .RecentImageIDs}}
+        <a href="/images/{{.}}"><img src="/thumbnails/{{$.ActiveGallery}}/{{.}}.jpg" alt="image {{.}}" loading="lazy"></a>
+        {{end}}
       </div>
-    </div>
+      <p><a id="tag-gallery-link" href="/?q={{.Tag.CategoryName}}:{{.Tag.Name}}">all {{.Tag.UsageCount}} in gallery →</a></p>
+      {{else}}
+      <p class="field-hint">No visible images carry this tag.</p>
+      {{end}}
+    </section>
+  </div>
 
-    <div>
-      <div class="tag-detail-outbound" style="border-color:{{catColor .Tag.CategoryColor}}">
-        <section class="tag-detail-section">
-          <h3>Implies</h3>
-          <div id="implications-editor" data-tag-id="{{.Tag.ID}}">
-            {{template "partials/implications_dialog.html" (dict "Parent" .Tag "Implications" .Implications "OriginKinds" $kinds)}}
-          </div>
-        </section>
+  {{if not .IsRating}}
+  <div id="tag-path" hx-get="/tags/{{.Tag.ID}}/rules" hx-trigger="load, tag-relations-changed from:body, implication-added from:body, monloader-status-changed from:body, tag-path-resize" hx-vals='js:{w: this.clientWidth}' hx-swap="innerHTML"></div>
+  {{end}}
+
+  <hr class="tag-detail-sep">
+
+  <div class="tag-detail-rel">
+    <section class="tag-detail-section" id="tag-aliases">
+      <h3>Aliases pointing here</h3>
+      {{if .Aliases}}
+      {{range groupTagsByOrigin .Aliases}}
+      <p class="relation-origin-sub">{{if .Stale}}stale, {{end}}added by {{originLabel $kinds .Origin}}
+        {{if gt (len .Tags) 1}}<button type="button" class="btn-link-accent"
+                hx-delete="/tags/{{$.Tag.ID}}/aliases/group?origin={{urlQ .Origin}}&stale={{if .Stale}}1{{else}}0{{end}}"
+                hx-confirm="Delete all {{len .Tags}} {{if .Stale}}stale {{end}}aliases added by {{originLabel $kinds .Origin}}?"
+                data-confirm-danger="Nothing records which spellings they mapped."
+                data-confirm-ok="Delete"
+                hx-on::after-request="if(event.detail.successful){pruneRelationGroup(this)}"
+                title="Delete every alias in this group">[×]</button>{{end}}</p>
+      <ul class="tag-list">
+        {{range .Tags}}
+        <li class="tag-item" data-spelling="{{.CategoryName}}:{{.Name}}">
+          <a href="/tags/{{.ID}}" style="color:{{catColor .CategoryColor}}" title="Alias details">{{.Name}}</a>
+          <button class="tag-remove-btn"
+                  hx-delete="/tags/{{.ID}}"
+                  hx-confirm="Delete the alias {{.Name}}?"
+                  data-confirm-ok="Delete"
+                  hx-on::after-request="if(event.detail.successful){pruneRelationRow(this)}"
+                  title="Delete this alias">×</button>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+      {{else}}
+      <p class="field-hint">No aliases point at this tag.</p>
+      {{end}}
+      <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/aliases"
+            hx-target="#alias-add-flash" hx-swap="innerHTML">
+        <input type="text" name="name" id="alias-add-input" placeholder="Alias name(s)..." required autocomplete="off">
+        <button type="submit" class="btn-sm">Add</button>
+      </form>
+      <div id="alias-add-flash"></div>
+    </section>
+    <section class="tag-detail-section" id="tag-implied-by">
+      <h3>Implied by</h3>
+      {{if .ImpliedBy}}
+      <p class="field-hint">These tags add {{.Tag.Name}} automatically.</p>
+      {{range groupImplicationsByOrigin .ImpliedBy}}
+      {{template "partials/implication_group_header.html" (dict "Group" . "OriginKinds" $kinds "BaseURL" (printf "/tags/%d/implied-by/group" $.Tag.ID))}}
+      <ul class="tag-list">
+        {{range .Implications}}
+        <li class="tag-item">
+          <a href="/tags/{{.ParentID}}" style="color:{{catColor .ParentCategoryColor}}">{{.ParentName}}</a>
+          <button class="tag-remove-btn"
+                  hx-delete="/tags/{{.ParentID}}/implications/{{$.Tag.ID}}"
+                  hx-target="#tag-flash"
+                  hx-confirm="Remove the implication that {{.ParentName}} implies {{$.Tag.Name}}?"
+                  data-confirm-ok="Remove"
+                  hx-on::after-request="if(event.detail.successful){pruneRelationRow(this)}"
+                  title="Remove this implication">×</button>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+      {{else}}
+      <p class="field-hint">Nothing implies this tag.</p>
+      {{end}}
+      <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/implied-by"
+            hx-target="#implied-by-add-flash" hx-swap="innerHTML">
+        <div class="add-tag-input-wrap">
+          {{template "multi_tag_suggest_input" dict "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tags..." "Required" true "ValsKey" "q"}}
+        </div>
+        <button type="submit" class="btn-sm">Add</button>
+      </form>
+      <div id="implied-by-add-flash"></div>
+    </section>
+    <section class="tag-detail-section tag-rel-implies" style="border-color:{{catColor .Tag.CategoryColor}}">
+      <h3>Implies</h3>
+      <div id="implications-editor" data-tag-id="{{.Tag.ID}}">
+        {{template "partials/implications_dialog.html" (dict "Parent" .Tag "Implications" .Implications "OriginKinds" $kinds)}}
       </div>
-    </div>
+    </section>
   </div>
 
   <hr class="tag-detail-sep">
 
-  <div class="tag-detail-cols">
-    <div>
-      <section class="tag-detail-section" id="tag-note">
-        <h3>Note
-          {{if or .NoteBody .NoteLinks}}
-          <button type="button" id="btn-detail-note" class="btn-link-accent" data-note="{{.NoteBody}}" data-links="{{.NoteLinksText}}" title="Edit the note and links" onclick="openTagNote('tag-note-body')">[edit]</button>
-          {{else}}
-          <button type="button" id="btn-detail-note" class="btn-link-accent" title="Add a note" onclick="openTagNote('tag-note-body')">[+ add note]</button>
-          <button type="button" id="btn-detail-links" class="btn-link-accent" title="Add links" onclick="openTagNote('tag-note-links')">[+ add links]</button>
-          {{end}}
-        </h3>
-        {{if .NoteBody}}<div class="commentary-body">{{.NoteHTML}}</div>{{end}}
-        {{if .NoteLinks}}
-        <ul class="tag-note-links">
-          {{range .NoteLinks}}
-          <li>{{if .URL}}<a href="{{.URL}}" target="_blank" rel="noopener noreferrer" title="{{if .Dead}}dead link: {{end}}{{.URL}}">{{if .Dead}}<s>{{.Label}}</s>{{else}}{{.Label}}{{end}}</a>{{else if .Dead}}<s>{{.Label}}</s>{{else}}{{.Label}}{{end}}{{if .Dead}}<span class="tag-note-dead">dead</span>{{end}}</li>
-          {{end}}
-        </ul>
-        {{end}}
-      </section>
-      <section class="tag-detail-section"
-               hx-get="/tags/{{.Tag.ID}}/usage" hx-trigger="load" hx-swap="innerHTML">Loading…</section>
-    </div>
-
-    <div>
-      {{if and .MonloaderUsable (not .IsRating)}}
-      <div id="ptr-contrib-panel" hx-get="/tags/{{.Tag.ID}}/ptr-contrib-panel" hx-trigger="load, implication-added from:body, tag-relations-changed from:body, ptr-contrib-closed from:body, monloader-status-changed from:body" hx-swap="innerHTML"></div>
-      <div id="ptr-contrib-dialog-host"></div>
-      {{template "ptr_contrib_loading"}}
-      {{end}}
-      <section class="tag-detail-section">
-        <h3>Recent images</h3>
-        {{if .RecentImageIDs}}
-        <div class="tag-recent-strip">
-          {{range .RecentImageIDs}}
-          <a href="/images/{{.}}"><img src="/thumbnails/{{$.ActiveGallery}}/{{.}}.jpg" alt="image {{.}}" loading="lazy"></a>
-          {{end}}
-        </div>
-        <p><a id="tag-gallery-link" href="/?q={{.Tag.CategoryName}}:{{.Tag.Name}}">all {{.Tag.UsageCount}} in gallery →</a></p>
-        {{else}}
-        <p class="field-hint">No visible images carry this tag.</p>
-        {{end}}
-      </section>
-    </div>
-  </div>
+  <section class="tag-detail-section"
+           hx-get="/tags/{{.Tag.ID}}/usage" hx-trigger="load" hx-swap="innerHTML">Loading…</section>
+  {{if and .MonloaderUsable (not .IsRating)}}
+  <div id="ptr-contrib-panel" hx-get="/tags/{{.Tag.ID}}/ptr-contrib-panel" hx-trigger="load, implication-added from:body, tag-relations-changed from:body, ptr-contrib-closed from:body, monloader-status-changed from:body" hx-swap="innerHTML"></div>
+  <div id="ptr-contrib-dialog-host"></div>
+  {{template "ptr_contrib_loading"}}
+  {{end}}
   {{end}}
 </div>
 
@@ -394,6 +407,47 @@ function pullTagPTRKeeping(spelling) {
     postTagPTRPull({as: spelling, merge: '1'});
   }, 'Every image tagged ' + TAG_NAME + ' gets it instead, and ' + TAG_NAME + ' keeps working as an alias. This cannot be undone.', 'Pull and keep');
 }
+
+document.addEventListener('click', function(e) {
+  var link = e.target.closest('[data-alias-into]');
+  if (!link) return;
+  e.preventDefault();
+  var name = link.dataset.aliasName;
+  showConfirm('Alias ' + name + ' to ' + TAG_NAME + '?', function() {
+    var params = new URLSearchParams();
+    params.set('ids', link.dataset.aliasInto);
+    params.set('canonical_id', '#' + TAG_ID);
+    postForm('/tags/batch-alias', params, {
+      flashId: 'tag-flash',
+      failMsg: 'Alias failed.',
+      catchMsg: 'Alias request failed.',
+      onOK: armGalleryReload
+    });
+  }, 'Every image tagged ' + name + ' gets ' + TAG_NAME + ' instead, and ' + name + ' keeps working as an alias. This cannot be undone.', 'Alias');
+});
+
+(function() {
+  var width = innerWidth, timer;
+  addEventListener('resize', function() {
+    clearTimeout(timer);
+    timer = setTimeout(function() {
+      if (Math.abs(innerWidth - width) < 40) return;
+      width = innerWidth;
+      var path = document.getElementById('tag-path');
+      if (path) htmx.trigger(path, 'tag-path-resize');
+    }, 300);
+  });
+})();
+
+function unclampTagNote(btn) {
+  document.getElementById('tag-note-text').classList.remove('tag-note-clamp');
+  btn.parentElement.hidden = true;
+}
+
+(function() {
+  var note = document.getElementById('tag-note-text');
+  if (note && note.scrollHeight > note.clientHeight) note.nextElementSibling.hidden = false;
+})();
 
 function deleteThisTag(btn) {
   deleteTagFlow(btn, TAG_ID, function() { window.location.href = '/tags'; });

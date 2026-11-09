@@ -113,13 +113,14 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 	}
 	tagInput := strings.TrimSpace(r.FormValue("tag"))
 	if tagInput == "" {
-		http.Error(w, "tag required", http.StatusBadRequest)
+		hxRefuse(w, r, http.StatusBadRequest, "Type a tag to add.")
 		return
 	}
 
 	catTags, unknownCats, parseErrMsg := s.parseTagInput(tagInput)
 
 	var added, rejected, dupes []string
+	var rejectedRows []*models.Tag
 	var promotedTokens []string
 	var displacedRatings []string
 	mutated := false
@@ -134,6 +135,10 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 	resolvedRaw := map[string]int{}
 	for _, ct := range catTags {
 		tag, err := s.tagSvc().GetOrCreateTag(ct.name, ct.catID)
+		if errors.Is(err, tags.ErrTagRejected) {
+			rejectedRows = append(rejectedRows, tag)
+			continue
+		}
 		if err != nil {
 			logx.Warnf("add tag %q: %v", ct.name, err)
 			rejected = append(rejected, ct.name+": "+err.Error())
@@ -196,13 +201,14 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 		return strings.Join(slices.DeleteFunc(parts, func(p string) bool { return p == "" }), "; ")
 	}
 
+	refused := len(rejected) + len(rejectedRows)
 	var addErrMsg, addWarnMsg, addOkMsg string
 	switch {
-	case parseErrMsg != "" && !mutated && len(rejected) == 0:
+	case parseErrMsg != "" && !mutated && refused == 0:
 		addErrMsg = parseErrMsg
-	case mutated && (len(rejected) > 0 || parseErrMsg != ""):
+	case mutated && (refused > 0 || parseErrMsg != ""):
 		addWarnMsg = joinNonEmpty(addedPart, promotedPart, dupesPart, displacedPart, unknownPart, parseErrMsg, rejectedPart)
-	case len(rejected) > 0:
+	case refused > 0:
 		addErrMsg = joinNonEmpty(parseErrMsg, rejectedPart)
 	case len(dupes) > 0 && !mutated && parseErrMsg == "":
 		addErrMsg = "tag already on image: " + strings.Join(dupes, ", ")
@@ -211,7 +217,7 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 	}
 	var input *string
 	switch {
-	case len(rejected) == 0 && parseErrMsg == "":
+	case refused == 0 && parseErrMsg == "":
 		input = new(string)
 	case mutated:
 		// Only what failed stays to be fixed: resubmitting the rest would add it again.
@@ -227,11 +233,15 @@ func (s *Server) addTagToImage(w http.ResponseWriter, r *http.Request) {
 		refill := strings.Join(left, " ")
 		input = &refill
 	}
-	s.renderTagListWithSidebar(w, r, id, addErrMsg, addWarnMsg, addOkMsg, input)
+	s.renderTagList(w, r, id, addErrMsg, addWarnMsg, addOkMsg, input, rejectedRows)
+}
+
+func (s *Server) renderTagListWithSidebar(w http.ResponseWriter, r *http.Request, id int64, errMsg, warnMsg, okMsg string, input *string) {
+	s.renderTagList(w, r, id, errMsg, warnMsg, okMsg, input, nil)
 }
 
 // A non-nil input replaces the add box's text; nil leaves it as typed.
-func (s *Server) renderTagListWithSidebar(w http.ResponseWriter, r *http.Request, id int64, errMsg, warnMsg, okMsg string, input *string) {
+func (s *Server) renderTagList(w http.ResponseWriter, r *http.Request, id int64, errMsg, warnMsg, okMsg string, input *string, rejectedRows []*models.Tag) {
 	folderPath, imageTags, _ := s.tagSvc().GetImageTags(id)
 	tagMode := tagModePref.resolve(w, r, "tagmode")
 	impliedMode := impliedModePref.resolve(w, r, "implied")
@@ -277,6 +287,7 @@ func (s *Server) renderTagListWithSidebar(w http.ResponseWriter, r *http.Request
 		"BackKVQS":         back.QueryString("&"),
 		"Ref":              ref,
 		"ErrMsg":           errMsg,
+		"RejectedRows":     rejectedRows,
 		"WarnMsg":          warnMsg,
 		"OkMsg":            okMsg,
 		"SetInput":         input != nil,

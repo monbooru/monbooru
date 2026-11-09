@@ -353,7 +353,7 @@ func (s *Server) mergeGallery(name, format string, upload io.Reader) (galleryio.
 	})
 	switch {
 	case errors.Is(err, context.Canceled):
-		done := res.Added + res.Tagged + res.Skipped + res.LeftOut
+		done := res.Added + res.Tagged + res.Unchanged + res.Skipped + res.LeftOut
 		err = fmt.Errorf("merge cancelled after %d of %d record%s: %s", done, total, plural(total), res.Summary())
 		s.jobs.Complete(fmt.Sprintf("merge cancelled (%d/%d records)", done, total))
 	case err != nil:

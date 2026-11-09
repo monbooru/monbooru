@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS tags (
     last_used_at     TEXT,
     -- 1 = PTR alias the latest refresh dropped; kept until the operator acts.
     stale            INTEGER NOT NULL DEFAULT 0,
+    -- 1 = a name mapped to nothing: every add path drops it.
+    rejected         INTEGER NOT NULL DEFAULT 0,
+    rejected_drops   INTEGER NOT NULL DEFAULT 0,
     UNIQUE(name, category_id)
 );
 

@@ -158,6 +158,19 @@ func (s *Service) DistinctPartners(ids []int64) (map[int64][]DistinctPartner, er
 	return out, nil
 }
 
+// NamedTags lists the plain tags of every category holding one of names.
+func (s *Service) NamedTags(names []string) ([]models.Tag, error) {
+	in, args := db.InPlaceholders(names)
+	return db.QueryAll(s.db.Read, db.ScanRow(func(t *models.Tag) []any {
+		return []any{&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor, &t.UsageCount}
+	}),
+		`SELECT t.id, t.name, t.category_id, tc.name, tc.color, t.usage_count
+		 FROM tags t
+		 JOIN tag_categories tc ON tc.id = t.category_id
+		 WHERE t.is_alias = 0 AND t.rejected = 0 AND t.name IN (`+in+`)
+		 ORDER BY t.name, tc.name`, args...)
+}
+
 func (s *Service) SameNameTags(id int64) ([]models.Tag, error) {
 	return db.QueryAll(s.db.Read, db.ScanRow(func(t *models.Tag) []any {
 		return []any{&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor, &t.UsageCount}

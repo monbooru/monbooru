@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
@@ -239,7 +241,10 @@ func (s *Server) runMemoryReclaim() {
 				if dropped {
 					logx.Debugf("memory reclaim %q: dropped idle indexes", cx.Name)
 				}
-				if err != nil {
+				switch {
+				case errors.Is(err, db.ErrPoolBusy):
+					logx.Debugf("memory reclaim %q: %v", cx.Name, err)
+				case err != nil:
 					logx.Warnf("memory reclaim %q: %v", cx.Name, err)
 				}
 			}
@@ -446,9 +451,13 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /tags/batch-clean", s.batchTagCleanPost)
 	rt.read("POST /tags/batch-distinct", s.batchTagDistinctPost)
 	rt.read("POST /tags/new", s.createTagPost)
+	rt.read("POST /tags/reject", s.rejectTagsPost)
+	rt.read("POST /tags/reject-search", s.rejectTagsSearchPost)
 	rt.read("POST /tags/aliases", s.createAliasPost)
 	rt.read("POST /tags/{id}/rename", s.renameTagPost)
 	rt.read("DELETE /tags/{id}", s.deleteTagHandler)
+	rt.read("POST /tags/{id}/reject", s.rejectTagPost)
+	rt.read("POST /tags/{id}/unreject", s.unrejectTagPost)
 	rt.read("PATCH /tags/{id}/category", s.changeTagCategory)
 	rt.read("GET /tags/{id}/implications", s.implicationsDialogHandler)
 	rt.read("POST /tags/{id}/implications", s.addImplicationPost)
@@ -586,6 +595,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /tags/delete-search", s.deleteTagsSearchPost)
 	rt.read("POST /tags/ptr-lookup-search", s.ptrLookupSearchPost)
 	rt.free("GET /tags/{id}/ptr-contrib-panel", s.tagPtrContribPanel)
+	rt.free("GET /tags/{id}/rules", s.tagRulesPanel)
 	rt.free("GET /tags/{id}/ptr-contrib-dialog", s.tagPtrContribDialog)
 	rt.free("POST /tags/{id}/ptr-contrib", s.tagPtrContribSend)
 	rt.read("GET /tags/{id}/ptr-lookup-dialog", s.tagPtrLookupDialog)
@@ -595,7 +605,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /internal/tags/suggest", s.tagSuggest)
 	rt.read("GET /internal/search/suggest", s.searchSuggest)
 	rt.read("GET /internal/search/ids", s.searchIDs)
+	rt.read("GET /internal/search/count", s.galleryCount)
 	rt.read("GET /internal/folders/suggest", s.foldersSuggest)
+	rt.read("GET /internal/folders/children", s.folderChildren)
 	rt.read("GET /internal/collection/suggest", s.collectionSuggest)
 	rt.read("GET /internal/source/suggest", s.sourceSuggest)
 	rt.read("GET /internal/name/preview", s.namePreview)
@@ -779,6 +791,31 @@ const sidebarCookieName = "monbooru_sidebar"
 
 func sidebarCollapsed(r *http.Request) bool {
 	return session.FromCookie(r, sidebarCookieName) == "collapsed"
+}
+
+// main.js writes it: each key encoded once and comma-joined. A value with
+// no comma of its own was encoded twice and reads once more.
+const folderCookieName = "monbooru_folders"
+
+func folderCookieKeys(r *http.Request) map[string]bool {
+	raw := session.FromCookie(r, folderCookieName)
+	if lower := strings.ToLower(raw); !strings.Contains(raw, ",") && (strings.Contains(lower, "%2c") || strings.Contains(lower, "%25")) {
+		var err error
+		if raw, err = url.PathUnescape(raw); err != nil {
+			return nil
+		}
+	}
+	keys := map[string]bool{}
+	for _, k := range strings.Split(raw, ",") {
+		key, err := url.PathUnescape(k)
+		if err != nil {
+			return nil
+		}
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
 }
 
 func (s *Server) base(r *http.Request, nav, title string) baseData {

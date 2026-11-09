@@ -18,7 +18,7 @@ func (s *Server) findRelationPairsPost(w http.ResponseWriter, r *http.Request) {
 	}
 	cx := s.active()
 	if cx == nil || cx.DB == nil {
-		flashStatus(w, http.StatusInternalServerError, "No active gallery.")
+		externalErr(w, r, "No active gallery.", http.StatusServiceUnavailable)
 		return
 	}
 	s.cfgMu.RLock()
@@ -33,7 +33,7 @@ func (s *Server) findRelationPairsPost(w http.ResponseWriter, r *http.Request) {
 	// A typed confirm, so a bare replace=true from curl or a bookmark
 	// cannot wipe the queue.
 	if replace && r.FormValue("confirm") != "REBUILD" {
-		flashStatus(w, http.StatusBadRequest, "replace=true requires confirm=REBUILD.")
+		externalErr(w, r, "replace=true requires confirm=REBUILD.", http.StatusBadRequest)
 		return
 	}
 
@@ -59,13 +59,13 @@ func (s *Server) resetSkippedPost(w http.ResponseWriter, r *http.Request) {
 	}
 	cx := s.active()
 	if cx == nil || cx.DB == nil {
-		flashStatus(w, http.StatusInternalServerError, "No active gallery.")
+		externalErr(w, r, "No active gallery.", http.StatusServiceUnavailable)
 		return
 	}
 	n, err := cx.RelationsSvc.ResetSkipped(r.Context())
 	if err != nil {
 		logx.Warnf("reset skipped: %v", err)
-		flashStatus(w, http.StatusInternalServerError, err.Error())
+		externalErr(w, r, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeInlineFlash(w, "ok", fmt.Sprintf("Reset %d skipped pair%s.", n, plural(int(n))))

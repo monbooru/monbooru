@@ -502,9 +502,10 @@ func respelling(root, canonical, walked string) bool {
 	return err == nil && SameFile(info, canonical)
 }
 
-// CanonicalGone also holds for a path the boundary refuses.
+// CanonicalGone also holds for a path outside the root or one the boundary
+// refuses: after a repoint the old copy can still be on disk.
 func CanonicalGone(bound *Boundary, path string) bool {
-	if bound.Check(path) != nil {
+	if !PathInside(bound.Root(), path) || bound.Check(path) != nil {
 		return true
 	}
 	_, err := os.Stat(path)
@@ -536,16 +537,38 @@ func repointRow(database *db.DB, galleryPath string, fi syncFileInfo, row syncBy
 	}
 }
 
+// A row the walk did not see is checked on disk before it is marked: an
+// upload, push or replace can land one after the walk passed its folder.
 func selectImagesToMarkMissing(database *db.DB, bound *Boundary, foundPaths map[string]struct{}, skips walkSkips) ([]int64, int, error) {
+	unseen, err := unseenImages(database, foundPaths, skips)
+	if err != nil {
+		return nil, 0, err
+	}
+	var toMark []int64
+	excluded := 0
+	for id, path := range unseen {
+		if !CanonicalGone(bound, path) {
+			continue
+		}
+		toMark = append(toMark, id)
+		if bound.Excludes(path) {
+			excluded++
+		}
+	}
+	return toMark, excluded, nil
+}
+
+// Collected before any stat so the read cursor is not held open across the
+// syscalls.
+func unseenImages(database *db.DB, foundPaths map[string]struct{}, skips walkSkips) (map[int64]string, error) {
 	rows, err := database.Read.Query(
 		`SELECT id, canonical_path FROM images WHERE is_missing = 0`,
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("querying existing images: %w", err)
+		return nil, fmt.Errorf("querying existing images: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var toMark []int64
-	excluded := 0
+	unseen := map[int64]string{}
 	for rows.Next() {
 		var id int64
 		var path string
@@ -554,16 +577,13 @@ func selectImagesToMarkMissing(database *db.DB, bound *Boundary, foundPaths map[
 			continue
 		}
 		if _, seen := foundPaths[path]; !seen && !skips.covers(path) {
-			toMark = append(toMark, id)
-			if bound.Excludes(path) {
-				excluded++
-			}
+			unseen[id] = path
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return toMark, excluded, fmt.Errorf("iterating existing images: %w", err)
+		return nil, fmt.Errorf("iterating existing images: %w", err)
 	}
-	return toMark, excluded, nil
+	return unseen, nil
 }
 
 func markImagesMissingChunked(ctx context.Context, database *db.DB, ids []int64) (int, error) {

@@ -34,11 +34,7 @@ func pageGalleryStale(w http.ResponseWriter, r *http.Request, active string) boo
 func (s *Server) requireActive(w http.ResponseWriter, r *http.Request) (*library.Gallery, bool) {
 	cx := s.active()
 	if cx == nil || cx.DB == nil {
-		if isHTMXRequest(r) {
-			flashHeaderErr(w, http.StatusServiceUnavailable, "No gallery is open.")
-		} else {
-			http.Error(w, "No gallery is open.", http.StatusServiceUnavailable)
-		}
+		hxRefuse(w, r, http.StatusServiceUnavailable, "No gallery is open.")
 		return nil, false
 	}
 	return cx, true

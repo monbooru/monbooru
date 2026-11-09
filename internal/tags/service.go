@@ -36,10 +36,10 @@ var (
 	ErrInvalidCategoryColor = errors.New("invalid category color (must be #rgb or #rrggbb)")
 
 	// Names land in form-field names and in search syntax, where ':'
-	// separates category from tag.
-	categoryNameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
+	// separates category from tag and a leading '-' negates the term.
+	categoryNameRe = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]*$`)
 
-	ErrInvalidCategoryName = errors.New("invalid category name (use lowercase letters, digits, underscore, or hyphen)")
+	ErrInvalidCategoryName = errors.New("invalid category name (use lowercase letters, digits, underscore, or hyphen, not starting with a hyphen)")
 
 	ErrCategoryExists = errors.New("a category with this name already exists")
 

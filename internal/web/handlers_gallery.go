@@ -15,6 +15,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/searchkw"
@@ -23,8 +24,7 @@ import (
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
-// A first search slower than this skips the second count behind "N hidden",
-// and that count gets no longer than this either.
+// The count behind "N hidden" gets no longer than this.
 var galleryHiddenIndicatorBudget = 300 * time.Millisecond
 
 const batchGapMinutes = 15
@@ -45,7 +45,7 @@ type galleryData struct {
 	StatusOOB         bool
 	Result            *models.SearchResult
 	SidebarTags       []models.Tag
-	FolderTree        []gallery.FolderNode
+	Folders           *folderLevel
 	SourceLabelCounts []gallery.SourceLabelCount
 	SavedSearches     []models.SavedSearch
 	SidebarURL        string
@@ -59,6 +59,13 @@ type galleryData struct {
 	SimilarityPercent map[int64]int
 	SortSelectOOB     bool
 	PluginSlot        pluginSlotView
+	CountURL          string
+	PagerPrev         string
+	PagerNext         string
+	// A cursor page's label drifts off its place while matches arrive or
+	// leave above it; these say rows lie past an edge the label hides.
+	PagerMorePrev bool
+	PagerMoreNext bool
 }
 
 type inboxCluster struct {
@@ -131,6 +138,9 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	pageSize := s.pageSize(r)
 	sq := viewQuery(expr, queryStr, sortStr, orderStr, ceiling)
 	sq.RandomSeed, sq.Page, sq.Limit = randomSeed, page, pageSize
+	sq.DeferCount = true
+	sq.After, _ = strconv.ParseInt(q.Get("after"), 10, 64)
+	sq.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
 	expr = sq.Expr
 	// Checked after ceiling.Apply: the cached count ignores the ceiling.
 	if expr == nil {
@@ -142,6 +152,8 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if at, err := strconv.ParseInt(q.Get("at"), 10, 64); err == nil && pageStr == "" && pageSize > 0 {
+		// A cursor would still pick the rows under the page the rank names.
+		sq.After, sq.Before = 0, 0
 		ctx, cancel := context.WithTimeout(r.Context(), rankPageBudget)
 		if rank, err := search.RankInQuery(ctx, s.source(), sq, at); err == nil && rank >= 0 {
 			page = rank/pageSize + 1
@@ -152,14 +164,15 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 
 	htmxGridTarget := isHTMXRequest(r) && r.Header.Get("HX-Target") == "gallery-grid"
 
-	firstStart := time.Now()
-	result, err := search.Execute(context.Background(), s.source(), sq)
+	result, err := search.Execute(r.Context(), s.source(), sq)
 	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
 		logx.Errorf("gallery search: %v", err)
-		http.Error(w, "search error", http.StatusInternalServerError)
+		hxRefuse(w, r, http.StatusInternalServerError, "Search error.")
 		return
 	}
-	firstElapsed := time.Since(firstStart)
 
 	// The detail back link's page is a slot counted from the grid, which a
 	// walk off the listing or a changed result set leaves pointing elsewhere.
@@ -169,24 +182,38 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 			movedQ := r.URL.Query()
 			movedQ.Set("page", strconv.Itoa(held))
 			movedQ.Del("at")
+			movedQ.Del("after")
+			movedQ.Del("before")
 			http.Redirect(w, r, "/?"+movedQ.Encode(), http.StatusSeeOther)
 			return
 		}
 	}
 
 	totalPages := 1
-	if pageSize > 0 {
+	switch {
+	case result.TotalUnknown:
+		totalPages = page
+	case pageSize > 0:
 		totalPages = (result.Total + pageSize - 1) / pageSize
 	}
 
-	if (result.Total > 0 && page > totalPages) || pageNonPositive {
+	// A cursor read that found rows is the page the link promised, whatever
+	// the count now makes of its label.
+	cursorRows := (sq.After != 0 || sq.Before != 0) && len(result.Results) > 0
+	if cursorRows {
+		totalPages = max(totalPages, page)
+	}
+	if (!result.TotalUnknown && result.Total > 0 && page > totalPages) || pageNonPositive {
 		if page > totalPages {
 			page = totalPages
-			sq.Page = page
-			result, err = search.Execute(context.Background(), s.source(), sq)
+			sq.Page, sq.After, sq.Before = page, 0, 0
+			result, err = search.Execute(r.Context(), s.source(), sq)
 			if err != nil {
+				if r.Context().Err() != nil {
+					return
+				}
 				logx.Errorf("gallery search (clamped): %v", err)
-				http.Error(w, "search error", http.StatusInternalServerError)
+				hxRefuse(w, r, http.StatusInternalServerError, "Search error.")
 				return
 			}
 		}
@@ -196,6 +223,8 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		clampedQ := r.URL.Query()
 		clampedQ.Set("page", strconv.Itoa(page))
+		clampedQ.Del("after")
+		clampedQ.Del("before")
 		clampedURL := "/?" + clampedQ.Encode()
 		if isHTMXRequest(r) {
 			w.Header().Set("HX-Push-Url", clampedURL)
@@ -205,22 +234,14 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hiddenByCeiling := 0
+	hiddenByCeiling, hiddenLater := 0, false
 	if ceiling.IsActive() {
-		bareExpr := search.Parse(queryStr)
-		switch {
-		case bareExpr == nil:
-			if cx := s.active(); cx != nil {
-				if n, ok := cx.VisibleCount(); ok && n > result.Total {
-					hiddenByCeiling = n - result.Total
-				}
+		if search.Parse(queryStr) != nil {
+			hiddenLater = true
+		} else if cx := s.active(); cx != nil {
+			if n, ok := cx.VisibleCount(); ok && n > result.Total {
+				hiddenByCeiling = n - result.Total
 			}
-		case firstElapsed < galleryHiddenIndicatorBudget:
-			ctx, cancel := context.WithTimeout(r.Context(), galleryHiddenIndicatorBudget)
-			if n, err := search.HiddenByCeiling(ctx, s.source(), queryStr, ceiling.Level()); err == nil {
-				hiddenByCeiling = n
-			}
-			cancel()
 		}
 	}
 
@@ -233,7 +254,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 
 	var sb sidebarBundle
 	if htmxGridTarget && !sidebarCollapsed(r) {
-		sb = s.sidebarLoad(ids, ceiling)
+		sb = s.sidebarLoad(r, queryStr, ids, ceiling)
 	}
 
 	enabledTaggers, taggersPresent, taggerReason := tagger.GalleryTaggers(s.cfgSnapshot(), s.activeGallery())
@@ -252,7 +273,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		PageSizeChoices:   s.pageSizeChoices(r),
 		Result:            result,
 		SidebarTags:       sb.Tags,
-		FolderTree:        sb.Folders,
+		Folders:           sb.Folders,
 		SourceLabelCounts: sb.SourceLabels,
 		SavedSearches:     sb.Saved,
 		EnabledTaggers:    enabledTaggers,
@@ -270,15 +291,29 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		data.SimilarityPercent = scores
 	}
 	if inboxClustersActive(sortStr, orderStr, expr) {
-		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1, page < totalPages)
+		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1, page < totalPages || result.TotalUnknown)
 	}
 	if inboxFilterActive(expr) {
 		data.InboxUploadActive = true
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
 	}
 	data.HiddenByCeiling = hiddenByCeiling
+	var first, last int64
+	if n := len(result.Results); n > 0 && search.CursorPaging(sq) {
+		first, last = result.Results[0].ID, result.Results[n-1].ID
+		data.PagerPrev, data.PagerNext = pagerCursor(first, last)
+		if page == 1 && cursorRows {
+			data.PagerMorePrev = s.cursorPageEdge(r.Context(), sq, first, 0)
+		}
+		if cursorRows && !result.TotalUnknown && n >= pageSize && page >= totalPages {
+			data.PagerMoreNext = s.cursorPageEdge(r.Context(), sq, 0, last)
+		}
+	}
+	if result.TotalUnknown || hiddenLater {
+		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, cursorRows && len(result.Results) >= pageSize)
+	}
 	// The fragment uses it too, for its collapsed sidebar placeholder.
-	data.SidebarURL = buildSidebarURL(queryStr, sortStr, orderStr, pageStr, q.Get("seed"), ids)
+	data.SidebarURL = buildSidebarURL(queryStr, ids)
 
 	if htmxGridTarget {
 		// The sort select and status bar sit outside the swap target, so
@@ -295,9 +330,101 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "gallery.html", data)
 }
 
+// cursorPageEdge tells whether one match lies before or after a cursor
+// page's edge row, where its label says there is none.
+func (s *Server) cursorPageEdge(ctx context.Context, sq search.Query, before, after int64) bool {
+	q := sq
+	q.Page, q.Limit, q.Before, q.After = 1, 1, before, after
+	q.SkipCount, q.DeferCount, q.Cached, q.PresetTotal = true, false, false, nil
+	res, err := search.Execute(ctx, s.source(), q)
+	return err == nil && len(res.Results) > 0
+}
+
+// Next and Prev read on from the page's last or first row rather than an
+// offset, so new images landing on top don't shift the pages being walked.
+func pagerCursor(first, last int64) (prev, next string) {
+	return "&before=" + strconv.FormatInt(first, 10), "&after=" + strconv.FormatInt(last, 10)
+}
+
+// The count fragment re-renders the pagers, so it takes the listing's
+// resolved sort, order and seed and the page's first and last ids.
+func buildCountURL(q, sort, order string, page int, seed int64, count bool, first, last int64, morePrev, fullCursorPage bool) string {
+	v := setNonEmpty(url.Values{}, "q", q, "sort", sort, "order", order, "page", strconv.Itoa(page))
+	if seed != 0 {
+		v.Set("seed", strconv.FormatInt(seed, 10))
+	}
+	if count {
+		v.Set("count", "1")
+	}
+	if first != 0 {
+		v.Set("first", strconv.FormatInt(first, 10))
+		v.Set("last", strconv.FormatInt(last, 10))
+	}
+	if morePrev {
+		v.Set("more_prev", "1")
+	}
+	if fullCursorPage {
+		v.Set("full_cursor", "1")
+	}
+	return "/internal/search/count?" + v.Encode()
+}
+
+// galleryCount fills in what the gallery render left out: a total its page
+// could not tell, and the images the rating ceiling hides from the search.
+func (s *Server) galleryCount(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	queryStr := q.Get("q")
+	data := galleryData{Query: queryStr, Sort: cmp.Or(q.Get("sort"), "newest"), Page: 1}
+	data.Order = cmp.Or(q.Get("order"), search.DefaultOrder(data.Sort))
+	if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 0 {
+		data.Page = p
+	}
+	if seed, err := strconv.ParseInt(q.Get("seed"), 10, 64); err == nil {
+		data.RandomSeed = seed
+	}
+	first, _ := strconv.ParseInt(q.Get("first"), 10, 64)
+	last, _ := strconv.ParseInt(q.Get("last"), 10, 64)
+	if first != 0 && last != 0 {
+		data.PagerPrev, data.PagerNext = pagerCursor(first, last)
+	}
+	ceiling := resolveCeiling(r, s.active())
+	data.PagerMorePrev = q.Get("more_prev") == "1"
+	if q.Get("count") == "1" {
+		sq := viewQuery(search.Parse(queryStr), queryStr, data.Sort, data.Order, ceiling)
+		sq.RandomSeed = data.RandomSeed
+		total, err := search.Count(r.Context(), s.source(), sq)
+		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			logx.Errorf("gallery count: %v", err)
+			hxRefuse(w, r, http.StatusInternalServerError, "The match count failed.")
+			return
+		}
+		data.Result = &models.SearchResult{Total: total}
+		if pageSize := s.pageSize(r); pageSize > 0 {
+			data.TotalPages = (total + pageSize - 1) / pageSize
+		}
+		if q.Get("full_cursor") == "1" {
+			data.TotalPages = max(data.TotalPages, data.Page)
+			if data.Page >= data.TotalPages {
+				data.PagerMoreNext = s.cursorPageEdge(r.Context(), sq, 0, last)
+			}
+		}
+	}
+	if ceiling.IsActive() && search.Parse(queryStr) != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), galleryHiddenIndicatorBudget)
+		if n, err := search.HiddenByCeiling(ctx, s.source(), queryStr, ceiling.Level()); err == nil {
+			data.HiddenByCeiling = n
+		}
+		cancel()
+	}
+	s.renderTemplate(w, "partials/gallery_count.html", data)
+}
+
 type sidebarBundle struct {
 	Tags         []models.Tag
-	Folders      []gallery.FolderNode
+	Folders      *folderLevel
 	SourceLabels []gallery.SourceLabelCount
 	Saved        []models.SavedSearch
 }
@@ -320,7 +447,7 @@ func (s *Server) pageHoldingImage(ctx context.Context, sq search.Query, id int64
 
 // Only the reads that always hit the DB fan out: a goroutine per cached
 // cx read takes a read-pool slot and costs more than it saves.
-func (s *Server) sidebarLoad(pageImageIDs []int64, ceiling *Ceiling) sidebarBundle {
+func (s *Server) sidebarLoad(r *http.Request, query string, pageImageIDs []int64, ceiling *Ceiling) sidebarBundle {
 	var sb sidebarBundle
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -333,7 +460,7 @@ func (s *Server) sidebarLoad(pageImageIDs []int64, ceiling *Ceiling) sidebarBund
 		}
 	})
 	if cx := s.active(); cx != nil {
-		sb.Folders, _ = cx.FolderTreeUnder(ceiling)
+		sb.Folders = folderSection(r, cx, ceiling, query)
 		sb.SourceLabels, _ = cx.SourceLabelCountsUnder(ceiling)
 	}
 	wg.Wait()
@@ -345,52 +472,13 @@ func (s *Server) gallerySidebar(w http.ResponseWriter, r *http.Request) {
 	queryStr := q.Get("q")
 	ceiling := resolveCeiling(r, s.active())
 
-	// Empty ids is an empty page; only a missing ids param re-runs the search.
-	var ids []int64
-	if q.Has("ids") {
-		ids = parseIDList(q["ids"])
-	} else {
-		sortStr := cmp.Or(q.Get("sort"), "newest")
-		orderStr := cmp.Or(q.Get("order"), search.DefaultOrder(sortStr))
-		page := 1
-		if p, err := strconv.Atoi(q.Get("page")); err == nil && p > 0 {
-			page = p
-		}
-		var randomSeed int64
-		if sortStr == "random" {
-			if seed, err := strconv.ParseInt(q.Get("seed"), 10, 64); err == nil {
-				randomSeed = seed
-			}
-		}
-		expr := search.Parse(queryStr)
-		expr = ceiling.Apply(expr)
-		sq := search.Query{
-			Expr:       expr,
-			Sort:       sortStr,
-			Order:      orderStr,
-			RandomSeed: randomSeed,
-			Page:       page,
-			Limit:      s.pageSize(r),
-			SkipCount:  true,
-		}
-		result, err := search.Execute(context.Background(), s.source(), sq)
-		if err != nil {
-			logx.Errorf("sidebar search: %v", err)
-			http.Error(w, "search error", http.StatusInternalServerError)
-			return
-		}
-		ids = make([]int64, 0, len(result.Results))
-		for _, img := range result.Results {
-			ids = append(ids, img.ID)
-		}
-	}
-
-	sb := s.sidebarLoad(ids, ceiling)
+	ids := parseIDList(q["ids"])
+	sb := s.sidebarLoad(r, queryStr, ids, ceiling)
 
 	s.renderTemplate(w, "partials/sidebar_content.html", map[string]any{
 		"Query":             queryStr,
 		"SidebarTags":       sb.Tags,
-		"FolderTree":        sb.Folders,
+		"Folders":           sb.Folders,
 		"SourceLabelCounts": sb.SourceLabels,
 		"SavedSearches":     sb.Saved,
 		"ActiveTagTerms":    computeActiveTagTerms(queryStr),
@@ -398,13 +486,152 @@ func (s *Server) gallerySidebar(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sidebarBrowse(w http.ResponseWriter, r *http.Request) {
-	sb := s.sidebarLoad(nil, resolveCeiling(r, s.active()))
+	queryStr := r.URL.Query().Get("q")
+	sb := s.sidebarLoad(r, queryStr, nil, resolveCeiling(r, s.active()))
 	s.renderTemplate(w, "partials/sidebar_browse.html", map[string]any{
-		"Query":             r.URL.Query().Get("q"),
-		"FolderTree":        sb.Folders,
+		"Query":             queryStr,
+		"Folders":           sb.Folders,
 		"SourceLabelCounts": sb.SourceLabels,
 		"SavedSearches":     sb.Saved,
 	})
+}
+
+const (
+	folderLevelRows     = 500
+	folderRowsPerRender = 2000
+)
+
+// A level that is not Loaded renders as an empty list that fetches its rows
+// from folderChildren once main.js shows it.
+type folderLevel struct {
+	Path   string
+	Query  string
+	Loaded bool
+	// The root level's first page leads with the "/" row.
+	Root  bool
+	Count int
+	Rows  []folderRow
+	More  int
+	Left  int
+}
+
+type folderRow struct {
+	gallery.FolderNode
+	Sub *folderLevel
+}
+
+// The levels the server renders: those the cookie holds open, and every
+// one on the way to the folder the search names.
+type folderOpen struct {
+	keys    map[string]bool
+	current string
+}
+
+func readFolderOpen(r *http.Request, query string) folderOpen {
+	return folderOpen{keys: folderCookieKeys(r), current: queryFolder(query)}
+}
+
+func (o folderOpen) onPath(path string) bool {
+	return o.current == path || strings.HasPrefix(o.current, path+"/")
+}
+
+// A closed section reads no tree: on a {hash:4} layout it holds tens of
+// thousands of rows.
+func folderSection(r *http.Request, cx *library.Gallery, ceiling *Ceiling, query string) *folderLevel {
+	o := readFolderOpen(r, query)
+	if !o.keys["__tree__"] && o.current == "" {
+		return &folderLevel{Query: query}
+	}
+	tree, err := cx.FolderTreeUnder(ceiling)
+	root := gallery.FindFolder(tree, "")
+	if err != nil || root == nil {
+		return &folderLevel{Query: query}
+	}
+	budget := folderRowsPerRender
+	return o.level(root, 0, query, &budget)
+}
+
+// The folder the search names stays among the first page's rows past the
+// cap, so the later pages leave it out.
+func (o folderOpen) level(node *gallery.FolderNode, offset int, query string, budget *int) *folderLevel {
+	lv := &folderLevel{Path: node.Path, Query: query, Loaded: true}
+	if node.Path == "" && offset == 0 {
+		lv.Root, lv.Count = true, node.Count
+	}
+	kids := node.Children
+	pin := -1
+	if o.current != "" {
+		pin = slices.IndexFunc(kids, func(c gallery.FolderNode) bool { return o.onPath(c.Path) })
+	}
+	end := min(offset+folderLevelRows, len(kids))
+	var shown []int
+	for i := offset; i < end; i++ {
+		if offset == 0 || i != pin {
+			shown = append(shown, i)
+		}
+	}
+	left := len(kids) - max(end, offset)
+	if pin >= end {
+		left--
+		if offset == 0 {
+			shown = append(shown, pin)
+		}
+	}
+	if left > 0 {
+		lv.More, lv.Left = end, left
+	}
+	*budget -= len(shown)
+	lv.Rows = make([]folderRow, len(shown))
+	for j, i := range shown {
+		lv.Rows[j] = o.row(&kids[i], query, budget)
+	}
+	return lv
+}
+
+func (o folderOpen) row(n *gallery.FolderNode, query string, budget *int) folderRow {
+	row := folderRow{FolderNode: *n}
+	switch {
+	case len(n.Children) == 0:
+	case *budget > 0 && (o.keys[n.Path] || (o.current != "" && o.onPath(n.Path))):
+		row.Sub = o.level(n, 0, query, budget)
+	default:
+		row.Sub = &folderLevel{Path: n.Path, Query: query}
+	}
+	return row
+}
+
+// A path no visible image sits under answers no rows: the folder can go
+// away between the render and the click.
+func (s *Server) folderChildren(w http.ResponseWriter, r *http.Request) {
+	cx := s.active()
+	if cx == nil {
+		return
+	}
+	tree, err := cx.FolderTreeUnder(resolveCeiling(r, cx))
+	if err != nil {
+		logx.Errorf("folder children: %v", err)
+		hxRefuse(w, r, http.StatusInternalServerError, "The folder list failed.")
+		return
+	}
+	q := r.URL.Query()
+	node := gallery.FindFolder(tree, q.Get("path"))
+	if node == nil {
+		return
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	query := q.Get("q")
+	budget := folderRowsPerRender
+	s.renderTemplate(w, "folder_rows", readFolderOpen(r, query).level(node, max(offset, 0), query, &budget))
+}
+
+func queryFolder(query string) string {
+	var path string
+	search.WalkAndedLeaves(search.Parse(query), func(e search.Expr) {
+		if v, ok := e.(search.FilterExpr); ok && path == "" && (v.Key == "folder" || v.Key == "folderonly") {
+			path = v.Val
+		}
+	})
+	return path
 }
 
 type PageSizeChoice struct {
@@ -447,8 +674,8 @@ func (s *Server) pageSizeChoices(r *http.Request) []PageSizeChoice {
 	return out
 }
 
-func buildSidebarURL(q, sort, order, page, seed string, ids []int64) string {
-	v := setNonEmpty(url.Values{}, "q", q, "sort", sort, "order", order, "page", page, "seed", seed)
+func buildSidebarURL(q string, ids []int64) string {
+	v := setNonEmpty(url.Values{}, "q", q)
 	var sb strings.Builder
 	for i, id := range ids {
 		if i > 0 {

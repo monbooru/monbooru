@@ -19,26 +19,13 @@
     </ul>
   </div>
   {{end}}
-  {{if .FolderTree}}
-  {{$root := index .FolderTree 0}}
+  {{with .Folders}}
   <div id="folder-tree-section">
     <div class="sidebar-section-header">
       <span class="sidebar-section-title">Folders</span>
       <button id="folder-tree-toggle" class="folder-toggle-btn" data-target="folder-tree-list">▶</button>
     </div>
-    <ul id="folder-tree-list" class="folder-tree" style="display:none">
-      <li class="folder-node-wrap">
-        <div class="folder-node-row">
-          <span class="folder-spacer"></span>
-          <a href="/?q=folder:" class="folder-link{{if eq $.Query "folder:"}} active{{end}}">/</a>
-          <span class="folder-count" title="{{$root.Count}} images">{{abbrevCount $root.Count}}</span>
-          <a href="/?q=folderonly:" class="folder-only-btn{{if eq $.Query "folderonly:"}} active{{end}}" title="Only this folder (no subfolders)">[·]</a>
-        </div>
-      </li>
-      {{range $root.Children}}
-      {{template "folder_node" (dict "Node" . "Query" $.Query)}}
-      {{end}}
-    </ul>
+    {{template "folder_list" (dict "Level" . "ID" "folder-tree-list" "Class" "folder-tree")}}
   </div>
   {{end}}
   {{if .SavedSearches}}
@@ -62,6 +49,38 @@
   {{end}}
 {{end}}
 
+{{define "folder_list"}}
+<ul id="{{.ID}}" class="{{.Class}}" style="display:none"{{if not .Level.Loaded}} hx-get="/internal/folders/children?path={{urlQ .Level.Path}}&q={{urlQ .Level.Query}}" hx-trigger="intersect once"{{end}}>
+  {{if .Level.Loaded}}{{template "folder_rows" .Level}}{{end}}
+</ul>
+{{end}}
+
+{{define "folder_rows"}}
+{{$query := .Query}}
+{{if .Root}}
+<li class="folder-node-wrap">
+  <div class="folder-node-row">
+    <span class="folder-spacer"></span>
+    <a href="/?q=folder:" class="folder-link{{if eq $query "folder:"}} active{{end}}">/</a>
+    <span class="folder-count" title="{{.Count}} images">{{abbrevCount .Count}}</span>
+    <a href="/?q=folderonly:" class="folder-only-btn{{if eq $query "folderonly:"}} active{{end}}" title="Only this folder (no subfolders)">[·]</a>
+  </div>
+</li>
+{{end}}
+{{range .Rows}}
+{{template "folder_node" (dict "Node" . "Query" $query)}}
+{{end}}
+{{if .More}}
+<li class="folder-node-wrap">
+  <div class="folder-node-row">
+    <span class="folder-spacer"></span>
+    <button class="folder-more-btn" hx-get="/internal/folders/children?path={{urlQ .Path}}&offset={{.More}}&q={{urlQ $query}}"
+            hx-target="closest li" hx-swap="outerHTML" title="{{.Left}} more {{plural .Left "folder" "folders"}}">[more]</button>
+  </div>
+</li>
+{{end}}
+{{end}}
+
 {{define "folder_node"}}
 {{$node := .Node}}
 {{$query := .Query}}
@@ -71,7 +90,7 @@
 {{$quotedOnlyActive := printf `folderonly:"%s"` (qval $node.Path)}}
 <li class="folder-node-wrap">
   <div class="folder-node-row">
-    {{if $node.Children}}
+    {{if $node.Sub}}
     <button class="folder-toggle-btn folder-expand-btn" data-path="{{$node.Path}}" data-target="fc-{{$node.Path}}" title="Toggle folder">▶</button>
     {{else}}
     <span class="folder-spacer"></span>
@@ -81,12 +100,8 @@
     <span class="folder-count" title="{{$node.Count}} images">{{abbrevCount $node.Count}}</span>
     <a href="/?q={{urlQ $quotedOnlyActive}}" class="folder-only-btn{{if or (eq $query $onlyActive) (eq $query $quotedOnlyActive)}} active{{end}}" title="Only this folder (no subfolders)">[·]</a>
   </div>
-  {{if $node.Children}}
-  <ul id="fc-{{$node.Path}}" class="folder-children" style="display:none">
-    {{range $node.Children}}
-    {{template "folder_node" (dict "Node" . "Query" $query)}}
-    {{end}}
-  </ul>
+  {{with $node.Sub}}
+  {{template "folder_list" (dict "Level" . "ID" (printf "fc-%s" .Path) "Class" "folder-children")}}
   {{end}}
 </li>
 {{end}}

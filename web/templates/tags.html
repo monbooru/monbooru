@@ -58,6 +58,9 @@
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=tag&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Tags</a>
       <a class="filter-btn{{if eq $type "alias"}} active{{end}}"
          href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=alias&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Aliases</a>
+      <a class="filter-btn{{if eq $type "rejected"}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=rejected&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         title="Names mapped to nothing: every add path drops them">Rejected{{if .RejectedTotal}} <span class="count-badge">{{.RejectedTotal}}</span>{{end}}</a>
     </div>
 
     <div class="filter-group">
@@ -145,6 +148,7 @@
     <span>Tags <span class="count-badge">{{.Total}}</span></span>
     <button type="button" id="btn-create-tag" class="btn-sm">Create tag…</button>
     <button type="button" id="btn-create-alias" class="btn-sm">Create alias…</button>
+    <button type="button" id="btn-reject-tags" class="btn-sm">Reject tags…</button>
   </h2>
 
   <div id="tag-flash" data-action-flash></div>
@@ -165,6 +169,7 @@
     <button type="button" id="btn-batch-imply" class="btn-sm">Imply…</button>
     <button type="button" id="btn-batch-clean" class="btn-sm">Clean names…</button>
     {{if .MonloaderPTRPresent}}<button type="button" id="btn-batch-ptr" class="btn-sm peer-accent"{{if not .MonloaderPTR}} disabled title="{{if .MonloaderPTRSyncing}}the Public Tag Repository index is still syncing{{else}}{{monloaderOffReason .MonloaderConn}}{{end}}"{{end}}>Find aliases and implications</button>{{end}}
+    <button type="button" id="btn-batch-reject" class="btn-sm btn-danger" title="Remove from every image and drop the names on arrival">Reject</button>
     <button type="button" id="btn-batch-delete" class="btn-sm btn-danger">Delete</button>
   </div>
 
@@ -197,12 +202,17 @@
       <tr class="tag-row" id="tag-row-{{.ID}}">
         <td class="tag-select-col"><input type="checkbox" class="tag-select" value="{{.ID}}" data-name="{{.Name}}" data-color="{{catColor .CategoryColor}}" data-category="{{.CategoryName}}"{{with index $.DistinctOf .ID}} data-distinct="{{range $i, $p := .}}{{if $i}} {{end}}{{$p.ID}}{{end}}"{{end}} aria-label="Select {{.Name}}"></td>
         <td class="tag-name-cell{{if and (not .IsAlias) (eq .CategoryName "rating")}} tag-name-builtin{{end}}"
-            title="{{.Name}}{{if .IsAlias}} → {{.CanonicalName}}{{end}}">
+            title="{{.Name}}{{if .IsAlias}} → {{.CanonicalName}}{{else if .Rejected}} → nothing{{end}}">
           {{if .IsAlias}}
           <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
           <span class="merge-arrow">→</span>
           <a href="/tags/{{.CanonicalTagID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CanonicalCategoryColor}}">{{.CanonicalName}}</a>
           <span class="alias-badge">alias</span>
+          {{else if .Rejected}}
+          <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
+          <span class="merge-arrow">→</span>
+          <span class="field-hint">nothing</span>
+          <span class="alias-badge rejected-badge">rejected</span>
           {{else}}
           <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
           {{with index $.DistinctOf .ID}}<span class="alias-badge" title="Marked distinct from {{range $i, $p := .}}{{if $i}}, {{end}}{{$p.Category}}:{{$tag.Name}}{{end}}">distinct</span>{{end}}
@@ -213,7 +223,7 @@
         <td class="tag-implied-cell"
             {{with index $imps .ID}}{{if le (len .) 5}}title="{{range $i, $im := .}}{{if $i}} {{end}}{{$im.ImpliedName}}{{end}}"{{end}}{{end}}>
           <div class="tag-overflow">
-            {{if not .IsAlias}}<a class="tag-implied-edit" href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" title="Edit what this tag implies, here">[edit]</a>{{end}}
+            {{if not (or .IsAlias .Rejected)}}<a class="tag-implied-edit" href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" title="Edit what this tag implies, here">[edit]</a>{{end}}
             {{with index $imps .ID}}
             {{$n := len .}}
             <span class="tag-overflow-names">{{range $i, $im := .}}{{if lt $i 5}}{{if $i}} {{end}}<a href="/?q={{$im.ImpliedCategoryName}}:{{$im.ImpliedName}}" style="color:{{catColor $im.ImpliedCategoryColor}}">{{$im.ImpliedName}}</a>{{end}}{{end}}</span>
@@ -241,7 +251,7 @@
           {{end}}
         </td>
         <td class="tag-usage-cell"
-            {{if .StaleUsage}}title="{{.UsageCount}} {{plural .UsageCount "image" "images"}}, {{.StaleUsage}} stale"{{end}}>{{.UsageCount}}</td>
+            {{if .Rejected}}title="{{.RejectedDrops}} {{plural .RejectedDrops "arrival" "arrivals"}} dropped since the reject"{{else if .StaleUsage}}title="{{.UsageCount}} {{plural .UsageCount "image" "images"}}, {{.StaleUsage}} stale"{{end}}>{{.UsageCount}}</td>
         <td class="tag-usedby-cell"
             {{with index $.UsedBySources .ID}}title="{{range $i, $l := .}}{{if $i}} {{end}}{{$l}}{{end}}"{{end}}>
           {{with index $.UsedBySources .ID}}
@@ -260,6 +270,11 @@
         <td class="tag-date">{{if .LastUsedAt.IsZero}}<span class="origin-none">—</span>{{else}}{{.LastUsedAt.Format "2006-01-02"}}{{end}}</td>
         <td>
           <div class="tag-actions">
+            {{if .Rejected}}
+            <button class="btn-sm btn-unreject-tag" hx-post="/tags/{{.ID}}/unreject" hx-swap="none"
+                    title="Make the name a tag again: arrivals are kept from now on">Un-reject</button>
+            <button class="btn-sm tag-action-spacer" tabindex="-1" aria-hidden="true">Rename</button>
+            {{else}}
             <a class="btn-sm btn-tag-search" href="/?q={{.CategoryName}}:{{.Name}}" title="Search the gallery for this tag">Search</a>
             {{if ne .CategoryName "rating"}}
             <button class="btn-sm btn-rename-trigger"
@@ -268,9 +283,10 @@
             {{else}}
             <button class="btn-sm tag-action-spacer" tabindex="-1" aria-hidden="true">Rename</button>
             {{end}}
+            {{end}}
             <button class="btn-sm btn-danger btn-delete-tag"
-                    title="{{if eq .CategoryName "rating"}}Remove this rating from every image. The rating itself stays.{{else}}Delete this tag from every image{{end}}"
-                    data-id="{{.ID}}" data-name="{{.Name}}" data-category="{{.CategoryName}}">{{if eq .CategoryName "rating"}}Clear{{else}}Delete{{end}}</button>
+                    title="{{if eq .CategoryName "rating"}}Remove this rating from every image. The rating itself stays.{{else if .Rejected}}Forget the name: it is no longer dropped on arrival{{else}}Delete this tag from every image{{end}}"
+                    data-id="{{.ID}}" data-name="{{.Name}}" data-category="{{.CategoryName}}" data-rejected="{{if .Rejected}}1{{end}}" data-alias="{{if .IsAlias}}1{{end}}">{{if eq .CategoryName "rating"}}Clear{{else}}Delete{{end}}</button>
           </div>
         </td>
       </tr>
@@ -402,7 +418,7 @@
 <dialog id="alias-create-dialog">
   <form hx-post="/tags/aliases"
         hx-target="#alias-create-error">
-    <p>An alias is another name for a tag. The target is created if it does not exist.</p>
+    <p>An alias is another name for a tag. The target is created if it does not exist. <span class="status-badge status-ok">this gallery</span><span class="status-badge status-off">on arrival</span></p>
     <div class="field">
       <label>Alias name</label>
       <input type="text" name="name" id="alias-create-name" required autocomplete="off">
@@ -420,9 +436,40 @@
   </form>
 </dialog>
 
+<dialog id="tag-reject-dialog">
+  <form hx-post="/tags/reject"
+        hx-target="#tag-reject-error">
+    <p>Reject names. Each is removed from every image and dropped on arrival, whatever brings it, until you un-reject it. Separate names with spaces; a name may start with its category. <span class="status-badge status-ok">this gallery</span><span class="status-badge status-off">on arrival</span></p>
+    <div class="field" style="position:relative">
+      <label for="tag-reject-name">Tag names</label>
+      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-reject-name" "SuggestID" "tag-reject-suggest" "ValsKey" "name" "Required" true}}
+    </div>
+    <div class="field">
+      <label for="tag-reject-cat">Category for names without one</label>
+      {{template "partials/category_select.html" dict "ID" "tag-reject-cat" "Name" "category_id" "Categories" .Categories}}
+    </div>
+    <div id="tag-reject-error"></div>
+    {{template "dialog_actions" dict "ID" "tag-reject-dialog" "Submit" "Reject" "Class" "btn-danger"}}
+  </form>
+</dialog>
+
+<dialog id="reject-tags-search-dialog">
+  <p class="dlg-title"><span id="reject-tags-scope-line"></span>{{template "webui/dialog_x"}}</p>
+  <p style="color:var(--error);font-size:12px">Each tag is removed from every image and its name is dropped on arrival, whatever brings it, until you un-reject it. Ratings and aliases are skipped: an alias follows its target.</p>
+  <div id="reject-tags-search-flash"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn-danger" onclick="confirmRejectTagsSearch()">Reject</button>
+    <button type="button" autofocus onclick="document.getElementById('reject-tags-search-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+
 <dialog id="delete-tags-search-dialog">
   <p class="dlg-title"><span id="delete-tags-scope-line"></span>{{template "webui/dialog_x"}}</p>
   <p style="color:var(--error);font-size:12px">Tags are removed from every image they touch. This cannot be undone. Built-in ratings are only removed from images.</p>
+  <label style="display:block;font-size:12px">
+    <input type="checkbox" id="delete-tags-reject">
+    Also reject the names, so nothing brings them back
+  </label>
   <div id="delete-tags-search-flash"></div>
   <div class="dialog-actions">
     <button type="button" class="btn-danger" onclick="confirmDeleteTagsSearch()">Delete</button>
@@ -545,8 +592,20 @@ var tagClickRoutes = [
   }],
   ['#btn-batch-delete', function() {
     clearSlots('delete-tags-search-flash');
+    document.getElementById('delete-tags-reject').checked = false;
     document.getElementById('delete-tags-scope-line').textContent = 'Delete ' + tagScopeLabel() + '?';
     document.getElementById('delete-tags-search-dialog').showModal();
+  }],
+  ['#btn-batch-reject', function() {
+    clearSlots('reject-tags-search-flash');
+    document.getElementById('reject-tags-scope-line').textContent = 'Reject ' + tagScopeLabel() + '?';
+    document.getElementById('reject-tags-search-dialog').showModal();
+  }],
+  ['#btn-reject-tags', function() {
+    document.getElementById('tag-reject-name').value = '';
+    clearSlots('tag-reject-error', 'tag-reject-suggest');
+    document.getElementById('tag-reject-dialog').showModal();
+    document.getElementById('tag-reject-name').focus();
   }],
   ['#btn-batch-ptr', function() {
     clearSlots('ptr-lookup-search-flash');
@@ -921,7 +980,13 @@ function confirmPTRLookupSearch() {
 }
 
 function confirmDeleteTagsSearch() {
-  postTagBatch('delete-tags-search', '/tags/delete-search', tagScopeParams(), 'Delete failed.', 'Delete request failed.');
+  var params = tagScopeParams();
+  if (document.getElementById('delete-tags-reject').checked) params.set('reject', '1');
+  postTagBatch('delete-tags-search', '/tags/delete-search', params, 'Delete failed.', 'Delete request failed.');
+}
+
+function confirmRejectTagsSearch() {
+  postTagBatch('reject-tags-search', '/tags/reject-search', tagScopeParams(), 'Reject failed.', 'Reject request failed.');
 }
 
 function updateTagColor(sel) {

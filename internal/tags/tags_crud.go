@@ -77,27 +77,41 @@ func (s *Service) GetOrCreateTag(name string, categoryID int64) (*models.Tag, er
 }
 
 // GetOrCreateTagFrom stamps origin only on insert; an existing row keeps
-// its creator.
+// its creator. A rejected name answers its row beside ErrTagRejected.
 func (s *Service) GetOrCreateTagFrom(name string, categoryID int64, origin string) (*models.Tag, error) {
-	normalized, err := s.validateTagIn(name, categoryID)
+	normalized, err := s.ValidateTagIn(name, categoryID)
 	if err != nil {
 		return nil, err
 	}
 
-	return writeTx(s, func(tx *sql.Tx) (*models.Tag, error) {
+	tag, err := writeTx(s, func(tx *sql.Tx) (*models.Tag, error) {
 		return getOrCreateTagTx(tx, normalized, categoryID, origin)
 	})
+	if errors.Is(err, ErrTagRejected) {
+		// The refusal rolled the transaction back, so the drop is counted here.
+		if tag, _ = lookupTag(s.db.Read, normalized, categoryID); tag != nil {
+			err = errors.Join(err, noteRejectedDrop(s.db.Write, tag.ID, origin))
+		}
+	}
+	return tag, err
 }
 
+// GetOrCreateTagsFrom leaves a rejected name out.
 func (s *Service) GetOrCreateTagsFrom(names []string, categoryID int64, origin string) ([]int64, error) {
 	return writeTx(s, func(tx *sql.Tx) ([]int64, error) {
 		ids := make([]int64, 0, len(names))
 		for _, name := range names {
-			normalized, err := s.validateTagIn(name, categoryID)
+			normalized, err := s.ValidateTagIn(name, categoryID)
 			if err != nil {
 				return nil, err
 			}
 			tag, err := getOrCreateTagTx(tx, normalized, categoryID, origin)
+			if errors.Is(err, ErrTagRejected) {
+				if err := noteRejectedDrop(tx, tag.ID, origin); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -107,7 +121,9 @@ func (s *Service) GetOrCreateTagsFrom(names []string, categoryID int64, origin s
 	})
 }
 
-func (s *Service) validateTagIn(name string, categoryID int64) (string, error) {
+// ValidateTagIn returns the name as it would land in the category, or why
+// the category refuses it.
+func (s *Service) ValidateTagIn(name string, categoryID int64) (string, error) {
 	normalized, err := ValidateTagName(name)
 	if err != nil {
 		return "", err
@@ -131,6 +147,9 @@ func (s *Service) FindTag(name string, categoryID int64) (*models.Tag, error) {
 func getOrCreateTagTx(tx *sql.Tx, name string, categoryID int64, origin string) (*models.Tag, error) {
 	tag, err := lookupTag(tx, name, categoryID)
 	if err != nil || tag != nil {
+		if err == nil && tag.Rejected {
+			return tag, ErrTagRejected
+		}
 		return tag, err
 	}
 	var id int64
@@ -155,9 +174,9 @@ func lookupTag(q db.RowQuerier, name string, categoryID int64) (*models.Tag, err
 	var createdAt string
 	var canonicalID sql.NullInt64
 	err := q.QueryRow(
-		`SELECT id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at FROM tags WHERE name = ? AND category_id = ?`,
+		`SELECT id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at, rejected, rejected_drops FROM tags WHERE name = ? AND category_id = ?`,
 		name, categoryID,
-	).Scan(&tag.ID, &tag.Name, &tag.CategoryID, &tag.UsageCount, &tag.IsAlias, &canonicalID, &createdAt)
+	).Scan(&tag.ID, &tag.Name, &tag.CategoryID, &tag.UsageCount, &tag.IsAlias, &canonicalID, &createdAt, &tag.Rejected, &tag.RejectedDrops)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -172,9 +191,9 @@ func lookupTag(q db.RowQuerier, name string, categoryID int64) (*models.Tag, err
 		var canon models.Tag
 		var canonCreated string
 		if err := q.QueryRow(
-			`SELECT id, name, category_id, usage_count, is_alias, created_at FROM tags WHERE id = ?`,
+			`SELECT id, name, category_id, usage_count, is_alias, created_at, rejected, rejected_drops FROM tags WHERE id = ?`,
 			canonicalID.Int64,
-		).Scan(&canon.ID, &canon.Name, &canon.CategoryID, &canon.UsageCount, &canon.IsAlias, &canonCreated); err != nil {
+		).Scan(&canon.ID, &canon.Name, &canon.CategoryID, &canon.UsageCount, &canon.IsAlias, &canonCreated, &canon.Rejected, &canon.RejectedDrops); err != nil {
 			return nil, fmt.Errorf("resolving canonical %d for alias %q: %w", canonicalID.Int64, tag.Name, err)
 		}
 		canon.CreatedAt, _ = time.Parse(time.RFC3339, canonCreated)
@@ -216,7 +235,9 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 	case "alias":
 		where += " AND t.is_alias = 1"
 	case "tag":
-		where += " AND t.is_alias = 0"
+		where += " AND t.is_alias = 0 AND t.rejected = 0"
+	case "rejected":
+		where += " AND t.rejected = 1"
 	}
 	if filter.UsedBy != "" {
 		// EXISTS stops at the first ledger row; the IN-subquery form
@@ -247,11 +268,14 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 	}
 	switch {
 	case filter.ZeroOnly:
-		// Alias rows always sit at usage 0, so both cases decide them by
-		// is_alias.
+		// Alias and rejected rows always sit at usage 0, so both cases
+		// decide them by their flags.
 		where += " AND t.usage_count = 0 AND t.is_alias = 0"
+		if filter.Type != "rejected" {
+			where += " AND t.rejected = 0"
+		}
 	case !filter.ShowZero:
-		where += " AND (t.usage_count > 0 OR t.is_alias = 1)"
+		where += " AND (t.usage_count > 0 OR t.is_alias = 1 OR t.rejected = 1)"
 	}
 	return where, args
 }
@@ -312,7 +336,7 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 	query := fmt.Sprintf(
 		`SELECT t.id, t.name, t.category_id, tc.name, tc.color,
 		        t.usage_count, t.is_alias, t.canonical_tag_id, t.created_at,
-		        t.origin, t.last_used_at,
+		        t.origin, t.last_used_at, t.rejected, t.rejected_drops,
 		        (SELECT COUNT(*) FROM image_tags it WHERE it.tag_id = t.id AND it.stale = 1),
 		        %s,
 		        c.name, cc.name, cc.color
@@ -333,7 +357,7 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 		if err := rows.Scan(
 			&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor,
 			&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt,
-			&t.Origin, &lastUsed, &t.StaleUsage, &foldedInto,
+			&t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops, &t.StaleUsage, &foldedInto,
 			&canonName, &canonCatName, &canonCatColor,
 		); err != nil {
 			return t, err
@@ -379,7 +403,9 @@ func (s *Service) OriginCounts(typeFilter string) ([]OriginCount, error) {
 	case "alias":
 		where = " AND is_alias = 1"
 	case "tag":
-		where = " AND is_alias = 0"
+		where = " AND is_alias = 0 AND rejected = 0"
+	case "rejected":
+		where = " AND rejected = 1"
 	}
 	return db.QueryAll(s.db.Read, db.ScanRow(func(oc *OriginCount) []any {
 		return []any{&oc.Label, &oc.Count}
@@ -433,7 +459,7 @@ func (s *Service) UnusedTags() (plain, kept []int64, err error) {
 		        OR EXISTS (SELECT 1 FROM tag_implications i WHERE i.implied_tag_id = t.id)
 		        OR EXISTS (SELECT 1 FROM tag_notes n WHERE n.tag_id = t.id AND (n.body != '' OR n.links != ''))
 		   FROM tags t
-		  WHERE t.is_alias = 0 AND t.category_id != ?
+		  WHERE t.is_alias = 0 AND t.rejected = 0 AND t.category_id != ?
 		    AND NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = t.id)
 		  ORDER BY t.id`, s.ratingCatID)
 	if err != nil {
@@ -505,7 +531,7 @@ func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, e
 }
 
 const tagSelect = `SELECT t.id, t.name, t.category_id, tc.name, tc.color, t.usage_count,
-	        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at
+	        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at, t.rejected, t.rejected_drops
 	 FROM tags t
 	 JOIN tag_categories tc ON tc.id = t.category_id`
 
@@ -516,7 +542,7 @@ func scanTag(row interface{ Scan(...any) error }) (*models.Tag, error) {
 	var lastUsed sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor,
-		&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt, &t.Origin, &lastUsed,
+		&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt, &t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops,
 	); err != nil {
 		return nil, err
 	}

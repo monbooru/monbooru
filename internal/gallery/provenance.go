@@ -16,6 +16,8 @@ type MergeSummary struct {
 	TagsRetired  int  `json:"tags_retired"`
 	RatingFilled bool `json:"rating_filled"`
 	SourceAdded  bool `json:"source_added"`
+	// Names the gallery rejects, dropped without a warning.
+	RejectedTags []string `json:"rejected_tags,omitempty"`
 }
 
 func writeSourceProvenance(database *db.DB, imageID int64, source, postID, url, md5, parentURL string, post PostFile) error {
@@ -78,10 +80,16 @@ func ApplyCreateProvenance(database *db.DB, imageID int64, source, postID, url, 
 	return nil
 }
 
+// Withheld is what a push chose not to send, by category and by tag.
+type Withheld struct {
+	Categories []string
+	Tags       []string
+}
+
 // MergeSource returns unresolvable tags as warnings. A booru origin takes
 // the primary over from the url-less ptr row, so a lookup that hit both
 // backends leads with the booru post.
-func MergeSource(database *db.DB, tagSvc *tags.Service, imageID int64, source, postID, url, md5, parentURL string, post PostFile, rawTags []string) (MergeSummary, []string, error) {
+func MergeSource(database *db.DB, tagSvc *tags.Service, imageID int64, source, postID, url, md5, parentURL string, post PostFile, rawTags []string, withheld Withheld) (MergeSummary, []string, error) {
 	var sum MergeSummary
 	if source != "" || url != "" {
 		if err := writeSourceProvenance(database, imageID, source, postID, url, md5, parentURL, post); err != nil {
@@ -100,8 +108,9 @@ func MergeSource(database *db.DB, tagSvc *tags.Service, imageID int64, source, p
 	}
 	var warnings []string
 	if source != "" && len(rawTags) > 0 {
-		tagIDs, warns, err := ResolveTagNames(database, tagSvc, rawTags, source)
+		tagIDs, warns, rejected, err := ResolveTagNames(database, tagSvc, rawTags, source)
 		warnings = warns
+		sum.RejectedTags = rejected
 		if err != nil {
 			return sum, warnings, err
 		}
@@ -114,7 +123,12 @@ func MergeSource(database *db.DB, tagSvc *tags.Service, imageID int64, source, p
 		).Scan(&origins); err != nil {
 			return sum, warnings, err
 		}
-		r, err := tagSvc.SyncSourceTags(imageID, tagIDs, source, origins <= 1)
+		withheldIDs, err := findTagIDs(database, tagSvc, withheld.Tags)
+		if err != nil {
+			return sum, warnings, err
+		}
+		r, err := tagSvc.SyncSourceTagsWithheld(imageID, tagIDs, source, origins <= 1,
+			tags.Withheld{Categories: withheld.Categories, TagIDs: withheldIDs})
 		if err != nil {
 			return sum, warnings, err
 		}
@@ -123,37 +137,75 @@ func MergeSource(database *db.DB, tagSvc *tags.Service, imageID int64, source, p
 	return sum, warnings, nil
 }
 
-func ApplyPTRTags(database *db.DB, tagSvc *tags.Service, imageID int64, tagNames []string) error {
-	_, _, err := MergeSource(database, tagSvc, imageID, contract.SourcePTR, "", "", "", "", PostFile{}, tagNames)
+func ApplyPTRTags(database *db.DB, tagSvc *tags.Service, imageID int64, tagNames []string, withheld Withheld) error {
+	_, _, err := MergeSource(database, tagSvc, imageID, contract.SourcePTR, "", "", "", "", PostFile{}, tagNames, withheld)
 	return err
 }
 
-// ResolveTagNames warns about a name the tag rules refuse and skips it;
-// any other error fails the whole call.
-func ResolveTagNames(database *db.DB, tagSvc *tags.Service, rawTags []string, origin string) ([]int64, []string, error) {
-	var warnings []string
-	tagIDs := make([]int64, 0, len(rawTags))
+// Never creates a tag: a name no tag has holds nothing to keep.
+func findTagIDs(database *db.DB, tagSvc *tags.Service, names []string) ([]int64, error) {
+	var ids []int64
+	for _, name := range names {
+		catID, bareName, err := ResolveCategoryTag(database, name)
+		if errors.Is(err, tags.ErrEmptyFormName) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		tag, err := tagSvc.FindTag(bareName, catID)
+		if errors.Is(err, tags.ErrTagNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, tag.ID)
+	}
+	return ids, nil
+}
+
+// ResolveTagNames warns about a name the tag rules refuse and skips it,
+// lists a rejected name and skips it; any other error fails the whole
+// call. A name sent twice is one arrival, so a rejected one counts once.
+func ResolveTagNames(database *db.DB, tagSvc *tags.Service, rawTags []string, origin string) (tagIDs []int64, warnings, rejected []string, err error) {
+	tagIDs = make([]int64, 0, len(rawTags))
+	type arrival struct {
+		cat  int64
+		name string
+	}
+	seen := map[arrival]bool{}
 	for _, tagName := range rawTags {
 		var tag *models.Tag
-		catID, bareName, err := resolveCategoryTag(database, tagName)
+		catID, bareName, err := ResolveCategoryTag(database, tagName)
 		if err == nil {
+			key := arrival{catID, tags.NormalizeTagName(bareName)}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			tag, err = tagSvc.GetOrCreateTagFrom(bareName, catID, origin)
+		}
+		if errors.Is(err, tags.ErrTagRejected) {
+			rejected = append(rejected, tagName)
+			continue
 		}
 		if errors.Is(err, tags.ErrInvalidTagName) || errors.Is(err, tags.ErrNonCanonicalRating) || errors.Is(err, tags.ErrEmptyFormName) {
 			warnings = append(warnings, "tag "+tagName+": "+err.Error())
 			continue
 		}
 		if err != nil {
-			return nil, warnings, err
+			return nil, warnings, rejected, err
 		}
 		tagIDs = append(tagIDs, tag.ID)
 	}
-	return tagIDs, warnings, nil
+	return tagIDs, warnings, rejected, nil
 }
 
+// ResolveCategoryTag splits a pushed name into its category and bare name.
 // An unknown prefix keeps the whole name in general, so names like
 // "nier:automata" or ":3" round-trip.
-func resolveCategoryTag(database *db.DB, input string) (int64, string, error) {
+func ResolveCategoryTag(database *db.DB, input string) (int64, string, error) {
 	f, err := tags.SplitForm(database, input)
 	if err != nil {
 		return 0, "", err

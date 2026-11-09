@@ -30,7 +30,8 @@
     <div class="ptr-contrib-actions">
       {{if .Pullable}}
       <button type="button" class="btn-ptr-pull peer-accent"
-              onclick="pullTagPTR('Pull aliases and implications', 'Pull the PTR aliases and implications for this tag{{if .KnownAs}} (known there as {{.KnownAs}}){{end}}?')">Pull aliases and implications</button>
+              {{if .PTRReady}}onclick="pullTagPTR('Pull aliases and implications', 'Pull the PTR aliases and implications for this tag{{if .KnownAs}} (known there as {{.KnownAs}}){{end}}?')"
+              {{else}}disabled title="the Public Tag Repository is still syncing"{{end}}>Pull aliases and implications</button>
       {{end}}
       {{template "ptr_contrib_button" (dict "DialogURL" (printf "/tags/%d/ptr-contrib-dialog" .TagID) "CanContribute" .CanContribute "NewCount" .NewCount "PetitionCount" .PetitionCount "ContribHint" .ContribHint)}}
     </div>

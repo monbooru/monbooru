@@ -72,6 +72,8 @@
 
 {{define "footer_version"}}<span id="footer-version"{{if .OOB}} hx-swap-oob="true"{{end}} title="page loaded in {{pageLoadMs .D.RequestStart}} ms"><a href="{{.D.RepoURL}}" target="_blank" rel="noopener">monbooru{{if .D.Build}} ({{.D.Build}}){{end}}</a> {{.D.Version}}</span>{{end}}
 
+{{define "footer_hidden"}}<span id="footer-hidden" class="footer-hidden"{{if .OOB}} hx-swap-oob="true"{{end}}>{{with .N}}<span class="footer-sep-strong">::</span><span class="footer-hidden-n">{{.}} hidden<span class="footer-wide"> {{plural . "image" "images"}} in the current search</span></span>{{end}}</span>{{end}}
+
 {{define "footer_counts"}}<span id="footer-count-images" hx-swap-oob="true">{{.VisibleCount}} img</span>
 <span id="footer-count-tags" hx-swap-oob="true">{{.TagCount}} tags</span>
 <span id="footer-count-collections" hx-swap-oob="true">{{.CollectionsCount}} collections</span>{{end}}
@@ -99,7 +101,7 @@
       <span class="footer-sep-strong">::</span>
       <span class="footer-rating-label footer-wide">show up to:</span>
       {{$active := .ActiveRating}}{{range $i, $lv := .RatingLevels}}{{if $i}}<span class="footer-sep">·</span>{{end}}{{$title := printf "Hide images rated above %s (this browser only)" $lv.Label}}{{if eq $lv.Value "explicit"}}{{$title = "Show every rating (this browser only)"}}{{end}}{{if eq $lv.Value $active}}<span class="footer-rating-active" title="{{$title}}">[{{$lv.Label}}]</span>{{else}}<form hx-post="/internal/rating-ceiling?level={{$lv.Value}}" hx-swap="none" hx-on::after-request="if(event.detail.successful){clearSelection();window.location.reload()}" style="display:inline"><button type="submit" class="footer-rating-link" title="{{$title}}">{{$lv.Label}}</button></form>{{end}}{{end}}
-      <span id="footer-hidden" class="footer-hidden">{{with .HiddenByCeiling}}<span class="footer-sep-strong">::</span><span class="footer-hidden-n">{{.}} hidden<span class="footer-wide"> {{plural . "image" "images"}} in the current search</span></span>{{end}}</span>
+      {{template "footer_hidden" dict "N" .HiddenByCeiling "OOB" false}}
     </div>
     <div id="footer-right">
       {{template "webui/peer_light" .MonloaderLight}}<span class="footer-peer-sep"> · </span><span class="footer-wide">{{template "footer_version" dict "D" .}} · <a href="#" id="footer-shortcuts" onclick="openShortcutSheet();return false">shortcuts</a> · </span><a href="{{.DocURL}}" target="_blank" rel="noopener">help</a><span class="footer-wide"> · <a href="/api/v1/docs" target="_blank" rel="noopener">API</a></span>

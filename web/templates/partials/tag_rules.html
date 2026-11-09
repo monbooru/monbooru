@@ -1,0 +1,22 @@
+{{define "partials/tag_rules.html"}}
+<section class="tag-detail-section" id="tag-path-section">
+  <h3>Where this tag comes from
+    {{if eq .Monloader "live"}}<span class="status-badge status-ok peer-badge">monloader live</span>
+    {{else if eq .Monloader "unreachable"}}<span class="status-badge status-warn">monloader unreachable</span>
+    {{else if eq .Monloader "old"}}<span class="status-badge status-off">monloader too old</span>
+    {{else}}<span class="status-badge status-off">monloader not paired</span>{{end}}
+    {{if .Taggers}}<span class="status-badge status-ok tagger-badge">{{.Taggers}} {{plural .Taggers "tagger" "taggers"}}</span>{{end}}
+    <span class="field-hint tag-path-hint">click a box to change that step</span></h3>
+  <div class="tag-path">
+    {{.SVG}}
+    <div class="tag-path-list">
+      {{range $r := .Rows}}{{if $r.Band}}<h4>{{$r.Band}}<span class="tl-dim">{{$r.Count}}</span></h4>{{else}}
+      <div class="tag-path-row"><span>{{$r.Name}}</span><span>{{$r.Mid}}</span><span>{{$r.End}}</span></div>
+      {{with $r.Note}}<div class="tag-path-row-note tl-{{$r.NoteClass}}">{{.}}</div>{{end}}{{end}}{{end}}
+      <div class="tag-path-gallery">
+        {{range .Gallery}}<p>{{.}}</p>{{end}}
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}

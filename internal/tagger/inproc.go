@@ -92,12 +92,12 @@ func init() {
 }
 
 // Caller must hold b.mu. The worker count joins the check since it also
-// sets the intra-op threads, which only a reload changes.
+// sets the intra-op threads, which only a reload changes; it is taken over
+// the warm set, as ensure built it, so a subset of it reuses the sessions.
 func (b *inprocBackend) satisfies(modelPath string, taggers []TaggerStatus, provider string, sessionParallel int) bool {
 	if !b.initialized || b.provider != provider {
 		return false
 	}
-	maxInput := 0
 	for _, t := range taggers {
 		s, ok := b.sessions[t.Name]
 		if !ok {
@@ -118,6 +118,9 @@ func (b *inprocBackend) satisfies(modelPath string, taggers []TaggerStatus, prov
 		if profile.fingerprint() != s.profileFP {
 			return false
 		}
+	}
+	maxInput := 0
+	for _, s := range b.sessions {
 		maxInput = max(maxInput, s.inputSize)
 	}
 	return sessionWorkers(provider, max(1, sessionParallel), maxInput) == b.workers
@@ -267,9 +270,13 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 	b.epCleanup = cleanup
 	b.provider = provider
 
+	newSession := ort.NewDynamicAdvancedSession
+	if provider == "directml" {
+		newSession = newDirectMLSession
+	}
 	b.sessions = make(map[string]*loadedSession, len(pending))
 	for _, p := range pending {
-		session, err := ort.NewDynamicAdvancedSession(p.onnxPath,
+		session, err := newSession(p.onnxPath,
 			[]string{p.input}, []string{p.output}, b.sessionOpts)
 		if err != nil {
 			return fmt.Errorf("create ort session for %q: %w", p.name, err)

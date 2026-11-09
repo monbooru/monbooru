@@ -128,7 +128,7 @@ func TransferOneImage(srcCx, dstCx *library.Gallery, id int64, removeAfter bool)
 			// collections don't travel.
 			dstID = landed.Image.ID
 		}
-		if err := applyTransferTags(dstCx.DB, dstCx.TagSvc, dstID, groups, generalID); err != nil {
+		if _, err := applyTransferTags(dstCx.DB, dstCx.TagSvc, dstID, groups, generalID); err != nil {
 			return err
 		}
 		return transferProvenance(srcCx.Handle, dstCx.Handle, id, dstID, note, originalSource, isFav)

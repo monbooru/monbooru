@@ -10,8 +10,8 @@
     <tr data-source="{{.Source}}" data-category="{{.CatName}}" data-name="{{.TagName}}" data-rule="{{.Rule}}"{{if .Muted}} data-muted="1"{{end}}>
       <td class="tc-source">{{.Source}}</td>
       <td class="tc-emits">
-        {{- if .Muted}}<span class="status-dim">muted</span>
-        {{- else}}<span style="color:{{catColor .Color}}">{{.CatName}}:{{.TagName}}</span>{{if .CategoryOff}} <span class="status-dim">- category off</span>{{end}}{{end -}}
+        {{- if .Muted}}<span class="status-dim">dropped</span>
+        {{- else}}<span style="color:{{catColor .Color}}">{{.CatName}}:{{.TagName}}</span>{{if .CategoryOff}} <span class="status-dim">dropped (category off)</span>{{end}}{{end -}}
       </td>
       <td class="tc-rule">
         {{- if eq .Rule "custom"}}<span class="status-badge status-custom">custom</span>{{else}}<span class="status-badge">default</span>{{end -}}

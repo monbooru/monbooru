@@ -60,21 +60,7 @@ modules:
         CGO_ENABLED=1 go build -tags tagger \
           -ldflags="-s -w $LDFLAGS -X '$MOD.Package=flatpak'" \
           -o monbooru ./cmd/monbooru
-        # The AppStream release entry is written from VERSION.md and the newest
-        # changelog heading, so a release has one version to bump, not two.
-        HEADING=$(awk '/^## /{print $2; exit}' CHANGELOG.md)
-        RELDATE=$(awk '/^## /{print $4; exit}' CHANGELOG.md)
-        [ "$HEADING" = "[$VERSION]" ] || {
-          echo "CHANGELOG.md's newest entry is $HEADING, VERSION.md says $VERSION" >&2
-          exit 1
-        }
-        RELEASE="<release version=\"${VERSION#v}\" date=\"$RELDATE\"/>"
-        sed "s|<!--RELEASE-->|$RELEASE|" \
-          packaging/flatpak/io.github.monbooru.Monbooru.metainfo.xml > metainfo.xml
-        grep -qF "$RELEASE" metainfo.xml || {
-          echo "the metainfo has no <!--RELEASE--> marker to fill" >&2
-          exit 1
-        }
+        sh packaging/metainfo.sh io.github.monbooru.Monbooru.desktop > metainfo.xml
       - install -Dm755 monbooru /app/bin/monbooru
       - install -Dm755 packaging/flatpak/monbooru-run /app/bin/monbooru-run
       - install -Dm644 packaging/flatpak/io.github.monbooru.Monbooru.desktop /app/share/applications/io.github.monbooru.Monbooru.desktop
@@ -89,10 +75,7 @@ modules:
           - .git
           - monbooru
           - perf
-          - tests
-          - project
           - dist
           - stage
           - tools
           - test-results
-          - .playwright-mcp

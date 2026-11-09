@@ -2,7 +2,7 @@
 <div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML">
   {{if .Pending}}
   <div class="pairing-pending">
-  <p class="pairing-pending-msg">An app is requesting to pair. Approve or deny below. A <strong>re-pair</strong> replaces the credentials the app already holds here.</p>
+  <p class="pairing-pending-msg">An app wants to pair. A <strong>re-pair</strong> replaces the credentials the app already holds here.</p>
   <div class="table-scroll">
   <table class="data-table stack-table">
     <thead><tr><th>App</th><th>Source</th><th>Scopes</th><th>Buttons</th><th>Expires</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>

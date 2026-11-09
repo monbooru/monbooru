@@ -180,6 +180,7 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/tags", h.auth(h.createTag))
 	mux.HandleFunc("POST /api/v1/tags/aliases", h.auth(h.createAlias))
 	mux.HandleFunc("POST /api/v1/tags/merge", h.auth(h.mergeTags))
+	mux.HandleFunc("POST /api/v1/tags/resolve", h.auth(h.resolveTags))
 	mux.HandleFunc("GET /api/v1/tags/{id}", h.auth(h.getTag))
 	mux.HandleFunc("PATCH /api/v1/tags/{id}", h.auth(h.patchTag))
 	mux.HandleFunc("DELETE /api/v1/tags/{id}", h.auth(h.deleteTag))
@@ -351,6 +352,13 @@ func badRequest(w http.ResponseWriter, err error) bool {
 func withWarnings(m map[string]any, warnings []string) map[string]any {
 	if len(warnings) > 0 {
 		m["tag_warnings"] = warnings
+	}
+	return m
+}
+
+func withRejected(m map[string]any, rejected []string) map[string]any {
+	if len(rejected) > 0 {
+		m["rejected_tags"] = rejected
 	}
 	return m
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/search"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 // The click-for-more is bounded too: a {md5} template hashes each file
@@ -67,7 +69,12 @@ func (s *Server) namePreview(w http.ResponseWriter, r *http.Request) {
 	if n, _ := strconv.Atoi(q.Get("rows")); n > want {
 		want = min(n, namePreviewRowsMax)
 	}
-	ids := s.namePreviewIDs(q["ids"], want)
+	var ids []int64
+	if q.Get("kind") == "search" {
+		ids = s.searchPreviewIDs(r, want)
+	} else {
+		ids = s.namePreviewIDs(q["ids"], want)
+	}
 	if len(ids) == 0 {
 		return
 	}
@@ -251,6 +258,19 @@ func (s *Server) receivedNaming(galleryName string) (writeDir string, n gallery.
 	folder := s.cfg.Gallery.DefaultUploadFolder
 	s.cfgMu.RUnlock()
 	return gallery.ReceivedNaming(galleryName, "", strings.TrimSpace(folder), "")
+}
+
+// A search scope is read from its first match in view order, as the run
+// numbers it, rather than from whatever page the grid shows.
+func (s *Server) searchPreviewIDs(r *http.Request, want int) []int64 {
+	q := r.URL.Query()
+	seed, _ := strconv.ParseInt(q.Get("seed"), 10, 64)
+	sc := search.NewScope(search.Parse(q.Get("q")), readRatingCookie(r)).InViewOrder(q.Get("sort"), q.Get("order"), seed)
+	ids, err := sc.FirstIDs(s.source(), want)
+	if err != nil {
+		logx.Warnf("name preview search: %v", err)
+	}
+	return ids
 }
 
 func (s *Server) namePreviewIDs(raw []string, want int) []int64 {

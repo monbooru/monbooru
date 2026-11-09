@@ -15,6 +15,7 @@ type tagResponse struct {
 	Color      string `json:"color"`
 	UsageCount int    `json:"usage_count"`
 	IsAlias    bool   `json:"is_alias"`
+	Rejected   bool   `json:"rejected"`
 	Origin     string `json:"origin"`
 	LastUsedAt string `json:"last_used_at,omitempty"`
 }
@@ -83,7 +84,7 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 		ShowZero:  q.Get("show_zero") != "0",
 	}
 
-	if filter.Type != "" && filter.Type != "tag" && filter.Type != "alias" {
+	if filter.Type != "" && filter.Type != "tag" && filter.Type != "alias" && filter.Type != "rejected" {
 		writePage(w, offset/limit+1, limit, 0, []tagResponse{})
 		return
 	}

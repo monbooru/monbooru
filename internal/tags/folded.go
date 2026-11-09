@@ -36,7 +36,7 @@ func (s *Service) ScanFoldedDuplicates() (int, error) {
 	}
 	all, err := db.QueryAll(s.db.Read, db.ScanRow(func(tr *tagRow) []any {
 		return []any{&tr.id, &tr.name, &tr.cat}
-	}), `SELECT id, name, category_id FROM tags WHERE is_alias = 0`)
+	}), `SELECT id, name, category_id FROM tags WHERE is_alias = 0 AND rejected = 0`)
 	if err != nil {
 		return 0, err
 	}
@@ -96,8 +96,8 @@ func (s *Service) ScanFoldedDuplicates() (int, error) {
 // CROSS JOIN keeps the few pairs as the driver: planner statistics taken
 // while the catalog was small pair every tag with its whole category.
 const liveFoldedPairs = `folded_tag_pairs fp
-	CROSS JOIN tags o ON o.id = fp.old_id AND o.is_alias = 0
-	CROSS JOIN tags n ON n.id = fp.new_id AND n.is_alias = 0 AND n.category_id = o.category_id`
+	CROSS JOIN tags o ON o.id = fp.old_id AND o.is_alias = 0 AND o.rejected = 0
+	CROSS JOIN tags n ON n.id = fp.new_id AND n.is_alias = 0 AND n.rejected = 0 AND n.category_id = o.category_id`
 
 func (s *Service) FoldedDuplicatesCount() (int, error) {
 	var n int

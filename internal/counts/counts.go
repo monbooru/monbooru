@@ -78,7 +78,7 @@ func (c *Tallies) InboxCount() (int, bool) {
 }
 
 func (c *Tallies) TagCount() (int, bool) {
-	return c.cachedCount(&c.tagCount, &c.gen, `SELECT COUNT(*) FROM tags WHERE is_alias = 0`)
+	return c.cachedCount(&c.tagCount, &c.gen, `SELECT COUNT(*) FROM tags WHERE is_alias = 0 AND rejected = 0`)
 }
 
 func (c *Tallies) CollectionsCount() (int, bool) {

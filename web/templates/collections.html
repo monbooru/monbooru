@@ -382,16 +382,20 @@ function confirmGenerateCBZ(btn) {
 }
 
 // Delegated: htmx swaps #collections-page on filters and the live search.
-document.addEventListener('click', function(e) {
-  var el = e.target.closest('.btn-rename-collection');
-  if (el) { openCollectionRename(el); return; }
-  el = e.target.closest('.btn-reorder-collection');
-  if (el) { openCollectionOrder(el); return; }
-  el = e.target.closest('.btn-generate-cbz');
-  if (el) { confirmGenerateCBZ(el); return; }
-  el = e.target.closest('.btn-dissolve-collection');
-  if (el) { confirmDissolveCollection(el); }
-});
+// A Back re-runs this script; stacked listeners would open a dialog twice.
+if (!window.collectionsPageWired) {
+  window.collectionsPageWired = true;
+  document.addEventListener('click', function(e) {
+    var el = e.target.closest('.btn-rename-collection');
+    if (el) { openCollectionRename(el); return; }
+    el = e.target.closest('.btn-reorder-collection');
+    if (el) { openCollectionOrder(el); return; }
+    el = e.target.closest('.btn-generate-cbz');
+    if (el) { confirmGenerateCBZ(el); return; }
+    el = e.target.closest('.btn-dissolve-collection');
+    if (el) { confirmDissolveCollection(el); }
+  });
+}
 </script>
 
 {{template "layout_end" .}}

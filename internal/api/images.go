@@ -145,7 +145,7 @@ func (h *Handler) enrichImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sum, tagWarnings, err := h.mergeSource(g, id, prov.source, prov.postID, prov.url, sourceMD5, prov.parentURL,
-		prov.postFile, body.Tags, "api")
+		prov.postFile, body.Tags, prov.withheld, "api")
 	if err != nil {
 		h.refuse(w, g, id, "fetch failed while applying tags", http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -340,7 +340,7 @@ func (h *Handler) replaceImageFile(w http.ResponseWriter, r *http.Request) {
 	upstreamMD5, rescued := newMD5, false
 
 	applyMeta := func() (gallery.MergeSummary, []string, bool) {
-		sum, tagWarnings, err := h.mergeSource(g, id, prov.source, prov.postID, prov.url, claimedMD5, prov.parentURL, prov.postFile, tags, "api")
+		sum, tagWarnings, err := h.mergeSource(g, id, prov.source, prov.postID, prov.url, claimedMD5, prov.parentURL, prov.postFile, tags, prov.withheld, "api")
 		if err != nil {
 			h.refuse(w, g, id, "replace failed while applying tags", http.StatusInternalServerError, "internal_error", err.Error())
 			return sum, nil, false
@@ -801,6 +801,7 @@ type createInput struct {
 	provenance
 	imgPath         string
 	initialTags     []string
+	clientTags      []string
 	folder          string
 	autotag         bool
 	taggerName      string
@@ -842,6 +843,12 @@ func (h *Handler) parseCreateMultipart(w http.ResponseWriter, r *http.Request, g
 	if tagsJSON := r.FormValue(contract.FieldTags); tagsJSON != "" {
 		if err := json.Unmarshal([]byte(tagsJSON), &in.initialTags); err != nil {
 			contract.WriteError(w, http.StatusBadRequest, "invalid_request", "tags must be a JSON array of names")
+			return in, false
+		}
+	}
+	if tagsJSON := r.FormValue(contract.FieldClientTags); tagsJSON != "" {
+		if err := json.Unmarshal([]byte(tagsJSON), &in.clientTags); err != nil {
+			contract.WriteError(w, http.StatusBadRequest, "invalid_request", "client_tags must be a JSON array of names")
 			return in, false
 		}
 	}
@@ -894,6 +901,7 @@ func (h *Handler) parseCreateJSON(w http.ResponseWriter, r *http.Request, g *lib
 		provenanceJSON
 		Path            string   `json:"path"`
 		Tags            []string `json:"tags"`
+		ClientTags      []string `json:"client_tags"`
 		Folder          string   `json:"folder"`
 		Autotag         bool     `json:"autotag"`
 		TaggerName      string   `json:"tagger_name"`
@@ -911,6 +919,7 @@ func (h *Handler) parseCreateJSON(w http.ResponseWriter, r *http.Request, g *lib
 	}
 	imgPath := body.Path
 	in.initialTags = body.Tags
+	in.clientTags = body.ClientTags
 	in.folder = strings.TrimSpace(body.Folder)
 	in.autotag = body.Autotag
 	in.taggerName = strings.TrimSpace(body.TaggerName)
@@ -1041,12 +1050,21 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		// reference is the operator's own second copy and stays an alias,
 		// unless that path was already the image's.
 		aliasAdded := !landed.Dropped && img.CanonicalPath != landed.Path && knownID != img.ID
-		sum, tagWarnings, mergeErr := h.mergeSource(g, img.ID, in.source, in.postID, in.url, in.md5, in.parentURL, in.postFile, in.initialTags, in.via)
+		sum, tagWarnings, mergeErr := h.mergeSource(g, img.ID, in.source, in.postID, in.url, in.md5, in.parentURL, in.postFile, in.initialTags, in.withheld, in.via)
 		if mergeErr != nil {
 			logx.Warnf("api createImage merge: %v", mergeErr)
 			contract.WriteError(w, http.StatusInternalServerError, "internal_error", "duplicate detected but the merge failed: "+mergeErr.Error())
 			return
 		}
+		_, clientWarnings, clientRejected, clientErr := h.applyInitialTags(g, img.ID, in.clientTags, in.via)
+		if clientErr != nil {
+			logx.Warnf("api createImage client tags: %v", clientErr)
+			contract.WriteError(w, http.StatusInternalServerError, "internal_error", "duplicate detected but the merge failed: "+clientErr.Error())
+			return
+		}
+		tagWarnings = append(tagWarnings, clientWarnings...)
+		rejected := append(sum.RejectedTags, clientRejected...)
+		sum.RejectedTags = nil
 		linkParentRelations(g, img.ID, in.url, in.parentURL)
 		if step, err := applySourceProvenance(g, img.ID, in.provenance); err != nil {
 			logx.Warnf("api createImage %s: %v", step, err)
@@ -1074,11 +1092,11 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 			contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to build response")
 			return
 		}
-		contract.WriteJSON(w, http.StatusOK, withWarnings(map[string]any{
+		contract.WriteJSON(w, http.StatusOK, withRejected(withWarnings(map[string]any{
 			"image":       resp,
 			"alias_added": aliasAdded,
 			"merge":       sum,
-		}, tagWarnings))
+		}, tagWarnings), rejected))
 		return
 	}
 
@@ -1108,12 +1126,21 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 	if in.source != "" {
 		tagVia = in.source
 	}
-	_, tagWarnings, err := h.applyInitialTags(g, img.ID, in.initialTags, tagVia)
+	_, tagWarnings, rejected, err := h.applyInitialTags(g, img.ID, in.initialTags, tagVia)
 	if err != nil {
 		logx.Warnf("api createImage tags: %v", err)
 		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to apply tags")
 		return
 	}
+	// Under via, never the source, whose refetch would read them as dropped.
+	_, clientWarnings, clientRejected, err := h.applyInitialTags(g, img.ID, in.clientTags, in.via)
+	if err != nil {
+		logx.Warnf("api createImage client tags: %v", err)
+		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to apply tags")
+		return
+	}
+	tagWarnings = append(tagWarnings, clientWarnings...)
+	rejected = append(rejected, clientRejected...)
 
 	var autotagNote string
 	if in.autotag {
@@ -1133,8 +1160,8 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(tagWarnings) > 0 || autotagNote != "" {
-		envelope := withWarnings(map[string]any{"image": resp}, tagWarnings)
+	if len(tagWarnings) > 0 || len(rejected) > 0 || autotagNote != "" {
+		envelope := withRejected(withWarnings(map[string]any{"image": resp}, tagWarnings), rejected)
 		if autotagNote != "" {
 			envelope["autotag"] = autotagNote
 		}
@@ -1219,7 +1246,10 @@ func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
 
 	src := g.Source()
 	src.LookupBackends = h.cfg().LookupBackends(g.Name)
-	result, err := search.Execute(context.Background(), src, sq)
+	result, err := search.Execute(r.Context(), src, sq)
+	if err != nil && r.Context().Err() != nil {
+		return
+	}
 	if serverError(w, err) {
 		return
 	}
@@ -1354,21 +1384,18 @@ func (h *Handler) addImageTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, tagWarnings, err := h.applyInitialTags(g, id, body.Tags, via)
+	_, tagWarnings, rejected, err := h.applyInitialTags(g, id, body.Tags, via)
 	if serverError(w, err) {
 		return
 	}
 
-	h.writeImageTagsResponse(w, g, id, tagWarnings)
+	h.writeImageTagsResponse(w, g, id, tagWarnings, rejected)
 }
 
-func (h *Handler) writeImageTagsResponse(w http.ResponseWriter, g *library.Gallery, id int64, tagWarnings []string) {
+func (h *Handler) writeImageTagsResponse(w http.ResponseWriter, g *library.Gallery, id int64, tagWarnings, rejected []string) {
 	tags := loadImageTagsJSON(g, id)
-	if len(tagWarnings) > 0 {
-		contract.WriteJSON(w, http.StatusOK, map[string]any{
-			"tags":         tags,
-			"tag_warnings": tagWarnings,
-		})
+	if len(tagWarnings) > 0 || len(rejected) > 0 {
+		contract.WriteJSON(w, http.StatusOK, withRejected(withWarnings(map[string]any{"tags": tags}, tagWarnings), rejected))
 		return
 	}
 	contract.WriteJSON(w, http.StatusOK, tags)
@@ -1397,40 +1424,40 @@ func imageExists(g *library.Gallery, id int64) (bool, error) {
 	return err == nil, err
 }
 
-func (h *Handler) applyInitialTags(g *library.Gallery, imgID int64, rawTags []string, via string) (int, []string, error) {
+func (h *Handler) applyInitialTags(g *library.Gallery, imgID int64, rawTags []string, via string) (added int, warnings, rejected []string, err error) {
 	// Default "api" so API tags don't read as anonymous UI adds.
 	via = cmp.Or(via, "api")
-	tagIDs, warnings, err := gallery.ResolveTagNames(g.DB, g.TagSvc, rawTags, via)
+	tagIDs, warnings, rejected, err := gallery.ResolveTagNames(g.DB, g.TagSvc, rawTags, via)
 	if err != nil || len(tagIDs) == 0 {
-		return 0, warnings, err
+		return 0, warnings, rejected, err
 	}
 	results, err := g.TagSvc.AddTagsToOneImage(imgID, tagIDs, via)
 	if err != nil {
-		return 0, warnings, fmt.Errorf("apply tags: %w", err)
+		return 0, warnings, rejected, fmt.Errorf("apply tags: %w", err)
 	}
-	added := 0
 	for _, r := range results {
 		if r.Added {
 			added++
 		}
 	}
-	return added, warnings, nil
+	return added, warnings, rejected, nil
 }
 
 // A source owns the tags it pushes; tags pushed without one go on add-only.
-func (h *Handler) mergeSource(g *library.Gallery, id int64, source, postID, url, md5, parentURL string, post gallery.PostFile, rawTags []string, via string) (gallery.MergeSummary, []string, error) {
+func (h *Handler) mergeSource(g *library.Gallery, id int64, source, postID, url, md5, parentURL string, post gallery.PostFile, rawTags []string, withheld gallery.Withheld, via string) (gallery.MergeSummary, []string, error) {
 	var sum gallery.MergeSummary
 	var warnings []string
 	err := g.Edit(func(d *db.DB) error {
 		var err error
-		sum, warnings, err = gallery.MergeSource(d, g.TagSvc, id, source, postID, url, md5, parentURL, post, rawTags)
+		sum, warnings, err = gallery.MergeSource(d, g.TagSvc, id, source, postID, url, md5, parentURL, post, rawTags, withheld)
 		return err
 	})
 	if err != nil || source != "" || len(rawTags) == 0 {
 		return sum, warnings, err
 	}
-	added, warns, err := h.applyInitialTags(g, id, rawTags, via)
+	added, warns, rejected, err := h.applyInitialTags(g, id, rawTags, via)
 	sum.TagsAdded += added
+	sum.RejectedTags = append(sum.RejectedTags, rejected...)
 	return sum, append(warnings, warns...), err
 }
 
@@ -1478,7 +1505,7 @@ func (h *Handler) removeImageTags(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.writeImageTagsResponse(w, g, id, nil)
+	h.writeImageTagsResponse(w, g, id, nil, nil)
 }
 
 var errTagAmbiguous = errors.New("exists on this image in multiple categories; use category:name")

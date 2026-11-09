@@ -662,17 +662,21 @@ function applyRandomSort() {
   window.location.href = '/?q=' + encodeURIComponent(q) + '&sort=random&seed=' + seed;
 }
 
-document.addEventListener('htmx:afterSettle', function(e) {
-  var el = e.detail.elt;
-  if (!el || el.id !== 'save-search-result') return;
-  var ok = el.querySelector('.flash-ok');
-  if (ok) {
-    setTimeout(function() {
-      document.getElementById('save-search-dialog').close();
-      window.location.reload();
-    }, 600);
-  }
-});
+// A Back re-runs this script; one listener is enough.
+if (!window.galleryPageWired) {
+  window.galleryPageWired = true;
+  document.addEventListener('htmx:afterSettle', function(e) {
+    var el = e.detail.elt;
+    if (!el || el.id !== 'save-search-result') return;
+    var ok = el.querySelector('.flash-ok');
+    if (ok) {
+      setTimeout(function() {
+        document.getElementById('save-search-dialog').close();
+        window.location.reload();
+      }, 600);
+    }
+  });
+}
 </script>
 
 {{template "layout_end" .}}

@@ -21,6 +21,7 @@
     </form>
     {{end}}
     <form method="get" action="/relations/session" class="session-order-form">
+      {{if .TagPairs}}<input type="hidden" name="detector" value="{{.Detector}}">{{end}}
       <span class="field-hint">Order</span>
       <label><input type="radio" name="order" value="smallest_distance_first" onchange="this.form.submit()" {{if eq .Order "smallest_distance_first"}}checked{{end}}> Most alike</label>
       <label><input type="radio" name="order" value="largest_file_first" onchange="this.form.submit()" {{if eq .Order "largest_file_first"}}checked{{end}}> Largest file</label>

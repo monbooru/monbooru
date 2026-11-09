@@ -13,17 +13,18 @@ import (
 const (
 	adjacencyCacheTTL        = 5 * time.Minute
 	adjacencyCacheMaxEntries = 4
-	adjacencyCacheMaxIDs     = 1000000
 	// The fan has no LIMIT to stop at. It gets twice what the request has
 	// spent, and at least the floor, raised with an exact total up to a
 	// cap: a query slow once repays its fan, a large match set gets the
 	// time its walk needs, and an overrun only leaves the entry unset.
-	adjacencyFanBudget            = 750 * time.Millisecond
-	adjacencyFanCostRatio         = 2
-	adjacencyFanPerID             = 3 * time.Microsecond
-	adjacencyFanMaxFloor          = 2 * time.Second
-	similarityFanBackgroundBudget = 10 * time.Second
+	adjacencyFanBudget    = 750 * time.Millisecond
+	adjacencyFanCostRatio = 2
+	adjacencyFanPerID     = 3 * time.Microsecond
+	adjacencyFanMaxFloor  = 2 * time.Second
+	fanBackgroundBudget   = 10 * time.Second
 )
+
+var adjacencyCacheMaxIDs = 1000000
 
 var fanBudget = func(spent time.Duration, total int) time.Duration {
 	return max(adjacencyFanBudget, spent*adjacencyFanCostRatio, min(time.Duration(total)*adjacencyFanPerID, adjacencyFanMaxFloor))
@@ -54,6 +55,9 @@ type AdjacencyCache struct {
 	// same full SELECT.
 	fanMu       sync.Mutex
 	fanInFlight map[string]bool
+	// Fans left to run after the answer share one slot: side by side on
+	// a large library each slows the others past its budget.
+	backgroundFan bool
 	// Keys whose last fan came back empty, until they may try again:
 	// without the hold-off such a query pays the whole budget on every
 	// page-1 hit.
@@ -76,6 +80,32 @@ func (c *AdjacencyCache) tryAcquireFan(key string) bool {
 	}
 	c.fanMu.Lock()
 	defer c.fanMu.Unlock()
+	return c.acquireFanLocked(key)
+}
+
+// tryAcquireBackgroundFan's winner must call releaseBackgroundFan. A key
+// that finds the slot taken is not held off, so its next page 1 tries again.
+func (c *AdjacencyCache) tryAcquireBackgroundFan(key string) bool {
+	if c == nil || key == "" {
+		return false
+	}
+	c.fanMu.Lock()
+	defer c.fanMu.Unlock()
+	if c.backgroundFan || !c.acquireFanLocked(key) {
+		return false
+	}
+	c.backgroundFan = true
+	return true
+}
+
+func (c *AdjacencyCache) releaseBackgroundFan(key string) {
+	c.fanMu.Lock()
+	c.backgroundFan = false
+	delete(c.fanInFlight, key)
+	c.fanMu.Unlock()
+}
+
+func (c *AdjacencyCache) acquireFanLocked(key string) bool {
 	if c.fanInFlight[key] {
 		return false
 	}

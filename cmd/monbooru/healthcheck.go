@@ -21,7 +21,7 @@ func runHealthcheck(argv []string) {
 	_ = fs.Parse(argv)
 
 	url := "http://" + resolveHealthAddr(*configPath) + "/health"
-	client := &http.Client{Timeout: *timeout}
+	client := &http.Client{Timeout: *timeout, Transport: &http.Transport{}}
 	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck: %v\n", err)

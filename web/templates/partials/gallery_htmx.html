@@ -10,7 +10,7 @@
 {{end}}
 {{template "partials/gallery_status.html" .}}
 <div id="search-warning" hx-swap-oob="true">{{if .SearchWarning}}<span class="field-hint">{{.SearchWarning}}</span>{{end}}</div>
-<span id="footer-hidden" class="footer-hidden" hx-swap-oob="true">{{with .HiddenByCeiling}}<span class="footer-sep-strong">::</span><span class="footer-hidden-n">{{.}} hidden<span class="footer-wide"> {{plural . "image" "images"}} in the current search</span></span>{{end}}</span>
+{{template "footer_hidden" dict "N" .HiddenByCeiling "OOB" true}}
 {{template "partials/sort_select.html" .}}
 {{template "footer_counts" .}}
 <div id="save-search-area" hx-swap-oob="true">{{template "partials/save_search_area.html" .}}</div>

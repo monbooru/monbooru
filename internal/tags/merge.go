@@ -31,7 +31,7 @@ func (s *Service) CreateAliasFrom(name string, categoryID, canonicalID int64, or
 // CreateAliasToNewTag creates the canonical in the alias's transaction, so
 // a refused alias leaves no new tag behind.
 func (s *Service) CreateAliasToNewTag(name string, categoryID int64, canonName string, canonCategoryID int64) (*models.Tag, error) {
-	canonName, err := s.validateTagIn(canonName, canonCategoryID)
+	canonName, err := s.ValidateTagIn(canonName, canonCategoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +61,8 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 			return err
 		}
 		canonicalID = id
-		var canonIsAlias int
-		if err := tx.QueryRow(`SELECT is_alias FROM tags WHERE id = ?`, canonicalID).Scan(&canonIsAlias); err == sql.ErrNoRows {
+		var canonIsAlias, canonRejected int
+		if err := tx.QueryRow(`SELECT is_alias, rejected FROM tags WHERE id = ?`, canonicalID).Scan(&canonIsAlias, &canonRejected); err == sql.ErrNoRows {
 			return ErrTagNotFound
 		} else if err != nil {
 			return err
@@ -70,17 +70,20 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 		if canonIsAlias == 1 {
 			return ErrAliasToAlias
 		}
+		if canonRejected == 1 {
+			return ErrAliasToRejected
+		}
 
 		// Test for image_tags rows, not usage_count: a tag whose images
 		// all went missing reads 0 but still has rows, which an alias
 		// would strand.
 		var existingID int64
-		var existingIsAlias, existingCarried int
+		var existingIsAlias, existingCarried, existingRejected int
 		err = tx.QueryRow(
-			`SELECT id, is_alias, EXISTS (SELECT 1 FROM image_tags WHERE tag_id = tags.id)
+			`SELECT id, is_alias, EXISTS (SELECT 1 FROM image_tags WHERE tag_id = tags.id), rejected
 			 FROM tags WHERE name = ? AND category_id = ?`,
 			normalized, categoryID,
-		).Scan(&existingID, &existingIsAlias, &existingCarried)
+		).Scan(&existingID, &existingIsAlias, &existingCarried, &existingRejected)
 		switch {
 		case err == sql.ErrNoRows:
 			var id int64
@@ -97,6 +100,9 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 		}
 		if existingID == canonicalID {
 			return ErrAliasToItself
+		}
+		if existingRejected == 1 {
+			return ErrTagRejected
 		}
 		if existingIsAlias == 1 {
 			if _, err := tx.Exec(
@@ -166,14 +172,22 @@ func (s *Service) MergeTags(aliasID, canonicalID int64) error {
 		} else if !aliasExists {
 			return ErrTagNotFound
 		}
-		var targetIsAlias int
-		if err := tx.QueryRow(`SELECT is_alias FROM tags WHERE id = ?`, canonicalID).Scan(&targetIsAlias); err == sql.ErrNoRows {
+		var targetIsAlias, targetRejected int
+		if err := tx.QueryRow(`SELECT is_alias, rejected FROM tags WHERE id = ?`, canonicalID).Scan(&targetIsAlias, &targetRejected); err == sql.ErrNoRows {
 			return ErrTagNotFound
 		} else if err != nil {
 			return err
 		}
 		if targetIsAlias == 1 {
 			return ErrMergeIntoAlias
+		}
+		if targetRejected == 1 {
+			return ErrAliasToRejected
+		}
+		if rejected, err := rejectedTx(tx, aliasID); err != nil {
+			return err
+		} else if rejected {
+			return ErrTagRejected
 		}
 
 		// Images that gain the canonical here need its implications

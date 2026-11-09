@@ -43,6 +43,7 @@
         </div>
         {{end}}
       </li>
+      {{if .More}}<li class="manga-page-cell"><a class="field-hint" href="{{.MoreURL}}">+{{.More}} more in {{.Series}}</a></li>{{end}}
       {{end}}
     </ul>
   </section>

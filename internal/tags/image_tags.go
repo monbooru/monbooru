@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
@@ -17,19 +18,26 @@ func (s *Service) AddTagToImage(imageID, tagID int64, isAuto bool, confidence *f
 }
 
 func (s *Service) AddTagsToImageFromTagger(imageID int64, tagIDs []int64, isAuto bool, taggerName string) error {
-	return s.AddTagsToImageFromTaggerConf(imageID, tagIDs, nil, isAuto, taggerName)
+	_, err := s.AddTagsToImageFromTaggerConf(imageID, tagIDs, nil, isAuto, taggerName)
+	return err
 }
 
 // AddTagsToImageFromTaggerConf pairs confs[i] with tagIDs[i]; a nil or
-// missing entry stores NULL.
-func (s *Service) AddTagsToImageFromTaggerConf(imageID int64, tagIDs []int64, confs []*float64, isAuto bool, taggerName string) error {
+// missing entry stores NULL. added counts the rows that were new.
+func (s *Service) AddTagsToImageFromTaggerConf(imageID int64, tagIDs []int64, confs []*float64, isAuto bool, taggerName string) (added int, err error) {
 	if len(tagIDs) == 0 {
-		return nil
+		return 0, nil
 	}
-	return s.inWriteTx(func(tx *sql.Tx) error {
-		_, err := addTagsTx(tx, imageID, tagIDs, confs, isAuto, taggerName, s.ratingCatID)
+	err = s.inWriteTx(func(tx *sql.Tx) error {
+		results, err := addTagsTx(tx, imageID, tagIDs, confs, isAuto, taggerName, s.ratingCatID)
+		for _, r := range results {
+			if r.Added {
+				added++
+			}
+		}
 		return err
 	})
+	return added, err
 }
 
 func addTagsTx(tx *sql.Tx, imageID int64, tagIDs []int64, confs []*float64, isAuto bool, via string, ratingCatID int64) ([]AddResult, error) {
@@ -169,10 +177,20 @@ type SyncResult struct {
 	RatingFilled bool
 }
 
-// A tag the source no longer lists is flagged stale, never removed. Pass
-// reconcile false when the site has several posts on the image: they
-// share one slice.
 func (s *Service) SyncSourceTags(imageID int64, tagIDs []int64, site string, reconcile bool) (SyncResult, error) {
+	return s.SyncSourceTagsWithheld(imageID, tagIDs, site, reconcile, Withheld{})
+}
+
+// Withheld is what a source chose not to send, which says nothing about its post.
+type Withheld struct {
+	Categories []string
+	TagIDs     []int64
+}
+
+// A tag the source no longer lists is flagged stale, never removed, unless
+// it is withheld. Pass reconcile false when the site has several posts on
+// the image: they share one slice.
+func (s *Service) SyncSourceTagsWithheld(imageID int64, tagIDs []int64, site string, reconcile bool, withheld Withheld) (SyncResult, error) {
 	if site == "" {
 		return SyncResult{}, errors.New("source label required")
 	}
@@ -251,17 +269,19 @@ func (s *Service) SyncSourceTags(imageID int64, tagIDs []int64, site string, rec
 		}
 		// Never flag a rating: the image's rating is protected from the source.
 		ratingCat := cmp.Or(s.ratingCatID, -1)
+		marks, args := db.InPlaceholders(withheld.Categories)
 		current, err := db.QueryIDs(tx,
 			`SELECT it.tag_id FROM image_tags it JOIN tags t ON t.id = it.tag_id
+			 JOIN tag_categories c ON c.id = t.category_id
 			 WHERE it.image_id = ? AND it.tagger_name = ? AND it.is_auto = 0
-			   AND it.stale = 0 AND t.category_id != ?`,
-			imageID, site, ratingCat)
+			   AND it.stale = 0 AND t.category_id != ? AND c.name NOT IN (`+marks+`)`,
+			append([]any{imageID, site, ratingCat}, args...)...)
 		if err != nil {
 			return SyncResult{}, err
 		}
 		var stale []int64
 		for _, tid := range current {
-			if !incoming[tid] {
+			if !incoming[tid] && !slices.Contains(withheld.TagIDs, tid) {
 				stale = append(stale, tid)
 			}
 		}

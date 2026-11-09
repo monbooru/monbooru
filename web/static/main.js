@@ -559,7 +559,8 @@ var slideshow = (function () {
   var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen' };
 
   function readDuration() {
-    var seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10);
+    var seconds = 5;
+    try { seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10); } catch (e) {}
     return durations.indexOf(seconds) >= 0 ? seconds : 5;
   }
   function itemAt(i) {
@@ -806,7 +807,7 @@ var slideshow = (function () {
       window.location.href = '/?' + params + '#img-' + id;
     });
     durationSelect.addEventListener('change', function () {
-      localStorage.setItem('monbooru_slideshow_duration', durationSelect.value);
+      try { localStorage.setItem('monbooru_slideshow_duration', durationSelect.value); } catch (e) {}
       durationMs = parseInt(durationSelect.value, 10) * 1000;
       if (!current || current.video) return;
       remainingMs = durationMs;
@@ -1917,7 +1918,7 @@ function updateBatchBar() {
   if (countEl) {
     countEl.hidden = !active;
     countEl.textContent = selectAllMatching
-      ? 'All ' + matching + ' matching selected'
+      ? 'All ' + (matching === null ? '…' : matching) + ' matching selected'
       : pickedIDs.length + ' selected' +
         (pickedIDs.length > onPage ? ' · ' + onPage + ' on this page' : '');
   }
@@ -1931,12 +1932,26 @@ function updateBatchBar() {
 }
 
 // Read off .result-count, which each htmx search swaps out of band; the
-// batch bar is not re-rendered.
+// batch bar is not re-rendered. null while a deferred count is loading.
 function matchingTotal() {
   var el = document.querySelector('.result-count');
   var m = el && el.textContent.match(/(\d+)/);
-  return m ? parseInt(m[1], 10) : 0;
+  return m ? parseInt(m[1], 10) : null;
 }
+
+// A count that loads after the grid lands without a grid settle; a batch
+// dialog opened before it still shows the ellipsis.
+document.body.addEventListener('htmx:oobAfterSwap', function(e) {
+  if (!e.detail || !e.detail.target || e.detail.target.id !== 'result-matches') return;
+  updateBatchBar();
+  document.querySelectorAll('dialog[open]').forEach(function(dlg) {
+    var prefix = dlg.id.replace(/-dialog$/, '');
+    var scopeEl = document.getElementById(prefix + '-scope');
+    if (scopeEl && scopeEl.value === 'search') {
+      scopeCount('search', document.getElementById(prefix + '-count'), document.getElementById(prefix + '-noun'));
+    }
+  });
+});
 
 function clearSelection() {
   pickedIDs = [];
@@ -2112,12 +2127,14 @@ document.addEventListener('click', function(e) {
   var totalSpan = document.getElementById('page-jump-total');
   if (!dlg || !input) return;
   var current = btn.dataset.current || '1';
-  var total = btn.dataset.total || '1';
+  // Empty while the gallery's count is still loading: any page goes, and
+  // the server clamps one past the end.
+  var total = btn.dataset.total || '';
   input.value = current;
   // data-max, not max: constraint validation would block the submit
   // before the clamp runs.
   input.dataset.max = total;
-  if (totalSpan) totalSpan.textContent = total;
+  if (totalSpan) totalSpan.textContent = total || '…';
   dlg.showModal();
   setTimeout(function() { input.focus(); input.select(); }, 0);
 });
@@ -2189,7 +2206,7 @@ function submitPageJump(inputId) {
   if (max && p > max) p = max;
   var u = new URL(window.location.href);
   u.searchParams.set('page', String(p));
-  u.searchParams.delete('at');
+  ['at', 'after', 'before'].forEach(function(k) { u.searchParams.delete(k); });
   window.location.href = u.toString();
 }
 
@@ -2211,7 +2228,7 @@ function setPageSize(size) {
       if (selectMode) writeStash('monbooru_select_mode', {url: selectionKey()});
       var u = new URL(location.href);
       u.searchParams.set('page', '1');
-      u.searchParams.delete('at');
+      ['at', 'after', 'before'].forEach(function(k) { u.searchParams.delete(k); });
       location.href = u.toString();
     }
   });
@@ -2244,15 +2261,20 @@ function revealSidebarFor(el) {
   if (el && el.closest && el.closest('#sidebar')) setSidebarCollapsed(false);
 }
 
+// Each path is encoded once and the list joined with commas; a value
+// written encoded twice has no comma of its own and is read once more.
 function getFolderCookie() {
   var m = document.cookie.match(/monbooru_folders=([^;]*)/);
   if (!m) return new Set();
-  try { return new Set(decodeURIComponent(m[1]).split(',').filter(Boolean).map(decodeURIComponent)); }
-  catch (err) { return new Set(); }
+  var raw = m[1];
+  try {
+    if (raw.indexOf(',') < 0 && /%2C|%25/i.test(raw)) raw = decodeURIComponent(raw);
+    return new Set(raw.split(',').filter(Boolean).map(decodeURIComponent));
+  } catch (err) { return new Set(); }
 }
 
 function setFolderCookie(set) {
-  document.cookie = 'monbooru_folders=' + encodeURIComponent(Array.from(set).map(encodeURIComponent).join(',')) + '; path=/; max-age=31536000';
+  document.cookie = 'monbooru_folders=' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
 }
 
 function toggleFolderItem(btn, targetId, path) {
@@ -2367,9 +2389,14 @@ function markInboxGrowth() {
   } catch (e) {}
 }
 document.addEventListener('DOMContentLoaded', markInboxGrowth);
+// An outerHTML swap, as [more] makes, settles each inserted row on its own.
+var _folderSettledXhr = null;
 document.addEventListener('htmx:afterSettle', function(e) {
   var el = e.detail.elt;
-  if (el && el.querySelector && el.querySelector('.folder-toggle-btn')) initFolderTree();
+  if (!el || !el.querySelector || !el.querySelector('.folder-toggle-btn')) return;
+  if (e.detail.xhr && e.detail.xhr === _folderSettledXhr) return;
+  _folderSettledXhr = e.detail.xhr;
+  initFolderTree();
 });
 
 function lastWordIndex(words) {
@@ -2443,25 +2470,27 @@ function insertToken(btn) {
   input.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-// A search scope has no picked ids; the rendered thumbnails head the same
-// order the job walks.
+// A search scope has no picked ids: the server reads its first rows in the
+// order the job walks, which the grid shows only on page 1.
 function namePreviewVals(prefix, scope) {
   var scopeEl = document.getElementById(prefix + '-scope');
   var kind = scopeEl && scopeEl.value ? scopeEl.value : 'selection';
-  var ids = kind === 'search'
-    ? Array.prototype.map.call(document.querySelectorAll('.thumb-card'),
-        function(c) { return c.dataset.id; })
-    : pickedIDs.slice();
   var slot = document.getElementById(prefix + '-preview');
   var rows = parseInt(slot && slot.dataset.rows, 10) || 5;
-  return {
+  var vals = {
     folder: document.getElementById(prefix + '-folder').value,
     name: document.getElementById(prefix + '-name').value,
     scope: scope,
     rows: rows,
-    ids: ids.slice(0, rows).join(','),
-    total: scopeCount(kind, null, null)
+    total: scopeCount(kind, null, null) || ''
   };
+  if (kind === 'search') {
+    new URLSearchParams(searchScopeParts().join('&')).forEach(function(v, k) { vals[k] = v; });
+    vals.kind = 'search';
+  } else {
+    vals.ids = pickedIDs.slice(0, rows).join(',');
+  }
+  return vals;
 }
 
 // A click, not a keystroke: a {md5} template hashes files that have no
@@ -2666,7 +2695,7 @@ function jobDoneFlash(doneEl) {
 
 function scopeCount(scope, countEl, nounEl) {
   var n = scope === 'selection' ? pickedIDs.length : matchingTotal();
-  if (countEl) countEl.textContent = n;
+  if (countEl) countEl.textContent = n === null ? '…' : n;
   if (nounEl) {
     var suffix = n === 1 ? 'image' : 'images';
     nounEl.textContent = scope === 'selection' ? 'selected ' + suffix : suffix + ' in current search';
@@ -3322,6 +3351,12 @@ function deleteTagFlow(btn, tagID, onSuccess) {
   var danger = isRating
     ? 'The rating itself stays and can be added again later.'
     : 'This cannot be undone.';
+  var alt = null;
+  // An alias follows its target, so only the target can be rejected.
+  if (!isRating && !btn.dataset.rejected && !btn.dataset.alias) {
+    danger += ' Delete and reject also drops the name on arrival, whatever brings it, until you un-reject it.';
+    alt = {label: 'Delete and reject', run: function() { rejectTagFlow(btn, tagID, onSuccess); }};
+  }
   showConfirm(msg, function() {
     btn.disabled = true;
     var el = document.getElementById('tag-flash');
@@ -3346,5 +3381,27 @@ function deleteTagFlow(btn, tagID, onSuccess) {
         setFlashText(el, 'err', t || 'Delete failed.');
       }
     });
-  }, danger, isRating ? 'Clear' : 'Delete');
+  }, danger, isRating ? 'Clear' : 'Delete', alt);
+}
+
+function rejectTagFlow(btn, tagID, onSuccess) {
+  var name = btn.dataset.name;
+  btn.disabled = true;
+  var el = document.getElementById('tag-flash');
+  setFlashText(el, 'warn', 'Rejecting "' + name + '"…');
+  postForm('/tags/' + tagID + '/reject', null, {
+    catchMsg: 'Reject request failed.',
+    onDone: function() {
+      btn.disabled = false;
+      el.textContent = '';
+    },
+    onOK: function() {
+      stashActionFlash(escapeHTML('Rejected "' + name + '": it is off every image, and nothing brings it back until you un-reject it.'), 'ok');
+      onSuccess();
+    },
+    onErr: function(t) {
+      btn.disabled = false;
+      setFlashText(el, 'err', t || 'Reject failed.');
+    }
+  });
 }

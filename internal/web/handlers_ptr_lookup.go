@@ -270,7 +270,7 @@ func (s *Server) tagPtrLookupPreview(w http.ResponseWriter, r *http.Request) {
 	data["TagForm"] = tagForm
 	found, err := monloader.LookupGroups(s.tagSvc, id, tagForm, spelling, info)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		externalErr(w, r, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	color := s.contribTagColor()

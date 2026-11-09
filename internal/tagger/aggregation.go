@@ -76,7 +76,8 @@ func AggregateInferenceScores(perFrame [][]float32, labels []CandidateLabel, opt
 	agg := map[int]accum{}
 	for _, scores := range perFrame {
 		for idx, s := range scores {
-			if s < 0.001 {
+			// Written so a NaN fails it: NaN compares false both ways.
+			if !(s >= 0.001) {
 				continue
 			}
 			e := agg[idx]

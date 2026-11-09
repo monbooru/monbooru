@@ -83,7 +83,7 @@ func SuggestUsageRanked(database *db.DB, prefix, categoryName string, requireUsa
 	baseSQL := `SELECT t.id, t.name, tc.name, tc.color, t.usage_count
 	            FROM (SELECT id, name, category_id, usage_count
 	                  FROM tags
-	                  WHERE is_alias = 0
+	                  WHERE is_alias = 0 AND rejected = 0
 	                    %s
 	                    AND name LIKE ? ESCAPE '\'
 	                    %s

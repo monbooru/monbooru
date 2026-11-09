@@ -41,7 +41,7 @@
     </div>
     {{end}}
     {{if .Awaiting}}
-    <div class="peer-line field-hint">approved - waiting for {{.Name}} to collect its token</div>
+    <div class="peer-line field-hint">Approved. Waiting for {{.Name}} to finish.</div>
     {{else if and (not .Paired) .Companion}}
     <div class="peer-line field-hint">Not paired yet. In monloader click "Connect to monbooru", then approve the request above.</div>
     {{else if and (not .Paired) (not .Refused)}}

@@ -31,7 +31,7 @@
     </div>
   </div>
   <div class="dialog-panel" id="tc-thresholds-{{.Name}}" hidden>
-    <p class="field-hint">Threshold sets the minimum confidence a tag in this category needs to be added.<br>
+    <p class="field-hint">Threshold sets the minimum confidence a tag in this category needs to be added. <span class="status-badge status-ok">this tagger</span><span class="status-badge status-off">at tagging</span><br>
       Max tags caps how many tags the auto-tagger adds in this category per image. (set to 0 to keep every tag)<br>
       Disable a category to stop this tagger emitting it at all.</p>
     <table class="tagger-thresh-table">
@@ -77,7 +77,7 @@
     </table>
   </div>
   <div class="dialog-panel tc-mappings" id="tc-mappings-{{.Name}}" hidden>
-    <p class="field-hint">Rules rename a label, change its category, or mute it for this tagger.<br>
+    <p class="field-hint">Rules rename a label, change its category, or drop it for this tagger. <span class="status-badge status-ok">this tagger</span><span class="status-badge status-off">at tagging</span><br>
       Applied edits take effect on the next run.<br>
       {{.LabelCount}} labels - <span id="tc-custom-count-{{.Name}}">{{.CustomRules}}</span> custom.</p>
     <div class="tc-search-row" id="tc-search-row-{{.Name}}">
@@ -91,7 +91,7 @@
       <span class="tc-filters">
         <button type="button" class="tc-filter active" data-filter="">all</button>
         <button type="button" class="tc-filter" data-filter="customized">customized</button>
-        <button type="button" class="tc-filter" data-filter="muted">muted</button>
+        <button type="button" class="tc-filter" data-filter="muted">dropped</button>
       </span>
     </div>
     <div id="tc-labels-{{.Name}}" class="table-scroll"
@@ -107,7 +107,7 @@
               {{range .Categories}}<option value="{{.}}">{{.}}</option>{{end}}
             </select></label>
             <label>rename to <input type="text" name="rule_name" class="tc-edit-name" placeholder="(keep name)"></label>
-            <label><input type="checkbox" name="rule_mute" value="1" class="tc-edit-mute"> mute</label>
+            <label><input type="checkbox" name="rule_mute" value="1" class="tc-edit-mute"> drop</label>
             <button type="button" class="btn-sm tc-edit-apply" name="rule_source"
                     hx-post="/settings/tagger/{{.Name}}/mapping"
                     hx-target="#tc-labels-{{.Name}}" hx-swap="innerHTML">Apply</button>

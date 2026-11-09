@@ -23,11 +23,13 @@
     <div class="ptr-contrib-actions">
       {{if .CanPull}}
       <button type="button" class="btn-ptr-pull peer-accent"
+              {{if .PTRReady}}
               hx-post="/images/{{.ImageID}}/lookup" hx-vals='{"backend":"ptr"}'
               hx-target="#fetch-pending" hx-swap="innerHTML"
               hx-confirm="Pull this file's tags from the Public Tag Repository?"
               title="Add the tags it holds and record it as a source for the ones this image already carries"
-              data-confirm-ok="Pull tags">Pull tags</button>
+              data-confirm-ok="Pull tags"
+              {{else}}disabled title="the Public Tag Repository is still syncing"{{end}}>Pull tags</button>
       {{end}}
       {{template "ptr_contrib_button" (dict "DialogURL" (printf "/images/%d/ptr-contrib-dialog" .ImageID) "CanContribute" .CanContribute "NewCount" .NewCount "PetitionCount" .PetitionCount "ContribHint" .ContribHint)}}
     </div>

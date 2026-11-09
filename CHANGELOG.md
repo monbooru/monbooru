@@ -1,5 +1,46 @@
 # Changelog
 
+## [v1.24.0] - 2026-11-08
+<a href="https://discord.gg/t4TmGtKRzK"><img src="https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/discord.webp" width="640" alt="MonBooru Central, the community-run Discord. Join"/></a>
+
+Thanks to @CeareDelafont for starting MonBooru Central, a community-run Discord server for discussion and help with monbooru. Feel free to join and say hi!
+
+### Added
+- You can now reject a tag to keep it off every image and drop it on arrival from any source. ([#166](https://github.com/monbooru/monbooru/issues/166))
+- The tag page draws a tag provenance graph, from each source's rules to the image; monloader lanes need monloader v1.14.0 or later. ([#166](https://github.com/monbooru/monbooru/issues/166))
+- The Relations pair comparison shows page counts for archives. ([#172](https://github.com/monbooru/monbooru/issues/172))
+- The AppImage can update in place with AppImageUpdate.
+- API: `POST /api/v1/tags/resolve` says what the gallery does with each tag name, creating nothing.
+
+### Changed
+- The folder tree loads one level at a time, so a large tree no longer slows every page. ([#167](https://github.com/monbooru/monbooru/issues/167))
+- Tag searches on large libraries show their first page much faster.
+- A slow search shows its grid first and lazy-loads its match count.
+- Next and Prev are faster at any depth and keep their images while new ones arrive.
+- The tag page opens on its note and recent images, then the graph, then the editors.
+- A category name can no longer start with `-`, which search reads as NOT.
+- Some wording changes in Settings, pairing and first-run setup.
+
+### Fixed
+- pixai-v1 loads on DirectML on Windows. ([#154](https://github.com/monbooru/monbooru/issues/154))
+- Pull tags stays on the PTR cards, disabled, while the PTR syncs. ([#103](https://github.com/monbooru/monbooru/issues/103))
+- Removing or replacing a gallery no longer deletes the files of another gallery on the same folder.
+- A file uploaded or pushed during a sync is no longer marked missing.
+- Free memory during a maintenance pass no longer hangs every page.
+- With monloader v1.14.0, tags that are dropped by rules or that a sender adds are no longer flagged stale on a refetch.
+- A NaN score from a GPU tagger no longer tags the top labels of every category.
+- Deleting a tagger or changing its provider is refused while a job runs, instead of breaking it.
+- Same collection lists every collection of an image, each cut at 200 with a +N more link.
+- Relations sessions keep Found by when Order changes, and show file names on Windows.
+- A network bind refuses public host names outside the API.
+
+Thanks to @CeareDelafont for the report (https://github.com/monbooru/monbooru/issues/103).
+Thanks to @elmogard for the report (https://github.com/monbooru/monbooru/issues/154).
+Thanks to @spry-key for the page count row (https://github.com/monbooru/monbooru/issues/172) and the suggestion (https://github.com/monbooru/monbooru/issues/166).
+Thanks to @Hamuko for the suggestion (https://github.com/monbooru/monbooru/issues/167).
+
+Co-authored-by: spry-key <352177377+spry-key@users.noreply.github.com>
+
 ## [v1.23.0] - 2026-10-30
 ### Added
 - Mark same-name tags in different categories as distinct so they no longer show as conflicts. ([#120](https://github.com/monbooru/monbooru/issues/120))

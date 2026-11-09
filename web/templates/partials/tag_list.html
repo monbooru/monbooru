@@ -1,6 +1,8 @@
 {{define "partials/tag_list.html"}}
 <div id="image-tags" data-image-id="{{.ImageID}}">
   {{if .ErrMsg}}<div class="flash flash-err" style="margin-bottom:4px">{{.ErrMsg}}</div>{{end}}
+  {{range .RejectedRows}}<div class="flash flash-err" style="margin-bottom:4px">{{.Name}} is rejected in this gallery
+    <button type="button" class="btn-link-accent" hx-post="/tags/{{.ID}}/unreject" hx-swap="none" title="Make the name a tag again, then add it">[un-reject]</button></div>{{end}}
   {{if .WarnMsg}}<div class="flash flash-warn" style="margin-bottom:4px">{{.WarnMsg}}</div>{{end}}
   {{if .OkMsg}}<div class="flash flash-ok" style="margin-bottom:4px">{{.OkMsg}}</div>{{end}}
 </div>

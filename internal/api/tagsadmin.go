@@ -25,6 +25,7 @@ func toTagResponse(t *models.Tag) tagResponse {
 		Color:      t.CategoryColor,
 		UsageCount: t.UsageCount,
 		IsAlias:    t.IsAlias,
+		Rejected:   t.Rejected,
 		Origin:     t.Origin,
 	}
 	if !t.LastUsedAt.IsZero() {
@@ -86,6 +87,8 @@ func writeTagError(w http.ResponseWriter, err error) {
 		{tags.ErrImplicationNotFound, http.StatusNotFound, "not_found"},
 		{tags.ErrCategoryNotFound, http.StatusBadRequest, "invalid_request"},
 		{tags.ErrTagNameTaken, http.StatusConflict, "conflict"},
+		{tags.ErrTagRejected, http.StatusConflict, "rejected"},
+		{tags.ErrAliasToRejected, http.StatusConflict, "rejected"},
 		{tags.ErrAliasNameInUse, http.StatusConflict, "conflict"},
 		{tags.ErrImplicationCycle, http.StatusConflict, "conflict"},
 		{tags.ErrInvalidTagName, http.StatusBadRequest, "invalid_request"},
@@ -125,6 +128,12 @@ func (h *Handler) createTag(w http.ResponseWriter, r *http.Request) {
 	}
 	name, catID, ok := splitTypedName(w, g, body.Name, catID)
 	if !ok {
+		return
+	}
+	// Refused before the create: a client creating a name is not an arrival
+	// on an image, so it must not count as a dropped one.
+	if found, err := g.TagSvc.FindTag(name, catID); err == nil && found.Rejected {
+		writeTagError(w, tags.ErrTagRejected)
 		return
 	}
 	tag, err := g.TagSvc.GetOrCreateTagFrom(name, catID, "api")

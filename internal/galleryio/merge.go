@@ -208,6 +208,9 @@ func ApplyLightReplace(mf LightManifest, files []translatedFile, dbPath, thumbsP
 // planExtraction runs before anything is reset or wiped, so an archive it
 // refuses leaves the gallery whole: it reads every entry it will write.
 func planExtraction(b *gallery.Boundary, files []translatedFile, maxBytes int64) ([]string, error) {
+	if other := b.SharedWith(); other != "" && len(files) > 0 {
+		return nil, fmt.Errorf("gallery %q indexes the same folder; a replace from an archive would delete its files", other)
+	}
 	root := filepath.Clean(b.Root())
 	dsts := make([]string, len(files))
 	written := make(map[string]string, len(files))
@@ -449,10 +452,11 @@ type mergeRecord struct {
 }
 
 type MergeResult struct {
-	Added   int // images ingested from files the archive carried
-	Tagged  int // images already in the gallery that the upload named
-	Skipped int // records whose sha the gallery does not hold and no file backed
-	LeftOut int // files the archive carried into a folder the gallery leaves out
+	Added     int // images ingested from files the archive carried
+	Tagged    int // images already in the gallery that gained a tag
+	Unchanged int // images already in the gallery that already had every tag named
+	Skipped   int // records whose sha the gallery does not hold and no file backed
+	LeftOut   int // files the archive carried into a folder the gallery leaves out
 }
 
 // MergeGallery wipes nothing: db and json uploads only tag images matched
@@ -505,6 +509,9 @@ func MergeGallery(ctx context.Context, cx *library.Gallery, format string, uploa
 // only a .zip can bring.
 func (r MergeResult) Summary() string {
 	parts := []string{fmt.Sprintf("%d %s added", r.Added, models.Plural(r.Added, "image", "images")), fmt.Sprintf("%d tagged", r.Tagged)}
+	if r.Unchanged > 0 {
+		parts = append(parts, fmt.Sprintf("%d unchanged", r.Unchanged))
+	}
 	if r.Skipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d not in this gallery", r.Skipped))
 	}
@@ -750,8 +757,7 @@ func (m *merger) apply(r mergeRecord) error {
 	cx := m.cx
 	imgID, err := gallery.ImageIDBySHA(cx.DB.Read, r.SHA256)
 	if err == nil {
-		m.tag(imgID, r)
-		m.res.Tagged++
+		m.tagMatched(imgID, r)
 		return nil
 	}
 	if err != sql.ErrNoRows {
@@ -782,36 +788,47 @@ func (m *merger) apply(r mergeRecord) error {
 		}
 		return nil
 	}
-	m.tag(landed.Image.ID, r)
 	// A record without a sha finds its image only once extracted.
 	if landed.Duplicate {
-		m.res.Tagged++
+		m.tagMatched(landed.Image.ID, r)
 		return nil
 	}
+	m.tag(landed.Image.ID, r)
 	m.res.Added++
 	return nil
 }
 
-func (m *merger) tag(imageID int64, r mergeRecord) {
-	if r.groups == nil {
-		applyImportTagsToImage(m.cx.DB, m.cx.TagSvc, imageID, r.Tags, m.generalID, m.source)
-		return
+func (m *merger) tagMatched(imageID int64, r mergeRecord) {
+	if m.tag(imageID, r) {
+		m.res.Tagged++
+	} else {
+		m.res.Unchanged++
 	}
-	if err := applyTransferTags(m.cx.DB, m.cx.TagSvc, imageID, r.groups, m.generalID); err != nil {
+}
+
+func (m *merger) tag(imageID int64, r mergeRecord) (gained bool) {
+	if r.groups == nil {
+		return applyImportTagsToImage(m.cx.DB, m.cx.TagSvc, imageID, r.Tags, m.generalID, m.source)
+	}
+	gained, err := applyTransferTags(m.cx.DB, m.cx.TagSvc, imageID, r.groups, m.generalID)
+	if err != nil {
 		logx.Warnf("merge: %v", err)
 	}
+	return gained
 }
 
 // Merged tags go through the tag service so aliases resolve and usage
 // counts move. Tokens resolve before the insert transaction:
 // GetOrCreateTag needs the single write connection itself.
-func applyImportTagsToImage(database *db.DB, tagSvc *tags.Service, imageID int64, tokens []string, generalID int64, source string) {
+func applyImportTagsToImage(database *db.DB, tagSvc *tags.Service, imageID int64, tokens []string, generalID int64, source string) (gained bool) {
 	// Native keeps an unknown namespace verbatim so a round-trip is
 	// lossless; foreign imports drop it.
 	tagIDs, _ := resolveTokenTagIDsConf(database, tagSvc, tokens, nil, generalID, source != ImportSourceNative, source)
-	if err := tagSvc.AddTagsToImageFromTagger(imageID, tagIDs, false, source); err != nil {
+	added, err := tagSvc.AddTagsToImageFromTaggerConf(imageID, tagIDs, nil, false, source)
+	if err != nil {
 		logx.Warnf("import tags to image %d: %v", imageID, err)
 	}
+	return added > 0
 }
 
 // confs, when not nil, pairs with tokens; the returned slices stay
@@ -842,16 +859,18 @@ func resolveTokenTagIDsConf(database *db.DB, tagSvc *tags.Service, tokens []stri
 }
 
 // Returns the error: a move deletes the source only once the tags have landed.
-func applyTransferTags(database *db.DB, tagSvc *tags.Service, imageID int64, groups []transferTagGroup, generalID int64) error {
+func applyTransferTags(database *db.DB, tagSvc *tags.Service, imageID int64, groups []transferTagGroup, generalID int64) (gained bool, err error) {
 	for _, g := range groups {
 		// An unlabelled group was a UI add on the source side, hence "user".
 		origin := cmp.Or(g.taggerName, "user")
 		tagIDs, confs := resolveTokenTagIDsConf(database, tagSvc, g.tokens, g.confs, generalID, false, origin)
-		if err := tagSvc.AddTagsToImageFromTaggerConf(imageID, tagIDs, confs, g.isAuto, g.taggerName); err != nil {
-			return fmt.Errorf("add tags to image %d: %w", imageID, err)
+		added, err := tagSvc.AddTagsToImageFromTaggerConf(imageID, tagIDs, confs, g.isAuto, g.taggerName)
+		if err != nil {
+			return gained, fmt.Errorf("add tags to image %d: %w", imageID, err)
 		}
+		gained = gained || added > 0
 	}
-	return nil
+	return gained, nil
 }
 
 func resolveImportTag(database *db.DB, token string, generalID int64, dropUnknownNamespace bool) (int64, string, error) {

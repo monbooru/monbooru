@@ -184,8 +184,19 @@ func main() {
 		}
 		if srv.TrayEnabled() {
 			trayCtx, stopTray := context.WithCancel(context.Background())
-			defer stopTray()
-			go runTray(trayCtx, srv, cfg.Server.BindAddress)
+			trayDone := make(chan struct{})
+			// The icon stays on screen until the tray's own loop removes it.
+			defer func() {
+				stopTray()
+				select {
+				case <-trayDone:
+				case <-time.After(time.Second):
+				}
+			}()
+			go func() {
+				defer close(trayDone)
+				runTray(trayCtx, srv, cfg.Server.BindAddress)
+			}()
 		}
 	}
 

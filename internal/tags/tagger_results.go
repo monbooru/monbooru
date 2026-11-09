@@ -1,6 +1,7 @@
 package tags
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -49,13 +50,13 @@ func (s *Service) ApplyTaggerResults(ctx context.Context, imageID int64, hits []
 			hasRating = true
 		}
 		var tagID, resolvedCat int64
-		var isAlias int
+		var isAlias, rejected int
 		var canonicalID sql.NullInt64
 		err := tx.QueryRowContext(ctx,
-			`SELECT t.id, t.is_alias, t.canonical_tag_id, COALESCE(c.category_id, t.category_id)
+			`SELECT t.id, t.is_alias, t.canonical_tag_id, COALESCE(c.category_id, t.category_id), COALESCE(c.rejected, t.rejected)
 			 FROM tags t LEFT JOIN tags c ON c.id = t.canonical_tag_id
 			 WHERE t.name = ? AND t.category_id = ?`, h.Name, h.CategoryID,
-		).Scan(&tagID, &isAlias, &canonicalID, &resolvedCat)
+		).Scan(&tagID, &isAlias, &canonicalID, &resolvedCat, &rejected)
 		if err == sql.ErrNoRows {
 			res, err2 := tx.ExecContext(ctx,
 				`INSERT INTO tags (name, category_id, usage_count, origin) VALUES (?, ?, 0, ?)`, h.Name, h.CategoryID, h.Tagger)
@@ -65,6 +66,11 @@ func (s *Service) ApplyTaggerResults(ctx context.Context, imageID int64, hits []
 			tagID, _ = res.LastInsertId()
 		} else if err != nil {
 			return fmt.Errorf("lookup tag %q (cat=%d): %w", h.Name, h.CategoryID, err)
+		} else if rejected == 1 {
+			if err := noteRejectedDrop(tx, cmp.Or(canonicalID.Int64, tagID), h.Tagger); err != nil {
+				return err
+			}
+			continue
 		} else if isAlias == 1 && canonicalID.Valid {
 			tagID = canonicalID.Int64
 			if s.ratingCatID != 0 && resolvedCat == s.ratingCatID && h.CategoryID != s.ratingCatID {

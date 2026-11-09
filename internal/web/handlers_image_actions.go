@@ -60,10 +60,10 @@ func (s *Server) toggleBoolColumn(w http.ResponseWriter, r *http.Request, flag g
 	on, err := cx.ToggleFlag(id, flag)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.NotFound(w, r)
+			hxRefuse(w, r, http.StatusNotFound, "This image is gone; reload the page.")
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		hxRefuse(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -180,16 +180,9 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Not externalErr: the form is hx-swap="none", so htmx shows only the header.
-	refuse := func(code int, msg string) {
-		if isHTMXRequest(r) {
-			flashHeaderErr(w, code, msg)
-			return
-		}
-		http.Error(w, msg, code)
-	}
 	requested := r.FormValue("path")
 	if requested == "" {
-		refuse(http.StatusBadRequest, "path required")
+		hxRefuse(w, r, http.StatusBadRequest, "path required")
 		return
 	}
 
@@ -200,15 +193,15 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 		id, requested,
 	).Scan(&newCanonical)
 	if errors.Is(err, sql.ErrNoRows) {
-		refuse(http.StatusBadRequest, "path is not an alias of this image")
+		hxRefuse(w, r, http.StatusBadRequest, "path is not an alias of this image")
 		return
 	}
 	if err != nil {
-		refuse(http.StatusInternalServerError, err.Error())
+		hxRefuse(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if _, statErr := os.Stat(newCanonical); statErr != nil {
-		refuse(http.StatusBadRequest, "cannot set canonical: file is missing on disk")
+		hxRefuse(w, r, http.StatusBadRequest, "cannot set canonical: file is missing on disk")
 		return
 	}
 
@@ -217,7 +210,7 @@ func (s *Server) promoteCanonical(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, new(gallery.Exclusion)) {
 			code = http.StatusBadRequest
 		}
-		refuse(code, err.Error())
+		hxRefuse(w, r, code, err.Error())
 		return
 	}
 	hxDone(w, r, "Canonical path updated.", "", fmt.Sprintf("/images/%d", id))

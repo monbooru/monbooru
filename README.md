@@ -1,14 +1,10 @@
-<h1>
-  <picture>
-    <img src="/.github/assets/banner.webp" alt="Monbooru">
-  </picture>
-</h1>
+# ![Monbooru](/.github/assets/banner.webp)
 
 Your own private, lightweight and fast booru: a tag-based image gallery, in the style of Danbooru, for your files.
 
 Designed for organizing your local media collection: images, videos, animated GIFs and manga archives. Tag it by hand or auto-tag it locally with ONNX models (WD14, JoyTag...), then search it by tag. Generation metadata from AI image tools (A1111/Forge, ComfyUI) is read too. The app itself never touches the internet; online features (downloading from boorus, reverse image lookup) live in [monloader](https://github.com/monbooru/monloader), an optional companion.
 
-**[Documentation](https://monbooru.github.io/mondocs/)** · **[Install](#install)** · **[Releases](https://github.com/monbooru/monbooru/releases)** · **[Changelog](CHANGELOG.md)**
+**[Demo](https://monbooru.github.io/demo/)** · **[Documentation](https://monbooru.github.io/mondocs/)** · **[Install](#install)** · **[Releases](https://github.com/monbooru/monbooru/releases)** · **[Changelog](CHANGELOG.md)**
 
 <table>
   <tr>
@@ -145,9 +141,15 @@ contribute back`"| loader
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. [CONTRIBUTING](CONTRIBUTING.md) explains where each one goes and how contributions are credited.
+Bug reports, ideas and pull requests are welcome.
 
-Feel free to ask questions or discuss your setup in [Discussions](https://github.com/monbooru/monbooru/discussions).
+See [CONTRIBUTING](CONTRIBUTING.md) for more information.
+
+Bugs and feature requests go in the GitHub issue tracker.
+
+Feel free to ask questions or discuss your setup in [Discussions](https://github.com/monbooru/monbooru/discussions), or on MonBooru Central, the community-run Discord. 
+
+<a href="https://discord.gg/t4TmGtKRzK"><img src="/.github/assets/discord.webp" width="640" alt="MonBooru Central, the community-run Discord. Join"/></a>
 
 ## License
 

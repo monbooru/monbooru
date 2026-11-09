@@ -17,7 +17,7 @@ func (s *Server) hostMiddleware(next http.Handler) http.Handler {
 		bind, base := s.cfg.Server.BindAddress, s.cfg.Server.BaseURL
 		s.cfgMu.RUnlock()
 		if desktop.ForeignHost(r, bind, base) {
-			http.Error(w, "monbooru answers only to a loopback address or its base_url host", http.StatusMisdirectedRequest)
+			http.Error(w, "monbooru does not answer to this host name: set server.base_url to it (MONBOORU_SERVER_BASE_URL)", http.StatusMisdirectedRequest)
 			return
 		}
 		next.ServeHTTP(w, r)

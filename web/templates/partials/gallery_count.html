@@ -1,0 +1,6 @@
+{{define "partials/gallery_count.html"}}
+{{if .Result}}{{template "result_count" dict "D" . "OOB" true}}
+{{template "gallery_pager" (dict "D" . "Pos" "top" "Class" "pagination-top" "OOB" true)}}
+{{template "gallery_pager" (dict "D" . "Pos" "bottom" "OOB" true)}}{{end}}
+{{template "footer_hidden" dict "N" .HiddenByCeiling "OOB" true}}
+{{end}}

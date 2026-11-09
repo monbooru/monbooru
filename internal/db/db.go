@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/bits"
 	"strings"
+	"sync"
 	"time"
 
 	sqlite "modernc.org/sqlite"
@@ -92,6 +93,9 @@ var ErrLibraryTooOld = errors.New("library too old to upgrade directly")
 type DB struct {
 	Read  *sql.DB
 	Write *sql.DB
+	// Two passes each holding part of one pool would wait on each other
+	// forever.
+	eachConn sync.Mutex
 }
 
 // Only these are URI syntax in a path; a URL encoding breaks relative and drive-letter paths.
@@ -141,10 +145,10 @@ func Open(path string) (*DB, error) {
 // Each connection has its own page cache, so ShrinkMemory holds them all
 // at once to reach every one.
 func (db *DB) ShrinkMemory(ctx context.Context) error {
-	if err := execEachConn(ctx, db.Read, `PRAGMA shrink_memory`); err != nil {
+	if err := db.execEachConn(ctx, db.Read, `PRAGMA shrink_memory`); err != nil {
 		return err
 	}
-	return execEachConn(ctx, db.Write, `PRAGMA shrink_memory`)
+	return db.execEachConn(ctx, db.Write, `PRAGMA shrink_memory`)
 }
 
 // Optimize refreshes the planner statistics a library outgrows. A
@@ -154,10 +158,18 @@ func (db *DB) Optimize(ctx context.Context) error {
 	if _, err := db.Write.ExecContext(ctx, `PRAGMA optimize=0x10002`); err != nil {
 		return err
 	}
-	return execEachConn(ctx, db.Read, `ANALYZE sqlite_schema`)
+	return db.execEachConn(ctx, db.Read, `ANALYZE sqlite_schema`)
 }
 
-func execEachConn(ctx context.Context, pool *sql.DB, stmt string) error {
+// ErrPoolBusy is a pass skipped because a long read kept a connection past
+// eachConnWait: holding the rest meanwhile would stall every other read.
+var ErrPoolBusy = errors.New("database busy; pass skipped")
+
+const eachConnWait = 2 * time.Second
+
+func (db *DB) execEachConn(ctx context.Context, pool *sql.DB, stmt string) error {
+	db.eachConn.Lock()
+	defer db.eachConn.Unlock()
 	n := pool.Stats().MaxOpenConnections
 	if n <= 0 {
 		n = 1
@@ -168,9 +180,14 @@ func execEachConn(ctx context.Context, pool *sql.DB, stmt string) error {
 			_ = c.Close()
 		}
 	}()
+	acquire, cancel := context.WithTimeout(ctx, eachConnWait)
+	defer cancel()
 	for i := 0; i < n; i++ {
-		c, err := pool.Conn(ctx)
+		c, err := pool.Conn(acquire)
 		if err != nil {
+			if ctx.Err() == nil && acquire.Err() != nil {
+				return ErrPoolBusy
+			}
 			return err
 		}
 		conns = append(conns, c)

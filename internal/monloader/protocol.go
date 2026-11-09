@@ -30,6 +30,8 @@ var monloaderRoutes = []struct{ Method, Path string }{
 	{http.MethodPost, "/api/v1/ptr/lookup"},
 	{http.MethodPost, "/api/v1/ptr/tags"},
 	{http.MethodGet, "/api/v1/ptr/tags/search"},
+	{http.MethodGet, "/api/v1/rules"},
+	{http.MethodPost, "/api/v1/rules"},
 	{http.MethodPost, "/api/v1/ptr/contrib"},
 	{http.MethodPost, "/api/v1/ptr/contrib/preview"},
 	{http.MethodPost, "/api/v1/ptr/contrib/pair-preview"},
@@ -139,33 +141,31 @@ func (l *Link) Teardown(remove func()) error {
 // A hundred hashes read from a cold full-size index took nearly 30 s.
 const ptrBatchTimeout = 2 * time.Minute
 
-func (l *Link) ptrBatchLookup(ctx context.Context, gallery string, scheduled bool, images []contract.PTRLookupImage) (map[string][]string, uint64, error) {
+func (l *Link) ptrBatchLookup(ctx context.Context, gallery string, scheduled bool, images []contract.PTRLookupImage) (contract.PTRLookupResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, ptrBatchTimeout)
 	defer cancel()
 	resp, err := l.client.PostSlow(ctx, "/api/v1/ptr/lookup", contract.PTRLookupRequest{
 		Images: images, Gallery: gallery, Scheduled: scheduled,
 	})
 	if err != nil {
-		return nil, 0, err
+		return contract.PTRLookupResponse{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusConflict {
 		if setupRequired(resp) {
-			return nil, 0, setupRefusal(resp)
+			return contract.PTRLookupResponse{}, setupRefusal(resp)
 		}
-		return nil, 0, ErrPTRUnavailable
+		return contract.PTRLookupResponse{}, ErrPTRUnavailable
 	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-		return nil, 0, errPTRBatchUnsupported
+		return contract.PTRLookupResponse{}, errPTRBatchUnsupported
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, 0, refused(resp)
+		return contract.PTRLookupResponse{}, refused(resp)
 	}
 	var out contract.PTRLookupResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, 0, err
-	}
-	return out.Results, out.Index, nil
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	return out, err
 }
 
 func (l *Link) ptrIndexCursor(ctx context.Context) (uint64, error) {

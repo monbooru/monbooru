@@ -30,6 +30,25 @@
   <url type="bugtracker">https://github.com/monbooru/monbooru/issues</url>
   <url type="help">https://monbooru.github.io/mondocs/index.html</url>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>Search results, with the tags of the matching images beside them</caption>
+      <image>https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/gallery.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>An image with its tags, sources and metadata</caption>
+      <image>https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/image.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>An AI-generated image with its auto-tags and ComfyUI generation data</caption>
+      <image>https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/sd.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>The Tags page with categories, usage counts and implications</caption>
+      <image>https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/tags.webp</image>
+    </screenshot>
+  </screenshots>
+
   <content_rating type="oars-1.1"/>
 
   <!-- Filled at build time from VERSION.md and the newest CHANGELOG.md heading. -->

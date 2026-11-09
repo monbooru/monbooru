@@ -129,12 +129,15 @@ func (s *Server) settingsTaggerPost(w http.ResponseWriter, r *http.Request) {
 		writeInlineFlash(w, "err", "Invalid execution provider: "+newProvider)
 		return
 	}
-	// ORT env init is not re-entrant, so no probe while a job runs.
+	// ORT env init is not re-entrant, so no probe while a job runs; the lane
+	// stays held through the release so no job starts on the old session.
 	if newProvider != s.executionProvider() {
-		if s.jobs.IsRunning() {
+		res, err := s.jobs.Reserve()
+		if err != nil {
 			writeInlineFlash(w, "err", "A job is running; try again when it finishes.")
 			return
 		}
+		defer res.Release()
 		if newProvider != "cpu" {
 			// SA4023: the stub build's probe always errors, the tagger build's
 			// does not, and staticcheck only ever sees the stub.
@@ -520,7 +523,8 @@ func (s *Server) settingsTaggerMappingPost(w http.ResponseWriter, r *http.Reques
 	}
 	inst, ok := s.resolveTaggerInstance(name)
 	if !ok {
-		http.Error(w, "tagger not found", http.StatusNotFound)
+		w.Header().Set("HX-Retarget", "#flash-tagger-config-"+name)
+		writeInlineFlash(w, "err", "Tagger "+name+" is not installed any more.")
 		return
 	}
 	writeFlashOOB(w, "flash-tagger-config-"+name, "", "")
@@ -816,6 +820,14 @@ func (s *Server) settingsTaggerDeletePost(w http.ResponseWriter, r *http.Request
 	// writer.
 	dir := filepath.Join(s.cfg.Paths.ModelPath, name)
 	s.cfgMu.RUnlock()
+	// A running job may still name this tagger for its next chunk, and the
+	// release below would kill the worker under it.
+	res, err := s.jobs.Reserve()
+	if err != nil {
+		writeInlineFlash(w, "err", "A job is running; try again when it finishes.")
+		return
+	}
+	defer res.Release()
 	// The folder goes first: an entry dropped before a failed removal
 	// leaves memory and the TOML disagreeing.
 	if err := os.RemoveAll(dir); err != nil {
@@ -834,6 +846,6 @@ func (s *Server) settingsTaggerDeletePost(w http.ResponseWriter, r *http.Request
 	// the idle release.
 	tagger.ReleaseAll()
 	logx.Infof("settings: tagger %q deleted (folder %s removed)", name, dir)
+	setFlashHeader(w, "Tagger "+name+" deleted.", "ok", nil)
 	w.Header().Set("HX-Refresh", "true")
-	writeInlineFlash(w, "ok", "Tagger "+name+" deleted.")
 }

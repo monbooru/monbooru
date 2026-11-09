@@ -372,6 +372,17 @@ func RemoveOwned(b *Boundary) (kept []string, err error) {
 	return kept, err
 }
 
+// SharedWith names another gallery configured on this same folder, or "".
+// Its files are this gallery's too, so nothing may remove them.
+func (b *Boundary) SharedWith() string {
+	for _, f := range b.others {
+		if SameFolder(f.Path, b.root) {
+			return f.Owner
+		}
+	}
+	return ""
+}
+
 func SameFolder(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b) || resolvePath(a) == resolvePath(b)
 }

@@ -49,7 +49,7 @@ func (s *Server) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) syncTrigger(w http.ResponseWriter, r *http.Request) {
 	if cx := s.active(); cx == nil || cx.Degraded {
-		flashStatus(w, http.StatusServiceUnavailable, "Sync unavailable: gallery path is unreadable.")
+		hxRefuse(w, r, http.StatusServiceUnavailable, "Sync unavailable: gallery path is unreadable.")
 		return
 	}
 	if !s.startJob(w, models.JobTypeSync) {

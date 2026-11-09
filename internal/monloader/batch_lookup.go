@@ -182,12 +182,12 @@ func (l *Link) batchPTRLookup(ctx context.Context, cx *library.Gallery, ids []in
 		if len(images) == 0 {
 			continue
 		}
-		results, cursor, err := l.ptrBatchLookup(ctx, cx.Name, false, images)
+		ans, err := l.ptrBatchLookup(ctx, cx.Name, false, images)
 		if err != nil {
 			return matched, err
 		}
 		// A record failure is logged inside and must not abort the batch.
-		hits, _, _ := applyPTRResults(cx, byHash, results, cursor)
+		hits, _, _ := applyPTRResults(cx, byHash, ans, ans.Index)
 		matched += hits
 	}
 	return matched, nil

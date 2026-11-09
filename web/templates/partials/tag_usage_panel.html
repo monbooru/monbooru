@@ -1,5 +1,7 @@
 {{define "partials/tag_usage_panel.html"}}
 {{$kinds := .OriginKinds}}
+<div class="tag-usage-cols">
+<div>
 <h3>Applied by</h3>
 {{if .AppliedBy}}
 <div class="table-scroll">
@@ -26,6 +28,8 @@
 <p class="field-hint">Not applied to any image.</p>
 {{end}}
 
+</div>
+<div>
 <h3>Usage over time</h3>
 {{if .Bars}}
 <pre class="tag-usage-graph">{{range .Bars}}{{.Month}}  <span class="usage-bar">{{.Bar}}</span> {{.Count}}
@@ -33,4 +37,6 @@
 {{else}}
 <p class="field-hint">No applications recorded.</p>
 {{end}}
+</div>
+</div>
 {{end}}

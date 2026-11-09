@@ -485,7 +485,9 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 	before := readVmRSS()
 	ctxs := s.allContexts()
 	for _, cx := range ctxs {
-		if err := cx.ShrinkMemory(); err != nil {
+		if err := cx.ShrinkMemory(); errors.Is(err, db.ErrPoolBusy) {
+			logx.Infof("free memory: shrink %q: %v", cx.Name, err)
+		} else if err != nil {
 			logx.Warnf("free memory: shrink %q: %v", cx.Name, err)
 		}
 	}

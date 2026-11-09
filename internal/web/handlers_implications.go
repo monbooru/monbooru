@@ -163,19 +163,22 @@ func (s *Server) removeImplicationDelete(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	// Claimed before the edge goes: without its sweep the implied rows
-	// would stay on the images.
-	if !s.startJob(w, models.JobTypeTag) {
+	// Reserved before the edge goes: without its sweep the implied rows
+	// would stay on the images. A refusal then leaves the job state alone.
+	res := s.reserveJob(w)
+	if res == nil {
 		return
 	}
+	defer res.Release()
 	if err := s.tagSvc().RemoveImplication(parentID, impliedID); err != nil {
-		s.jobs.Fail(err.Error())
 		flashHeaderErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.goJobWork(models.JobTypeTag, func(context.Context) {
-		s.runImplicationEdges([]models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
-	})
+	if s.startReserved(res, models.JobTypeTag) {
+		s.goJobWork(models.JobTypeTag, func(context.Context) {
+			s.runImplicationEdges([]models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
+		})
+	}
 	setFlashHeader(w, "Implication removed.", "ok",
 		map[string]any{"tag-relations-changed": ""})
 	w.WriteHeader(http.StatusNoContent)

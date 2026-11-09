@@ -36,9 +36,29 @@ flowchart LR
     classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
 ```
 
+## Guidelines
+
+These aren't rules, more the direction I try to keep monbooru and its companions in. They're what I look at first when I read an issue or a pull request, so it helps to have them in mind before starting on something.
+
+1. **Prefer the lightweight solution.** monbooru is meant to run on a modest box at home, so I'd rather have a plain function than a new library, and the standard library than a framework. If something can be done simply with what's already there (Go, SQLite, htmx, plain CSS and JS), that's usually the version I'll go with, even if a heavier one would do a bit more.
+
+2. **Keep things optional and separate.** monbooru works on its own: monloader, monsender, the taggers, ffmpeg, plugins and themes all add to it, but none of them is required. I think a new feature should follow the same idea, by degrading gracefully when a piece is missing and by not adding a hard dependency (a database server, a service, a runtime) that everyone has to install. When something makes sense living outside, as a plugin, a theme or a companion talking through the API, I'd rather it does.
+
+3. **Think of the large libraries.** Something that feels instant on 1,000 images can take seconds on a million. Libraries that big do exist, so it's worth asking how a change behaves when everything grows: what runs on every page, what can wait until it's opened, what can be limited or paged. The target is a home box with spinning disks, not a server.
+
+4. **Stay close to the core feature.** monbooru is a booru for your own files: organize, tag, search, view. A lot of good ideas sit next to that, and I'd rather say no to some of them than end up with an app that does everything a bit.
+
+5. **The user's files are theirs.** The images, the folders and the config belong to the user, and the apps shouldn't modify, move or delete them unless the user asked for it, with a confirmation when it can't be undone.
+
+6. **Stay local and private.** monbooru never goes on the internet, has no telemetry, and only talks to the peers the user paired. Everything online goes through monloader, and monsender asks for as few permissions as it can. A change that adds network calls, or widens what a component can reach, needs a very good reason.
+
+7. **Fit in with what's there.** The terminal look and the simple, old-school UI are part of the project as much as the features. Following the existing style, reusing the patterns the code already has and keeping the wording plain makes a contribution much easier to review, and to keep working on afterwards.
+
 ## Ask a question
 
-Questions, workflows, setups and general talk go to [Discussions](https://github.com/monbooru/monbooru/discussions), for every repo. There is no Discord or other chat server, so answers stay public and the next person can find them.
+Questions, workflows, setups and general talk go to [Discussions](https://github.com/monbooru/monbooru/discussions), for every repo, so answers stay public and the next person can find them.
+
+For live chat, [MonBooru Central](https://discord.gg/t4TmGtKRzK) is a Discord server created and run by monbooru users. Bugs, feature requests and project decisions stay on GitHub, so a bug found in chat still needs an issue.
 
 ## Report it
 
@@ -117,19 +137,19 @@ flowchart TD
     size -->|"a small fix"| branch
     size -->|"anything bigger, a new dependency, or changes across many templates or handlers"| ask["`**Open an issue first**
     say what and why, wait for a go-ahead`"]
-    ask --> branch["`**Write it on a branch of your fork**
+    ask --> branch["`**Write it on a branch of your fork, off dev**
     follow the existing style, reuse the patterns the code already has, and follow any instructions given in the issue`"]
-    branch --> self["`**Read every line of your diff and test it live**`"]
-    self --> link["`**Link the branch from the issue**
-    a small fix opens its issue now`"]
-    link --> review{{"Review answers in the issue or PR"}}
+    branch --> self["`**Read every line of your diff and test it live**
+    make test has to pass`"]
+    self --> pr["`**Open a pull request against dev**
+    Verify runs the build, the linter and the Go tests on it`"]
+    pr --> review{{"Review answers in the pull request"}}
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
-    review -->|"accepted, whole or in part"| ship(["`**Applied upstream, ships in the next release**
-    the PR is closed then, never merged in the GitHub UI → Credit`"])
+    review -->|"accepted"| ship(["`**Squash-merged into dev, ships in the next release** → Credit`"])
 
     class ship hub;
-    class ask,branch,self,link,declined step;
+    class ask,branch,self,pr,declined step;
     class size,review ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
@@ -139,7 +159,7 @@ flowchart TD
     classDef repo fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
 ```
 
-This repo publishes squashed release snapshots, which is why accepted work lands through a release rather than a merge.
+Two branches. `dev` is where the work happens: one commit per change, the pull requests merged in, and the Go tests. `main` holds one snapshot per release. So check that a pull request targets `dev`.
 
 References:
 
@@ -285,7 +305,7 @@ config:
 ---
 flowchart LR
     ship(["`**Your report, request or code ships**`"]) --> log["`**Credited in that release's changelog**
-    a thanks line linking the issue, plus a co-author mention on the release commit for code`"]
+    a thanks line linking the issue or pull request; a merged pull request keeps you as its author on dev`"]
     log -->|"credited in several releases: a long-standing contributor"| ack(["`**A line in the README Acknowledgements**`"])
 
     class ship,ack hub;
