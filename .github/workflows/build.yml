@@ -1,0 +1,314 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      image_tags:
+        description: The image tags, space-separated, without the variant suffix
+        required: true
+        type: string
+      docker:
+        description: Build and push the images
+        required: false
+        type: boolean
+        default: true
+      binaries:
+        description: Build the binaries, installers, AppImage and Flatpak
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      GHCR_LEGACY_TOKEN:
+        required: false
+
+env:
+  GO_VERSION: '1.27.3'
+  GO_SHA256_LINUX_AMD64: '65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40'
+  GO_SHA256_LINUX_ARM64: 'a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49'
+  ORT_VERSION: '1.21.0'
+  DIRECTML_VERSION: '1.15.4'
+  FFMPEG_BUILD: 'v8.1.3-mb2'
+  FFMPEG_NAME: 'ffmpeg-8.1.3-mb2'
+  ORT_SHA256_LINUX_X64: '7485c7e7aac6501b27e353dcbe068e45c61ab51fbaf598d13970dfae669d20bf'
+  ORT_SHA256_LINUX_AARCH64: '4508084bde1232ee1ab4b6fad2155be0ea2ccab1c1aae9910ddb3fb68a60805e'
+  ORT_DML_SHA256_WIN_X64: 'f1f7dd0b6a568ff6e79be3822d591faffb3ae0f7f0aaf58ee3d7bd1d9f0e6edc'
+  DIRECTML_SHA256: '4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9'
+  FFMPEG_SHA256_LINUX64: 'eb15fba0c9f2c01a5ae1da1a6d6392ff5822dee950650521e2c0b214e9851c65'
+  FFMPEG_SHA256_LINUXARM64: '012a038248c9beb6a560564b50823793ef06128c4aa342e53c568194b3fa6b38'
+  FFMPEG_SHA256_WIN64: '2d9320ae1c89dd5e76cc0f144fad814af3a6364e9dc2b7413c7d7a6308fd0e14'
+
+jobs:
+  docker:
+    if: inputs.docker
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            dockerfile: docker/Dockerfile
+            arch: amd64
+            runner: ubuntu-latest
+          - variant: cpu
+            dockerfile: docker/Dockerfile
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - variant: cuda
+            dockerfile: docker/Dockerfile.cuda
+            arch: amd64
+            runner: ubuntu-latest
+          - variant: openvino
+            dockerfile: docker/Dockerfile.openvino
+            arch: amd64
+            runner: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Lowercase image name
+        id: img
+        run: echo "NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+
+      - name: Login to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.variant }} ${{ matrix.arch }}
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/${{ steps.img.outputs.NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Smoke test ${{ matrix.arch }}
+        if: matrix.variant == 'cpu' || matrix.variant == 'openvino'
+        run: |
+          docker run --rm --entrypoint /usr/local/bin/monbooru \
+            ghcr.io/${{ steps.img.outputs.NAME }}@${{ steps.build.outputs.digest }} \
+            -hash-password smoke-test
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: digests-${{ matrix.variant }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    if: inputs.docker
+    runs-on: ubuntu-latest
+    needs: docker
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            suffix: ""
+          - variant: cuda
+            suffix: "-cuda"
+          - variant: openvino
+            suffix: "-openvino"
+    steps:
+      - name: Lowercase image name
+        id: img
+        run: echo "NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.variant }}-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+
+      - name: Login to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag ${{ matrix.variant }}
+        working-directory: /tmp/digests
+        run: |
+          tags=""
+          for t in ${{ inputs.image_tags }}; do
+            tags="$tags --tag ghcr.io/${{ steps.img.outputs.NAME }}:${t}${{ matrix.suffix }}"
+          done
+          docker buildx imagetools create $tags \
+            $(printf 'ghcr.io/${{ steps.img.outputs.NAME }}@sha256:%s ' *)
+
+      - name: Login to GHCR (legacy namespace)
+        if: github.repository == 'monbooru/monbooru'
+        continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: leqwin
+          password: ${{ secrets.GHCR_LEGACY_TOKEN }}
+
+      - name: Push ${{ matrix.variant }} to legacy namespace
+        if: github.repository == 'monbooru/monbooru'
+        continue-on-error: true
+        run: |
+          set -- ${{ inputs.image_tags }}
+          tags=""
+          for t in "$@"; do
+            tags="$tags --tag ghcr.io/leqwin/monbooru:${t}${{ matrix.suffix }}"
+          done
+          docker buildx imagetools create $tags \
+            ghcr.io/${{ steps.img.outputs.NAME }}:${1}${{ matrix.suffix }}
+
+  lite:
+    name: Lite binaries and installer
+    if: inputs.binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Go
+        run: |
+          ./packaging/install-go.sh "${GO_VERSION}" "${GO_SHA256_LINUX_AMD64}"
+
+      - name: Build
+        run: ./packaging/build-binaries.sh lite
+
+      - name: Build the installer
+        run: ./packaging/build-installer.sh lite
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: binaries-lite
+          path: dist/*
+          if-no-files-found: error
+
+  bundled-linux:
+    name: Bundled Linux (${{ matrix.arch }})
+    if: inputs.binaries
+    runs-on: ${{ matrix.runner }}
+    container: node:24-bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.arch }}
+    steps:
+      - name: Install the build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl file gcc git libc6-dev tar xz-utils
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Go
+        run: |
+          sha=$GO_SHA256_LINUX_AMD64
+          [ "${{ matrix.arch }}" = arm64 ] && sha=$GO_SHA256_LINUX_ARM64
+          ./packaging/install-go.sh "${GO_VERSION}" "$sha" "${{ matrix.arch }}"
+
+      - name: Fetch the bundled tools
+        run: ./packaging/fetch-tools.sh
+
+      - name: Build
+        run: ./packaging/build-binaries.sh bundled
+
+      - name: Build the AppImage
+        run: ./packaging/build-appimage.sh
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: binaries-bundled-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  bundled-windows:
+    name: Bundled Windows and installer
+    if: inputs.binaries
+    runs-on: ubuntu-latest
+    env:
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install the build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-x86-64-win32 unzip zip
+          ./packaging/install-go.sh "${GO_VERSION}" "${GO_SHA256_LINUX_AMD64}"
+
+      - name: Fetch the bundled tools
+        run: ./packaging/fetch-tools.sh
+
+      - name: Build
+        env:
+          CC: x86_64-w64-mingw32-gcc-win32
+        run: ./packaging/build-binaries.sh bundled
+
+      - name: Build the installer
+        run: ./packaging/build-installer.sh bundled
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: binaries-bundled-windows
+          path: dist/*
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak bundle
+    if: inputs.binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+
+      - name: Let bwrap open a user namespace
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Build the bundle
+        run: ./packaging/flatpak-bundle.sh
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: binaries-flatpak
+          path: dist/*
+          if-no-files-found: error
