@@ -1,0 +1,20 @@
+{
+  "dataset_info": {
+    "tag_mapping": {
+      "idx_to_tag": {
+        "0": "1girl",
+        "1": "hatsune_miku",
+        "2": "wlop",
+        "3": "neon_genesis_evangelion",
+        "4": "explicit"
+      },
+      "tag_to_category": {
+        "1girl": "general",
+        "hatsune_miku": "character",
+        "wlop": "artist",
+        "neon_genesis_evangelion": "copyright",
+        "explicit": "rating"
+      }
+    }
+  }
+}

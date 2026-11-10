@@ -1,0 +1,3975 @@
+{
+ "components": {
+  "schemas": {
+   "EnqueueResponse": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "Error": {
+    "properties": {
+     "code": {
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "Health": {
+    "properties": {
+     "api": {
+      "description": "The /api/v1 contract's number; it moves when a path, field, status code or vocabulary word a peer reads changes",
+      "type": "integer"
+     },
+     "app": {
+      "description": "Always monloader, so a second launch can tell its own instance from another program on the port",
+      "type": "string"
+     },
+     "gallerydl_version": {
+      "type": "string"
+     },
+     "min_peer_api": {
+      "description": "The oldest monbooru api this monloader still drives",
+      "type": "integer"
+     },
+     "status": {
+      "type": "string"
+     },
+     "version": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "Item": {
+    "properties": {
+     "error": {
+      "type": "string"
+     },
+     "error_code": {
+      "type": "string"
+     },
+     "held_tags": {
+      "description": "What never reached the image, each with its reason: \"lowres (held by your rules)\", \"watermark (rejected by the gallery)\"",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "merge_note": {
+      "description": "What a duplicate or enrich merge folded into the existing image (e.g. \"+7 tags\"), or the rule behind skipped_blacklist and its list (\"global rule: guro\", \"danbooru rule: guro\")",
+      "type": "string"
+     },
+     "monbooru_id": {
+      "type": "integer"
+     },
+     "num": {
+      "description": "1-based pool page order",
+      "type": "integer"
+     },
+     "outcome": {
+      "description": "created, duplicate, enriched, matched, replaced, skipped_archive, skipped_unsupported, skipped_blacklist, failed",
+      "type": "string"
+     },
+     "post_id": {
+      "type": "string"
+     },
+     "sha256": {
+      "type": "string"
+     },
+     "status": {
+      "description": "pending, downloaded, uploaded, done, skipped, failed",
+      "type": "string"
+     },
+     "tag_warnings": {
+      "description": "Tags monbooru rejected on the push, and rule targets that name a category it does not have; recorded, not fatal",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "tags_sent": {
+      "description": "How many tags the push or enrich sent, the rating counted",
+      "type": "integer"
+     },
+     "url": {
+      "description": "canonical source post page",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "Job": {
+    "properties": {
+     "backend": {
+      "description": "Lookup source (booru, ptr, or all) for a lookup job",
+      "type": "string"
+     },
+     "cap": {
+      "description": "The applied item cap when capped is true",
+      "type": "integer"
+     },
+     "capped": {
+      "description": "The resolve hit the per-job item cap, or the listing ended on the job's error_code, so more posts may remain",
+      "type": "boolean"
+     },
+     "commentary": {
+      "description": "Commentary the submitting client attached, used where the post carries none",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "type": "string"
+     },
+     "error": {
+      "type": "string"
+     },
+     "error_code": {
+      "type": "string"
+     },
+     "finished_at": {
+      "format": "date-time",
+      "type": "string"
+     },
+     "folder": {
+      "description": "destination subfolder under the gallery; relative, no .. segment",
+      "type": "string"
+     },
+     "force": {
+      "description": "Last/next run bypasses the gallery-dl archive (set by a forced retry)",
+      "type": "boolean"
+     },
+     "gallery": {
+      "description": "target monbooru gallery",
+      "type": "string"
+     },
+     "id": {
+      "type": "integer"
+     },
+     "image_id": {
+      "description": "monbooru image a metadata, lookup, or replace job targets",
+      "type": "integer"
+     },
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/Item"
+      },
+      "type": "array"
+     },
+     "kind": {
+      "description": "download (the default, omitted), metadata (a source refetch that enriches an existing image), lookup (a hash lookup that enriches an existing image), hash_import (an md5 resolved to a post and imported), replace (a post's file downloaded and pushed over an existing image's bytes), contrib (a PTR contribution send), or ptr_lookup (a batch PTR hash lookup answered in process)",
+      "type": "string"
+     },
+     "max_items": {
+      "description": "per-job item cap supplied at enqueue",
+      "type": "integer"
+     },
+     "md5": {
+      "description": "File md5 a lookup or hash import is keyed on",
+      "type": "string"
+     },
+     "note": {
+      "description": "The job's result line (a contribution send's commit summary); empty for other kinds",
+      "type": "string"
+     },
+     "page_url": {
+      "description": "Page a direct-file send came from; a directlink item records it as its source link",
+      "type": "string"
+     },
+     "root": {
+      "description": "Originating job of a continue-series; a capped search and its continuations share it. Self for a standalone job",
+      "type": "integer"
+     },
+     "sha256": {
+      "description": "File sha256 a ptr lookup is keyed on",
+      "type": "string"
+     },
+     "site": {
+      "description": "gallery-dl category, set after resolve",
+      "type": "string"
+     },
+     "source": {
+      "description": "Source label the submitting client attached, applied where nothing claims the host",
+      "type": "string"
+     },
+     "started_at": {
+      "format": "date-time",
+      "type": "string"
+     },
+     "status": {
+      "description": "queued, running, succeeded, partial, failed, canceled, interrupted (was running when the process died; requeue to re-run)",
+      "type": "string"
+     },
+     "summary": {
+      "$ref": "#/components/schemas/Summary"
+     },
+     "tags": {
+      "description": "Tags the submitting client attached, added to every item this job pushes",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "url": {
+      "type": "string"
+     },
+     "via": {
+      "description": "Client that sent the URL; blank means monloader stamped its own name",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "LookupStatus": {
+    "properties": {
+     "chain": {
+      "description": "the sources the booru walk would query, in order, leaving out any it would skip for a missing credential; empty means nothing is configured",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "daily_budget": {
+      "description": "images per day a scheduled lookup may cover; 0 refuses them all",
+      "type": "integer"
+     },
+     "left_today": {
+      "description": "budgeted lookups still acceptable before the next rollover",
+      "type": "integer"
+     },
+     "resets_at": {
+      "description": "unix time of the next local-midnight rollover",
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "PTRContribPairPreview": {
+    "properties": {
+     "a_ptr": {
+      "description": "the PTR spelling of a",
+      "type": "string"
+     },
+     "b_ptr": {
+      "description": "the PTR spelling of b",
+      "type": "string"
+     },
+     "direction": {
+      "description": "suggest, petition, pending, conflict, covered, or ineligible",
+      "type": "string"
+     },
+     "note": {
+      "description": "why the pair is ineligible; absent otherwise",
+      "type": "string"
+     },
+     "provisional": {
+      "description": "the index is still syncing; the direction may be stale",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "PTRContribPreview": {
+    "properties": {
+     "provisional": {
+      "description": "the index is still syncing; the diff may overstate what is new",
+      "type": "boolean"
+     },
+     "ptr_only": {
+      "items": {
+       "properties": {
+        "petitionable": {
+         "description": "false when a removal for this tag and hash is already staged or awaiting janitor review",
+         "type": "boolean"
+        },
+        "ptr": {
+         "description": "the raw PTR spelling a removal petition would target",
+         "type": "string"
+        },
+        "tag": {
+         "description": "monbooru form of a PTR-current tag the submitted list lacks",
+         "type": "string"
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "to_add": {
+      "items": {
+       "properties": {
+        "note": {
+         "description": "why the tag is ineligible or filtered",
+         "type": "string"
+        },
+        "ptr": {
+         "description": "the exact PTR spelling a send would use; empty when ineligible",
+         "type": "string"
+        },
+        "status": {
+         "description": "new, known, ineligible, filtered, or unsent",
+         "type": "string"
+        },
+        "tag": {
+         "description": "the submitted monbooru-form tag",
+         "type": "string"
+        },
+        "unknown_tag": {
+         "description": "on a new row, the PTR spelling is not a tag the index holds at all; absent otherwise",
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "PTRContribResults": {
+    "properties": {
+     "job_id": {
+      "description": "the send job, when anything was accepted and commit was on",
+      "type": "integer"
+     },
+     "results": {
+      "items": {
+       "properties": {
+        "kind": {
+         "description": "the item's kind, in request order",
+         "type": "string"
+        },
+        "note": {
+         "description": "detail on a refusal; absent otherwise",
+         "type": "string"
+        },
+        "result": {
+         "description": "staged, or why the item was refused",
+         "type": "string"
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "type": "object"
+   },
+   "PTRLookupResults": {
+    "properties": {
+     "index": {
+      "description": "the index's applied-update cursor at answer time",
+      "type": "integer"
+     },
+     "results": {
+      "description": "map of a matched sha256 to its monbooru-form tags; a hash the index does not hold, or holds nothing usable for, is absent",
+      "type": "object"
+     },
+     "withheld_categories": {
+      "description": "the categories Keep categories leaves out of every answer",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "withheld_tags": {
+      "description": "map of a matched sha256 to the tags the PTR's row held back; they say nothing about whether the hash still lists them",
+      "type": "object"
+     }
+    },
+    "type": "object"
+   },
+   "PTRStatus": {
+    "properties": {
+     "contrib": {
+      "description": "contribution gate; absent while the PTR is off",
+      "properties": {
+       "account": {
+        "description": "a personal (non-public) access key is set; every contribution surface gates on this",
+        "type": "boolean"
+       },
+       "banned": {
+        "description": "the account is banned; contribution surfaces hide, sync stays allowed",
+        "type": "boolean"
+       },
+       "failed": {
+        "description": "items whose last send failed, kept for retry",
+        "type": "integer"
+       },
+       "unsent": {
+        "description": "staged or failed items awaiting a send",
+        "type": "integer"
+       }
+      },
+      "type": "object"
+     },
+     "counts": {
+      "properties": {
+       "hashes": {
+        "type": "integer"
+       },
+       "mappings": {
+        "type": "integer"
+       },
+       "parents": {
+        "type": "integer"
+       },
+       "siblings": {
+        "type": "integer"
+       },
+       "tags": {
+        "type": "integer"
+       }
+      },
+      "type": "object"
+     },
+     "covered_through": {
+      "description": "unix time the synced data reaches; absent until an update has been applied",
+      "type": "integer"
+     },
+     "disk_bytes": {
+      "type": "integer"
+     },
+     "enabled": {
+      "type": "boolean"
+     },
+     "error": {
+      "type": "string"
+     },
+     "next_update_due": {
+      "description": "unix time the next update is expected",
+      "type": "integer"
+     },
+     "progress": {
+      "properties": {
+       "blobs_done": {
+        "description": "update blobs applied; over blobs_total this is the volume-weighted sync fraction (0 until the blob census is known)",
+        "type": "integer"
+       },
+       "blobs_total": {
+        "description": "update blobs the server publishes",
+        "type": "integer"
+       },
+       "download_rate": {
+        "description": "average fetch rate in bytes per second over the pass's network time, while syncing",
+        "type": "integer"
+       },
+       "downloaded_bytes": {
+        "description": "compressed bytes fetched this session",
+        "type": "integer"
+       },
+       "last_applied_at": {
+        "description": "unix time the last update this process committed was applied (absent until one lands)",
+        "type": "integer"
+       },
+       "process_rate": {
+        "description": "rows replayed into the index per second of replay time, while syncing",
+        "type": "integer"
+       },
+       "update_count": {
+        "description": "total updates the server publishes",
+        "type": "integer"
+       },
+       "update_index": {
+        "description": "the update index being applied",
+        "type": "integer"
+       }
+      },
+      "type": "object"
+     },
+     "queryable": {
+      "description": "the lookup, tag and contribution reads answer: the index finished a full sync and is not replaying a backlog (holds while paused)",
+      "type": "boolean"
+     },
+     "state": {
+      "description": "disabled, syncing, ready, paused, error",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "PTRTagResults": {
+    "properties": {
+     "results": {
+      "description": "map of the queried tag to its PTR ideal, aliases, implications, and implied_by (monbooru form); known=false when the PTR does not have the tag",
+      "type": "object"
+     }
+    },
+    "type": "object"
+   },
+   "PTRTagSearch": {
+    "properties": {
+     "clusters": {
+      "items": {
+       "properties": {
+        "aliases": {
+         "description": "other spellings resolving to the ideal",
+         "type": "integer"
+        },
+        "ideal": {
+         "description": "the cluster's preferred spelling in monbooru form; the name to look up or pull under",
+         "type": "string"
+        },
+        "implications": {
+         "description": "distinct tags the cluster implies",
+         "type": "integer"
+        },
+        "implied_by": {
+         "description": "distinct tags implying the cluster, capped at 200 like the graph answer",
+         "type": "integer"
+        },
+        "matched": {
+         "description": "the spellings of this cluster the query matched, in monbooru form",
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "truncated": {
+      "description": "a scan or the limit cut the answer short; narrow the query to see the rest",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "PaginatedJobs": {
+    "properties": {
+     "jobs": {
+      "items": {
+       "$ref": "#/components/schemas/Job"
+      },
+      "type": "array"
+     },
+     "limit": {
+      "type": "integer"
+     },
+     "page": {
+      "type": "integer"
+     },
+     "paused": {
+      "description": "Whether the queue is holding new downloads (see the pause/resume endpoints)",
+      "type": "boolean"
+     },
+     "total": {
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "PauseState": {
+    "properties": {
+     "paused": {
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "ProbeResult": {
+    "properties": {
+     "detail": {
+      "type": "string"
+     },
+     "missing_credential": {
+      "description": "The credential the site requires and the config lacks (\"cookies\", \"api key\"); absent when nothing is missing",
+      "type": "string"
+     },
+     "status": {
+      "description": "ok, auth_required, blocked, rate_limited, failed",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "Site": {
+    "properties": {
+     "auth": {
+      "description": "none, api_optional, api_required, username_password, cookies, oauth",
+      "type": "string"
+     },
+     "category": {
+      "type": "string"
+     },
+     "configured": {
+      "description": "Carries user-set site data or a custom profile (the settings tables' visibility rule)",
+      "type": "boolean"
+     },
+     "curated": {
+      "description": "Has a mapping profile (shipped or user)",
+      "type": "boolean"
+     },
+     "custom_profile": {
+      "description": "A user profile file overrides the shipped mapping",
+      "type": "boolean"
+     },
+     "example": {
+      "type": "string"
+     },
+     "hosts": {
+      "description": "The curated profile's host aliases (file CDNs, mirror instances); a registrable domain covers its subdomains",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "kind": {
+      "description": "booru, manga, other",
+      "type": "string"
+     },
+     "name": {
+      "description": "Display name from gallery-dl's supported-sites data",
+      "type": "string"
+     },
+     "subcategory": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "Summary": {
+    "properties": {
+     "archived": {
+      "description": "The archive half of skipped: the posts a forced retry can fetch again",
+      "type": "integer"
+     },
+     "blacklisted": {
+      "description": "The rule half of skipped: posts a blacklist rule kept out, which a forced retry skips again",
+      "type": "integer"
+     },
+     "canceled": {
+      "description": "Items aborted by a job cancel, kept out of failed",
+      "type": "integer"
+     },
+     "created": {
+      "type": "integer"
+     },
+     "duplicate": {
+      "type": "integer"
+     },
+     "enriched": {
+      "description": "Source refetches and hash lookups that merged tags into an image monbooru already holds",
+      "type": "integer"
+     },
+     "failed": {
+      "type": "integer"
+     },
+     "matched": {
+      "description": "Hashes a batch PTR lookup answered with tags; true past the bound on the items the row keeps",
+      "type": "integer"
+     },
+     "replaced": {
+      "description": "In-place file replacements of an image monbooru already holds",
+      "type": "integer"
+     },
+     "skipped": {
+      "description": "Posts the gallery-dl archive already had, files monbooru cannot ingest, or posts a blacklist rule kept out",
+      "type": "integer"
+     },
+     "total": {
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "TagRule": {
+    "properties": {
+     "blacklist": {
+      "description": "global or site when a blacklist rule names the tag, before or after its rule; absent otherwise",
+      "type": "string"
+     },
+     "blacklist_line": {
+      "description": "The blacklist line that names the tag, as written; a line with other tags skips only the posts that also match them",
+      "type": "string"
+     },
+     "builtin": {
+      "description": "True for a site the history or a watch reached but the settings never set up: its rules are the built-in profile's",
+      "type": "boolean"
+     },
+     "kept": {
+      "description": "Whether the tag, as this site sends it after its rule, survives the global category drop",
+      "type": "boolean"
+     },
+     "kind": {
+      "description": "booru, manga, other; lookup for the PTR",
+      "type": "string"
+     },
+     "mapped_from": {
+      "description": "The site's own categories a category map sends into this category",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "renamed_from": {
+      "description": "The names the site's tag rules turn into this tag",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "rule": {
+      "description": "none, drop, rename, move: the site's tag rule on the name",
+      "type": "string"
+     },
+     "site": {
+      "type": "string"
+     },
+     "target": {
+      "description": "What a rename or move sends instead",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "TagRules": {
+    "properties": {
+     "category": {
+      "type": "string"
+     },
+     "category_kept": {
+      "description": "False when the global Rules drop the category after download",
+      "type": "boolean"
+     },
+     "sites": {
+      "items": {
+       "$ref": "#/components/schemas/TagRule"
+      },
+      "type": "array"
+     },
+     "tag": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  "securitySchemes": {
+   "bearerAuth": {
+    "bearerFormat": "token",
+    "description": "Required on every endpoint except /health, /api/v1/openapi.json, /api/v1/docs, and the unauthenticated /api/v1/pair/* pairing bootstrap. Use a named, scoped token from Settings -> Authentication (read: queue/sites; write: enqueue/manage); the API is disabled until at least one token exists.",
+    "scheme": "bearer",
+    "type": "http"
+   }
+  }
+ },
+ "info": {
+  "description": "Queue booru URLs for download into monbooru. Errors answer {error, code}; clients branch on code. Every authenticated operation can answer 401 unauthorized, 403 insufficient_scope, or 503 api_disabled; on a desktop install whose first-run setup is not finished, every /api/v1 path but this reference answers 409 setup_required.",
+  "title": "monloader API",
+  "version": "dev"
+ },
+ "openapi": "3.0.3",
+ "paths": {
+  "/api/v1/docs": {
+   "get": {
+    "operationId": "docs",
+    "responses": {
+     "200": {
+      "description": "HTML reference"
+     }
+    },
+    "security": [],
+    "summary": "HTML API reference"
+   }
+  },
+  "/api/v1/galleries/rename": {
+   "post": {
+    "description": "Called by monbooru when one of its galleries is renamed: the default gallery and every site target naming the old name move to the new one. Downloads resolve their target when they start, so the ones still waiting follow too.",
+    "operationId": "galleryRename",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "from": {
+          "description": "The gallery's old name",
+          "type": "string"
+         },
+         "to": {
+          "description": "Its new name",
+          "type": "string"
+         }
+        },
+        "required": [
+         "from",
+         "to"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "changed": {
+           "description": "How many settings named the old gallery",
+           "type": "integer"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Settings moved to the new name"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "A name is missing"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The settings could not be saved (save_failed)"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Follow a monbooru gallery rename"
+   }
+  },
+  "/api/v1/lookup": {
+   "post": {
+    "description": "Look a file hash up - the booru backend walks the sites given a lookup order in settings using their md5 search, the ptr backend queries the local PTR index by sha256, the all backend runs both (skipping the PTR when it is disabled) - and fold the tags found into the monbooru image it names. The queued job reports the enriched outcome, or failed with hash_not_found when no source knows the hash.",
+    "operationId": "lookupHash",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "backend": {
+          "description": "\"booru\", \"ptr\", or \"all\"",
+          "type": "string"
+         },
+         "background": {
+          "description": "Queue behind anything a person is waiting on, for bulk or unattended work (default false)",
+          "type": "boolean"
+         },
+         "budgeted": {
+          "description": "Count the job against the daily scheduled-lookup budget and refuse it when that is spent (default false)",
+          "type": "boolean"
+         },
+         "gallery": {
+          "description": "Gallery holding the image; empty uses monbooru's active gallery",
+          "type": "string"
+         },
+         "image_id": {
+          "description": "monbooru image to enrich",
+          "type": "integer"
+         },
+         "md5": {
+          "description": "32-hex file md5, required by the booru and all backends",
+          "type": "string"
+         },
+         "sha256": {
+          "description": "64-hex file sha256, required by the ptr backend, and by the all backend while the ptr sync is enabled",
+          "type": "string"
+         }
+        },
+        "required": [
+         "image_id",
+         "backend"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Lookup queued; poll GET /api/v1/queue/{id}"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Missing image_id, unknown backend, or a malformed hash"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The ptr backend is disabled or not fully synced"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Budgeted and today's scheduled-lookup budget is spent"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Find tags for a file hash and enrich a monbooru image"
+   }
+  },
+  "/api/v1/lookup/status": {
+   "get": {
+    "description": "Report how much of today's scheduled-lookup budget is left, when it rolls over, and which sources the walk would query. A readout only: the 429 on an enqueue stays authoritative, so a caller must not keep its own count.",
+    "operationId": "lookupStatus",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LookupStatus"
+        }
+       }
+      },
+      "description": "Budget and chain state"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Scheduled-lookup budget and chain readout"
+   }
+  },
+  "/api/v1/metadata": {
+   "post": {
+    "description": "Re-read a post URL for its tags, commentary, and notes (no file download) and fold them into the monbooru image it names. The queued job reports the enriched outcome, or failed with hash_mismatch when the source no longer serves the stored file.",
+    "operationId": "refetchMetadata",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "gallery": {
+          "description": "Gallery holding the image; empty uses monbooru's active gallery",
+          "type": "string"
+         },
+         "image_id": {
+          "description": "monbooru image to enrich",
+          "type": "integer"
+         },
+         "url": {
+          "description": "Source post URL to re-read",
+          "type": "string"
+         }
+        },
+        "required": [
+         "image_id",
+         "url"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Refetch queued; poll GET /api/v1/queue/{id}"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Missing image_id, or a non-http(s) url"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Refetch a post's metadata and enrich a monbooru image"
+   }
+  },
+  "/api/v1/openapi.json": {
+   "get": {
+    "operationId": "openapi",
+    "responses": {
+     "200": {
+      "description": "OpenAPI 3 spec"
+     }
+    },
+    "security": [],
+    "summary": "This OpenAPI document"
+   }
+  },
+  "/api/v1/pair/remove": {
+   "post": {
+    "description": "Authenticates with the paired token itself rather than the bearer gate, so one \"remove pairing\" tears down both ends. monloader removes only locally and never calls back.",
+    "operationId": "pairRemove",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "status": {
+           "description": "Always \"removed\"",
+           "type": "string"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Pairing removed"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The Authorization header is missing or is not a pairing token"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The pairing could not be removed (remove_failed)"
+     }
+    },
+    "security": [],
+    "summary": "Drop a pairing from the client side"
+   }
+  },
+  "/api/v1/pair/request": {
+   "post": {
+    "description": "Step one of the handshake a client runs before it can call anything else. Nothing is issued here: the operator approves the request in monloader's settings, after which the client claims its token from GET /api/v1/pair/status. Unauthenticated by design - it is how a client obtains a token.",
+    "operationId": "pairRequest",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "app": {
+          "description": "The client's name, shown to the operator: [A-Za-z0-9_-]{1,32}; \"monbooru\" is reserved for the dedicated pairing flow",
+          "type": "string"
+         },
+         "requested_scopes": {
+          "description": "Scopes to ask for (read, write); an empty list grants read only",
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         }
+        },
+        "required": [
+         "app"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "request_id": {
+           "description": "Poll GET /api/v1/pair/status with this id",
+           "type": "string"
+          },
+          "status": {
+           "description": "Always \"pending\"",
+           "type": "string"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Request registered, awaiting approval"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Missing app name, or the reserved name \"monbooru\""
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Already paired with that app; remove the existing pairing first"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Too many pending pairing requests"
+     }
+    },
+    "security": [],
+    "summary": "Offer a pairing"
+   }
+  },
+  "/api/v1/pair/status": {
+   "get": {
+    "description": "Reports pending / denied / approved. The first poll after approval mints the client's token, returns the secret once and forgets the request, so a later poll gets 404; a poll racing the claim answers approved with no token.",
+    "operationId": "pairStatus",
+    "parameters": [
+     {
+      "description": "The request_id from POST /api/v1/pair/request",
+      "in": "query",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "status": {
+           "description": "pending, denied, or approved",
+           "type": "string"
+          },
+          "token": {
+           "description": "The bearer secret, present once, on the first poll after approval",
+           "type": "string"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Request state, with the token on the claiming poll"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Unknown pairing request"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The token could not be minted (mint_failed); the approval stands, so poll again"
+     }
+    },
+    "security": [],
+    "summary": "Poll a pairing request"
+   }
+  },
+  "/api/v1/ptr/account": {
+   "post": {
+    "description": "Run the repository's open auto-creation once and store the resulting access key as the instance's personal account, shared by sync and uploads. Refused while a personal key is already set; replacing an account is a deliberate manual step (clear the key in settings first).",
+    "operationId": "ptrAccountCreate",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "created": {
+           "type": "boolean"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Account created and key stored"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "PTR disabled, or a personal key already exists"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The key could not be saved (save_failed); the account exists, so back the key up from the ptr page"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The repository answered an error (ptr_error)"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The repository is not taking new accounts right now; or api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Create the personal PTR contribution account"
+   }
+  },
+  "/api/v1/ptr/contrib": {
+   "delete": {
+    "operationId": "ptrContribRescindAll",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "rescinded": {
+           "type": "integer"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Count of rescinded items"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The contribution store could not be written"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Rescind every unsent item"
+   },
+   "get": {
+    "description": "The unsent backlog (staged and failed items with errors), counts by kind and status, and the newest slice of the committed history with each row's janitor outcome.",
+    "operationId": "ptrContribLedger",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "counts": {
+           "properties": {
+            "by_kind": {
+             "description": "unsent items per kind",
+             "type": "object"
+            },
+            "by_status": {
+             "description": "unsent items per status",
+             "type": "object"
+            },
+            "outcomes": {
+             "description": "the newest 100 history rows per janitor outcome, pending included",
+             "type": "object"
+            }
+           },
+           "type": "object"
+          },
+          "log": {
+           "description": "the newest 100 committed items",
+           "items": {
+            "properties": {
+             "committed_at": {
+              "description": "unix seconds",
+              "type": "integer"
+             },
+             "id": {
+              "type": "integer"
+             },
+             "kind": {
+              "type": "string"
+             },
+             "outcome": {
+              "description": "applied, not_taken, approved, removed, or rescinded; absent while pending",
+              "type": "string"
+             },
+             "outcome_at": {
+              "description": "unix seconds; absent while pending",
+              "type": "integer"
+             },
+             "reason": {
+              "type": "string"
+             },
+             "sha256": {
+              "type": "string"
+             },
+             "tag": {
+              "type": "string"
+             },
+             "tag2": {
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "type": "array"
+          },
+          "unsent": {
+           "description": "staged and failed items, oldest first",
+           "items": {
+            "properties": {
+             "created_at": {
+              "description": "unix seconds",
+              "type": "integer"
+             },
+             "error": {
+              "description": "why the last send failed; absent otherwise",
+              "type": "string"
+             },
+             "id": {
+              "type": "integer"
+             },
+             "kind": {
+              "type": "string"
+             },
+             "origin": {
+              "type": "string"
+             },
+             "reason": {
+              "type": "string"
+             },
+             "sha256": {
+              "description": "the file hash, for the mapping kinds",
+              "type": "string"
+             },
+             "status": {
+              "description": "staged or failed; an item mid-send is left out",
+              "type": "string"
+             },
+             "tag": {
+              "description": "the mapping tag, the sibling's bad or the parent's child",
+              "type": "string"
+             },
+             "tag2": {
+              "description": "the sibling's good or the parent's parent; absent otherwise",
+              "type": "string"
+             }
+            },
+            "type": "object"
+           },
+           "type": "array"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Unsent items, counts, and history"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The contribution store could not be read"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Contribution ledger"
+   },
+   "post": {
+    "description": "Stage items (tags in monbooru form; monloader maps and validates) and, by default, commit them in the same call as one queue send job. Per-item results report staged, duplicate, already_known, already_suggested, not_on_ptr, conflict, ineligible, or invalid_reason; one refused item never sinks the rest. A reason is required on every kind except mapping_add. With commit true the account is validated synchronously first.",
+    "operationId": "ptrContribStage",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "commit": {
+          "description": "send the accepted items now as one queue job (default true)",
+          "type": "boolean"
+         },
+         "items": {
+          "items": {
+           "properties": {
+            "bad": {
+             "description": "the alias name, for the sibling kinds",
+             "type": "string"
+            },
+            "child": {
+             "description": "the carrying tag, for the parent kinds",
+             "type": "string"
+            },
+            "good": {
+             "description": "the canonical name, for the sibling kinds",
+             "type": "string"
+            },
+            "kind": {
+             "description": "mapping_add, mapping_petition, sibling, parent, sibling_petition, or parent_petition",
+             "type": "string"
+            },
+            "parent": {
+             "description": "the implied tag, for the parent kinds",
+             "type": "string"
+            },
+            "reason": {
+             "description": "the janitor-facing reason; required on every kind except mapping_add",
+             "type": "string"
+            },
+            "sha256": {
+             "description": "the file hash, for the mapping kinds",
+             "type": "string"
+            },
+            "tag": {
+             "description": "the tag in monbooru form, for the mapping kinds",
+             "type": "string"
+            }
+           },
+           "type": "object"
+          },
+          "type": "array"
+         },
+         "origin": {
+          "description": "display provenance carried on the staged row while it is unsent, e.g. \"image 42\"; the committed ledger entry identifies the item by hash instead",
+          "type": "string"
+         }
+        },
+        "required": [
+         "items"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRContribResults"
+        }
+       }
+      },
+      "description": "Per-item results and no send job: nothing was accepted, or commit was false and the accepted items wait staged"
+     },
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRContribResults"
+        }
+       }
+      },
+      "description": "Per-item results plus the send job id"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Malformed body, or an empty items list"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "ptr_unavailable, ptr_account_required, ptr_banned, or ptr_syncing"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Stage contributions and send them"
+   }
+  },
+  "/api/v1/ptr/contrib/commit": {
+   "post": {
+    "description": "Queue one send job over every staged and failed item - the retry path for failed leftovers. Refused while another send is queued or running.",
+    "operationId": "ptrContribCommit",
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "The send job id"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "ptr_unavailable, ptr_account_required, ptr_banned, ptr_syncing, or already_running"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Send the unsent backlog"
+   }
+  },
+  "/api/v1/ptr/contrib/log/{id}/rescind": {
+   "post": {
+    "description": "Stage and send a removal petition for the same tag and hash with a fixed reason, and mark the ledger row rescinded. Committed suggestions and petitions cannot be withdrawn - the protocol reserves their resolution for janitors.",
+    "operationId": "ptrContribLogRescind",
+    "parameters": [
+     {
+      "description": "Ledger row id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "The send job id"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "No ledger row with that id"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "not_rescindable, or an account refusal"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The contribution store could not be read"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Rescind a committed mapping add"
+   }
+  },
+  "/api/v1/ptr/contrib/pair-preview": {
+   "post": {
+    "description": "For a sibling (a=bad, b=good) or parent (a=child, b=parent) pair in monbooru form, report the exact PTR spellings and which direction a contribution takes: suggest (absent from the PTR), petition (current on the PTR), pending (already in the ledger awaiting janitors), conflict (the PTR holds the reverse), covered (a sibling's spellings already resolve to one ideal, or a parent edge already holds), or ineligible.",
+    "operationId": "ptrContribPairPreview",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "a": {
+          "description": "the alias (sibling) or carrying tag (parent), monbooru form",
+          "type": "string"
+         },
+         "b": {
+          "description": "the canonical (sibling) or implied tag (parent), monbooru form",
+          "type": "string"
+         },
+         "kind": {
+          "description": "sibling or parent",
+          "type": "string"
+         }
+        },
+        "required": [
+         "kind",
+         "a",
+         "b"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRContribPairPreview"
+        }
+       }
+      },
+      "description": "The pair's direction and PTR spellings"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Malformed body or kind"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Resolve a relation pair's contribution direction"
+   }
+  },
+  "/api/v1/ptr/contrib/preview": {
+   "post": {
+    "description": "For one file's sha256 and its monbooru-form tags, answer the two-way diff against the synced PTR copy: which tags a send would add (with the exact PTR spelling and a per-tag status of new, known, ineligible, filtered, or unsent) and which PTR-current tags the submitted list lacks (the removal-petition candidates; both sides compare on the display view, so alias spellings and implied tags never read as diffs). provisional is true while the index is still syncing, so the diff may overstate what is new.",
+    "operationId": "ptrContribPreview",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "implied": {
+          "description": "the file's implied tags, context only: never offered as adds, but they suppress removal petitions like submitted tags do",
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         "sha256": {
+          "description": "the file's sha256, 64 lowercase hex characters",
+          "type": "string"
+         },
+         "tags": {
+          "description": "the file's storage tags in monbooru form (non-implied, non-alias, rating excluded)",
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         }
+        },
+        "required": [
+         "sha256",
+         "tags"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRContribPreview"
+        }
+       }
+      },
+      "description": "The two-way diff"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Malformed hash or body"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Preview a file's contribution diff"
+   }
+  },
+  "/api/v1/ptr/contrib/{id}": {
+   "delete": {
+    "description": "Delete one staged or failed item exactly - nothing ever left the machine.",
+    "operationId": "ptrContribRescind",
+    "parameters": [
+     {
+      "description": "Unsent item id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Rescinded"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "No unsent item with that id"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The contribution store could not be written"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Rescind one unsent item"
+   }
+  },
+  "/api/v1/ptr/lookup": {
+   "post": {
+    "description": "Return the tags the local index holds for each file sha256, in monbooru form. Answers in process, so a whole-library sweep costs one call per batch instead of a queued job per image; a hash the index does not hold, or holds nothing usable for, is absent from the results.",
+    "operationId": "ptrLookup",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "gallery": {
+          "description": "Gallery the images come from; recorded on that row",
+          "type": "string"
+         },
+         "images": {
+          "description": "At most 100 `{ image_id, sha256 }` pairs; the id names the image on the queue row the answer files, and is required on each entry like it is on the per-image lookup",
+          "items": {
+           "type": "object"
+          },
+          "type": "array"
+         },
+         "scheduled": {
+          "description": "Set by monbooru's nightly run, so the row reads as scheduled rather than bulk",
+          "type": "boolean"
+         }
+        },
+        "required": [
+         "images"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRLookupResults"
+        }
+       }
+      },
+      "description": "Tags per matched hash, plus the index cursor"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Empty or over-long image list, or a malformed hash"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available or not fully synced"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The index could not be read"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Look a batch of file hashes up in the PTR index"
+   }
+  },
+  "/api/v1/ptr/status": {
+   "get": {
+    "description": "Report whether the Hydrus PTR lookup backend is enabled and, when it is, its sync state, progress, and index counts. Always answers, so a caller's capability check is one unconditional GET; a run without the PTR built in reports disabled.",
+    "operationId": "ptrStatus",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRStatus"
+        }
+       }
+      },
+      "description": "PTR status"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "PTR sync status and capability"
+   }
+  },
+  "/api/v1/ptr/tags": {
+   "post": {
+    "description": "For each monbooru-form tag, return the PTR's ideal spelling, the tags that alias to it, its implications, and the tags that imply it (direct children, at most 200), mapped back to monbooru form. Batched so a caller can sweep its tag list page by page.",
+    "operationId": "ptrTags",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "tags": {
+          "description": "monbooru-form tag names, at most 500",
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         }
+        },
+        "required": [
+         "tags"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRTagResults"
+        }
+       }
+      },
+      "description": "Per-tag graph answers"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Empty or over-long tag list"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available or not fully synced"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The index could not be read"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Query the PTR alias / implication graph"
+   }
+  },
+  "/api/v1/ptr/tags/search": {
+   "get": {
+    "description": "Find the spellings the index holds under a monbooru-form prefix, folded to one row per sibling cluster with the size of each cluster's graph. The graph query answers about a name the caller already knows; this is how it finds out which name to ask about when the operator's own spelling is not the repository's.",
+    "operationId": "ptrTagSearch",
+    "parameters": [
+     {
+      "description": "monbooru-form prefix, `category:name` or bare for general",
+      "in": "query",
+      "name": "q",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Clusters to return, 1..50 (default 20)",
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      }
+     },
+     {
+      "description": "`prefix` (default) seeks the range; `contains` walks the namespace instead and needs a category-qualified q, since a bare one has nothing to bound the scan. Anything else is refused",
+      "in": "query",
+      "name": "mode",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PTRTagSearch"
+        }
+       }
+      },
+      "description": "Matching clusters, best first"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Empty q, a limit out of range, or contains with no namespace to bound it"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The PTR index is not available or not fully synced"
+     },
+     "500": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The index could not be read"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Search the PTR's spellings"
+   }
+  },
+  "/api/v1/queue": {
+   "get": {
+    "operationId": "listJobs",
+    "parameters": [
+     {
+      "description": "Filter by job status",
+      "in": "query",
+      "name": "status",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Page number (1-based)",
+      "in": "query",
+      "name": "page",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      }
+     },
+     {
+      "description": "Results per page (max 200)",
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PaginatedJobs"
+        }
+       }
+      },
+      "description": "Paginated job list"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Unknown status filter"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "List jobs"
+   },
+   "post": {
+    "operationId": "enqueue",
+    "parameters": [
+     {
+      "description": "Block up to N seconds (capped at 60) for the job to resolve and return it inline; otherwise 202 with a job id",
+      "in": "query",
+      "name": "wait",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "options": {
+          "properties": {
+           "commentary": {
+            "description": "Commentary for every item this job pushes, used only where the post itself carries none - a direct file link, typically. Max 10000 characters",
+            "type": "string"
+           },
+           "folder": {
+            "description": "Destination subfolder under the gallery; relative, no .. segment",
+            "type": "string"
+           },
+           "gallery": {
+            "description": "Target monbooru gallery; overrides the per-source default",
+            "type": "string"
+           },
+           "max_items": {
+            "description": "Cap on posts fetched this run (--range 1-N); only lowers the cap, never above the server's max_items_per_job, and 0 keeps it. A pool is exempt and always fetched whole",
+            "type": "integer"
+           },
+           "page_url": {
+            "description": "The page a direct-file send came from; a directlink job records it as the item's source link instead of the bare file URL",
+            "type": "string"
+           },
+           "source": {
+            "description": "Source label for every item this job pushes. Applied only where monloader would otherwise stamp a bare host nothing claims (a direct link to a CDN); a site with a profile, a [[sites]] label, or a host_labels row keeps its own name. Max 200 characters",
+            "type": "string"
+           },
+           "tags": {
+            "description": "Tags to add to every item this job pushes, on top of the ones mapped from the post. Normalized like any other tag (a category prefix is kept); duplicates are dropped. Max 64",
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "via": {
+            "description": "Names the client that sent the URL; lands on monbooru's image origin, and on the tagger of each tag only for a push carrying no source label - every booru push carries one, and monbooru prefers it so each source owns a prunable slice. Blank keeps \"monloader\". Max 200 characters, no whitespace or any of: \" ' < > [ ] \\",
+            "type": "string"
+           }
+          },
+          "type": "object"
+         },
+         "url": {
+          "description": "A booru post, pool, tag-search, or artist URL gallery-dl supports; or \"md5:<32 hex>\" to find and import the post carrying that file hash via the lookup walk. Surrounding whitespace is trimmed, the scheme and host are lower-cased, and the md5: prefix is matched case-insensitively; a bare hash is not accepted here",
+          "type": "string"
+         }
+        },
+        "required": [
+         "url"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Job"
+        }
+       }
+      },
+      "description": "Resolved job (only when wait elapsed in time)"
+     },
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Job accepted; poll GET /api/v1/queue/{id}"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Missing or non-http(s) url, a bad md5: hash, a folder that is absolute or climbs with .., negative max_items, non-http(s) page_url, or client metadata past its cap"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "No monbooru is configured (monbooru_unconfigured), or its link is paused from the footer light (monbooru_paused)"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Enqueue a URL"
+   }
+  },
+  "/api/v1/queue/pause": {
+   "post": {
+    "description": "Hold the queue globally, for every kind of job. A job already running finishes; pending and newly submitted jobs wait until resume.",
+    "operationId": "pauseQueue",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PauseState"
+        }
+       }
+      },
+      "description": "Queue paused"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Pause the queue"
+   }
+  },
+  "/api/v1/queue/resume": {
+   "post": {
+    "description": "Lift a pause so held jobs run. Nothing starts while a gallery-dl install holds the queue, which ends on its own.",
+    "operationId": "resumeQueue",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PauseState"
+        }
+       }
+      },
+      "description": "Queue resumed"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Resume the queue"
+   }
+  },
+  "/api/v1/queue/{id}": {
+   "delete": {
+    "description": "Acts on the job's whole series, the search and its continuations, which share its root. While the job is queued or running, every window running with it is canceled and every window queued with it is removed, and the finished windows stay; once it has finished, the finished windows are removed, and a window still running is canceled and stays.",
+    "operationId": "deleteJob",
+    "parameters": [
+     {
+      "description": "Job id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "The series' live windows canceled, or its finished windows removed"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job not found"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Cancel or remove a job's series"
+   },
+   "get": {
+    "operationId": "getJob",
+    "parameters": [
+     {
+      "description": "Job id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Job"
+        }
+       }
+      },
+      "description": "The job with items and outcomes"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job not found"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Get a job"
+   }
+  },
+  "/api/v1/queue/{id}/continue": {
+   "post": {
+    "operationId": "continueJob",
+    "parameters": [
+     {
+      "description": "Job id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Follow-up job queued for the next window"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job not found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job was not capped so there is no next window, no monbooru is configured (monbooru_unconfigured), or its link is paused (monbooru_paused)"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Fetch the next window of a capped job"
+   }
+  },
+  "/api/v1/queue/{id}/continue-all": {
+   "post": {
+    "operationId": "continueAllJob",
+    "parameters": [
+     {
+      "description": "Job id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "First follow-up queued; the queue continues until the search runs short"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job not found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job was not capped so there is no next window, no monbooru is configured (monbooru_unconfigured), or its link is paused (monbooru_paused)"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Fetch every remaining window of a capped job"
+   }
+  },
+  "/api/v1/queue/{id}/retry": {
+   "post": {
+    "operationId": "retryJob",
+    "parameters": [
+     {
+      "description": "Job id",
+      "in": "path",
+      "name": "id",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     },
+     {
+      "description": "Set to 1 to re-run with the gallery-dl archive bypassed, re-downloading already-fetched posts",
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Re-queued"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The id is not an integer"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job not found"
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Job is not in a retryable state, no monbooru is configured (monbooru_unconfigured), or its link is paused (monbooru_paused)"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Retry a finished job"
+   }
+  },
+  "/api/v1/replace": {
+   "post": {
+    "description": "Download the file the post URL serves and push it into the monbooru image it names, replacing its bytes in place while the image's tags, sources, and relations survive. The queued job reports the replaced outcome, or failed with hash_mismatch (the download did not match the md5 the source claims), already_exists (monbooru holds the original as another image), or wrong_type (the target is an archive or video row).",
+    "operationId": "replaceFile",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "gallery": {
+          "description": "Gallery holding the image; empty uses monbooru's active gallery",
+          "type": "string"
+         },
+         "image_id": {
+          "description": "monbooru image whose file is replaced",
+          "type": "integer"
+         },
+         "url": {
+          "description": "Source post URL to download",
+          "type": "string"
+         }
+        },
+        "required": [
+         "image_id",
+         "url"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/EnqueueResponse"
+        }
+       }
+      },
+      "description": "Replace queued; poll GET /api/v1/queue/{id}"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Missing image_id, or a non-http(s) url"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Download a post's file and replace a monbooru image's bytes"
+   }
+  },
+  "/api/v1/rules": {
+   "get": {
+    "description": "For a monbooru tag, the tag rule, blacklist hit and category map of every configured or used site and the PTR, plus whether the global Rules keep its category: what monbooru's tag page draws.",
+    "operationId": "tagRules",
+    "parameters": [
+     {
+      "description": "The tag's name, as monbooru spells it",
+      "in": "query",
+      "name": "tag",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The tag's monbooru category; general when absent",
+      "in": "query",
+      "name": "category",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TagRules"
+        }
+       }
+      },
+      "description": "One row per configured or used site, the PTR last"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "tag is missing"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "What each site does with a tag"
+   },
+   "post": {
+    "description": "The GET answer for each name given, in order, read against one list of sites.",
+    "operationId": "tagRulesBatch",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "names": {
+          "description": "1 to 50 tags",
+          "items": {
+           "properties": {
+            "category": {
+             "description": "The tag's monbooru category; general when absent",
+             "type": "string"
+            },
+            "tag": {
+             "description": "The tag's name, as monbooru spells it",
+             "type": "string"
+            }
+           },
+           "type": "object"
+          },
+          "type": "array"
+         }
+        },
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "results": {
+           "items": {
+            "$ref": "#/components/schemas/TagRules"
+           },
+           "type": "array"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "One answer per name"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "No names, more than 50, a name without a tag, or a body that does not parse"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "What each site does with several tags"
+   }
+  },
+  "/api/v1/sites": {
+   "get": {
+    "operationId": "listSites",
+    "parameters": [
+     {
+      "description": "Substring filter on category/subcategory",
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "sites": {
+           "items": {
+            "$ref": "#/components/schemas/Site"
+           },
+           "type": "array"
+          },
+          "total": {
+           "type": "integer"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Supported sites (curated first)"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "List supported sites"
+   }
+  },
+  "/api/v1/sites/{name}/test": {
+   "post": {
+    "operationId": "testSite",
+    "parameters": [
+     {
+      "description": "gallery-dl category",
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "URL to probe; defaults to the site's example URL",
+      "in": "query",
+      "name": "url",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "url": {
+          "description": "URL to probe, when the query carries none",
+          "type": "string"
+         }
+        },
+        "type": "object"
+       }
+      }
+     },
+     "required": false
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProbeResult"
+        }
+       }
+      },
+      "description": "Probe result"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "The supplied url is not http(s), or the body does not parse"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "unauthorized: no bearer token, or one that matches none"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "insufficient_scope: the token lacks the scope this operation needs"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "Unknown site and no url supplied"
+     },
+     "413": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "JSON body exceeds 1 MiB"
+     },
+     "503": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      },
+      "description": "api_disabled: no API token exists yet"
+     }
+    },
+    "summary": "Probe a site"
+   }
+  },
+  "/health": {
+   "get": {
+    "operationId": "health",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Health"
+        }
+       }
+      },
+      "description": "Service status and versions"
+     }
+    },
+    "security": [],
+    "summary": "Liveness and versions"
+   }
+  }
+ },
+ "security": [
+  {
+   "bearerAuth": []
+  }
+ ],
+ "servers": [
+  {
+   "description": "This server",
+   "url": "http://localhost:8456"
+  }
+ ]
+}
