@@ -1588,7 +1588,8 @@ func TestGalleryAccessorsDoNotReenterContextLock(t *testing.T) {
 	go func() {
 		close(waiting)
 		srv.set.Lock()
-		srv.set.Unlock() //nolint:staticcheck // only the queued acquisition matters
+		//lint:ignore SA2001 only the queued acquisition matters
+		srv.set.Unlock() //nolint:staticcheck
 	}()
 	<-waiting
 	time.Sleep(50 * time.Millisecond)
