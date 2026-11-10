@@ -146,7 +146,7 @@ flowchart TD
     pr --> review{{"Review answers in the pull request"}}
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
-    review -->|"accepted"| ship(["`**Squash-merged into dev, ships in the next release** → Credit`"])
+    review -->|"accepted"| ship(["`**Merged into dev, ships in the next release** → Credit`"])
 
     class ship hub;
     class ask,branch,self,pr,declined step;
