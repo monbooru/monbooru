@@ -142,7 +142,7 @@ flowchart TD
     branch --> self["`**Read every line of your diff and test it live**
     make test has to pass`"]
     self --> pr["`**Open a pull request against dev**
-    Verify runs the build, the linter and the Go tests on it`"]
+    Verify builds and lints it; the Go tests run when a maintainer comments /test`"]
     pr --> review{{"Review answers in the pull request"}}
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
