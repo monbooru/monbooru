@@ -77,10 +77,12 @@ flowchart TD
     describe the problem or workflow first, then the solution you have in mind`"]
     bug & idea --> issue["`**Open an issue in the repo it is about**
     see the graph below`"]
-    issue -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
+    issue --> state["`**A label says where it stands**
+    accepted, needs info, postponed or declined; a milestone is the version it is planned for`"]
+    state -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
 
     class ship hub;
-    class bug,idea,issue step;
+    class bug,idea,issue,state step;
     class want ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
@@ -134,9 +136,9 @@ config:
 ---
 flowchart TD
     size{{"How big is it?"}}
-    size -->|"a small fix"| branch
+    size -->|"a small fix, or an issue marked help wanted"| branch
     size -->|"anything bigger, a new dependency, or changes across many templates or handlers"| ask["`**Open an issue first**
-    say what and why, wait for a go-ahead`"]
+    say what and why, wait for it to be marked accepted or help wanted`"]
     ask --> branch["`**Write it on a branch of your fork, off dev**
     follow the existing style, reuse the patterns the code already has, and follow any instructions given in the issue`"]
     branch --> self["`**Read every line of your diff and test it live**
@@ -147,9 +149,10 @@ flowchart TD
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
     review -->|"accepted"| ship(["`**Merged into dev, ships in the next release** → Credit`"])
+    review -->|"reimplemented"| redone["`Closed and redone on my side, still credited in the changelog → Credit`"]
 
     class ship hub;
-    class ask,branch,self,pr,declined step;
+    class ask,branch,self,pr,declined,redone step;
     class size,review ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
