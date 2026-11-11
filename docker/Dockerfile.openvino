@@ -15,9 +15,9 @@ FROM openvino/ubuntu22_runtime:2026.4.1
 USER root
 COPY --from=build /monbooru /usr/local/bin/monbooru
 
-ARG FFMPEG_BUILD=v8.1.3-mb2
-ARG FFMPEG_NAME=ffmpeg-8.1.3-mb2
-ARG FFMPEG_SHA256_LINUX64=eb15fba0c9f2c01a5ae1da1a6d6392ff5822dee950650521e2c0b214e9851c65
+ARG FFMPEG_BUILD=v8.1.3-mb4
+ARG FFMPEG_NAME=ffmpeg-8.1.3-mb4
+ARG FFMPEG_SHA256_LINUX64=b4f4b357683462fbdbeaadf98ada904afe80c725d3ce8c0e1e84f75d1bb2108c
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
       ca-certificates curl xz-utils && \
