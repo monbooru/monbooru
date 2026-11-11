@@ -86,6 +86,30 @@ func Bootstrap(db *DB) error {
 				WHEN lower(md5) = NEW.md5 THEN 'match' ELSE 'differ' END
 			 WHERE image_id = NEW.id AND md5 != '';
 		END`)
+	// One row per http(s) URL an image's sources carry, so sourceurl:
+	// seeks a prefix instead of scanning the newline-joined originals.
+	b.backfillIfFreshTable("image_source_urls",
+		`CREATE TABLE IF NOT EXISTS image_source_urls (
+			key      TEXT    NOT NULL COLLATE NOCASE,
+			image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+			PRIMARY KEY (key, image_id)
+		) WITHOUT ROWID`,
+		`INSERT OR IGNORE INTO image_source_urls (image_id, key) `+sourceURLKeys("1"),
+		"backfill image_source_urls")
+	b.exec("create idx_image_source_urls_image", `CREATE INDEX IF NOT EXISTS idx_image_source_urls_image ON image_source_urls(image_id)`)
+	// Triggers, not the write sites: url and original are written by many
+	// paths. Each rebuilds the image's keys, as another source may share one.
+	for _, t := range []struct{ name, event, imageID string }{
+		{"trg_image_sources_urls_ai", "AFTER INSERT ON image_sources", "NEW.image_id"},
+		{"trg_image_sources_urls_au", "AFTER UPDATE OF url, original ON image_sources", "NEW.image_id"},
+		{"trg_image_sources_urls_ad", "AFTER DELETE ON image_sources", "OLD.image_id"},
+	} {
+		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
+		BEGIN
+			DELETE FROM image_source_urls WHERE image_id = `+t.imageID+`;
+			INSERT OR IGNORE INTO image_source_urls (image_id, key) `+sourceURLKeys("s.image_id = "+t.imageID)+`;
+		END`)
+	}
 	// VIRTUAL: ALTER TABLE cannot add a STORED column, and the index stores it.
 	b.ensureColumn("images", "basename_lower",
 		`ALTER TABLE images ADD COLUMN basename_lower TEXT GENERATED ALWAYS AS (lower(basename(canonical_path))) VIRTUAL`)
@@ -465,6 +489,22 @@ func ratingRankExpr(imageIDCol string) string {
 				JOIN tag_categories tc ON tc.id = t.category_id
 				WHERE it.image_id = ` + imageIDCol + ` AND tc.name = 'rating'
 			), -1)`
+}
+
+// sourceURLKeys selects (image_id, key) for the post url and each original
+// line of the image_sources rows s that where picks; search's sourceURLKey
+// is its Go twin. Newlines become U+E000 before json_quote, which leaves
+// that character alone, so the split never meets an escape.
+func sourceURLKeys(where string) string {
+	return `SELECT image_id, CASE WHEN h LIKE 'www.%' THEN substr(h, 5) ELSE h END
+		FROM (SELECT image_id, CASE WHEN u LIKE 'https://%' THEN substr(u, 9) ELSE substr(u, 8) END AS h
+			FROM (SELECT s.image_id, s.url AS u FROM image_sources s WHERE ` + where + `
+				UNION ALL
+				SELECT s.image_id, trim(j.value, ' ' || char(9, 13)) FROM image_sources s,
+					json_each('[' || replace(json_quote(replace(s.original, char(10), char(57344))), char(57344), '","') || ']') j
+				WHERE s.original != '' AND ` + where + `)
+			WHERE u LIKE 'http://%' OR u LIKE 'https://%')
+		WHERE h != ''`
 }
 
 func pairsResweepBody(predA, predB string) string {
