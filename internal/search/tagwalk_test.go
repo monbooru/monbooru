@@ -178,7 +178,7 @@ func TestTagWalkLegs_LeavesADenseUnionToTheSortIndex(t *testing.T) {
 func TestExecuteAdjacent_TheTagWalkStepsAsTheSortIndexDoes(t *testing.T) {
 	database, _ := setupSearchDB(t)
 	seedWalkFixture(t, database)
-	for _, expr := range []Expr{Parse("walk_a walk_b"), Parse("walk_b OR walk_c -walk_a"), ApplyCeiling(Parse("character:walk_x"), "general")} {
+	for _, expr := range []Expr{Parse("walk_a walk_b"), Parse("( walk_b OR walk_c ) -walk_a"), ApplyCeiling(Parse("character:walk_x"), "general")} {
 		for _, order := range []string{"desc", "asc"} {
 			q := Query{Expr: expr, Sort: "newest", Order: order}
 			assertAdjacencyChain(t, database, q, sqlOrderIDs(t, database, q))

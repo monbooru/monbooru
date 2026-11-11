@@ -2,6 +2,7 @@
 package search
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/searchkw"
@@ -34,18 +35,29 @@ func (NotExpr) exprNode()    {}
 func (TagExpr) exprNode()    {}
 func (FilterExpr) exprNode() {}
 
+// Parse binds NOT tighter than AND, and AND tighter than OR. A query it
+// can't fully read still parses as best it can; Unreadable says what it skipped.
 func Parse(query string) Expr {
-	tokens, _ := tokenize(query)
+	expr, _ := parse(query)
+	return expr
+}
+
+func parse(query string) (Expr, []string) {
+	tokens, open := tokenize(query)
 	p := &parser{tokens: tokens}
-	exprs := p.parseAll()
-	if len(exprs) == 0 {
-		return nil
+	if open {
+		p.problem("unterminated quote")
 	}
-	result := exprs[0]
-	for _, e := range exprs[1:] {
-		result = AndExpr{Left: result, Right: e}
+	var expr Expr
+	for {
+		expr = andOf(expr, p.parseOr())
+		if p.peek() == nil {
+			return expr, p.problems
+		}
+		// Only a ) stops parseOr at the top level.
+		p.problem("unmatched )")
+		p.next()
 	}
-	return result
 }
 
 type tokenKind int
@@ -55,6 +67,9 @@ const (
 	tokFilter
 	tokNot
 	tokOR
+	tokAND
+	tokOpen
+	tokClose
 )
 
 type token struct {
@@ -76,9 +91,18 @@ func tokenize(query string) (tokens []token, open bool) {
 			continue
 		}
 
-		if i+4 <= len(query) && strings.EqualFold(query[i:i+4], "not ") {
-			tokens = append(tokens, token{kind: tokNot, val: "NOT"})
-			i += 4
+		// A paren is a group only standing alone, so saber_(fate) stays a tag.
+		if (query[i] == '(' || query[i] == ')') && (i+1 == len(query) || query[i+1] == ' ' || query[i+1] == '\t') {
+			if query[i] == ')' {
+				tokens = append(tokens, token{kind: tokClose, val: ")"})
+			} else {
+				// `- (` negates the group like `-(` does.
+				if n := len(tokens); n > 0 && tokens[n-1] == (token{kind: tokTag, val: "-"}) {
+					tokens[n-1] = token{kind: tokNot, val: "-"}
+				}
+				tokens = append(tokens, token{kind: tokOpen, val: "("})
+			}
+			i++
 			continue
 		}
 
@@ -106,11 +130,15 @@ func tokenize(query string) (tokens []token, open bool) {
 		term := query[i:j]
 		i = j
 
-		if strings.EqualFold(term, "or") {
+		switch {
+		case strings.EqualFold(term, "or"):
 			tokens = append(tokens, token{kind: tokOR, val: "OR"})
 			continue
-		}
-		if strings.EqualFold(term, "and") {
+		case strings.EqualFold(term, "and"):
+			tokens = append(tokens, token{kind: tokAND, val: "AND"})
+			continue
+		case strings.EqualFold(term, "not"):
+			tokens = append(tokens, token{kind: tokNot, val: "NOT"})
 			continue
 		}
 
@@ -141,8 +169,9 @@ func skipQuoted(query string, j int) (int, bool) {
 }
 
 type parser struct {
-	tokens []token
-	pos    int
+	tokens   []token
+	pos      int
+	problems []string
 }
 
 func (p *parser) peek() *token {
@@ -154,63 +183,103 @@ func (p *parser) peek() *token {
 
 func (p *parser) next() { p.pos++ }
 
-func (p *parser) parseAll() []Expr {
-	var exprs []Expr
-	for {
-		t := p.peek()
-		if t == nil {
-			break
-		}
-
-		// parseTerm returns nil at an OR, which would end the loop and
-		// drop the rest of the query.
-		if t.kind == tokOR {
-			p.next()
-			continue
-		}
-
-		expr := p.parseOperand()
-		if expr == nil {
-			continue
-		}
-		for {
-			or := p.peek()
-			if or == nil || or.kind != tokOR {
-				break
-			}
-			p.next()
-			right := p.parseOperand()
-			if right == nil {
-				break
-			}
-			expr = OrExpr{Left: expr, Right: right}
-		}
-		exprs = append(exprs, expr)
+func (p *parser) problem(msg string) {
+	if !slices.Contains(p.problems, msg) {
+		p.problems = append(p.problems, msg)
 	}
-	return exprs
 }
 
-// parseTerm stops at a NOT, so without this `a OR -b` would parse as `a -b`.
-func (p *parser) parseOperand() Expr {
-	if t := p.peek(); t != nil && t.kind == tokNot {
+// startsOperand reports whether the next token can begin an operand.
+func (p *parser) startsOperand() bool {
+	t := p.peek()
+	return t != nil && t.kind != tokOR && t.kind != tokAND && t.kind != tokClose
+}
+
+func andOf(left, right Expr) Expr {
+	switch {
+	case left == nil:
+		return right
+	case right == nil:
+		return left
+	}
+	return AndExpr{Left: left, Right: right}
+}
+
+func (p *parser) parseOr() Expr {
+	expr := p.parseAnd()
+	for t := p.peek(); t != nil && t.kind == tokOR; t = p.peek() {
 		p.next()
-		inner := p.parseTerm()
-		if inner == nil {
+		if expr == nil {
+			p.problem("nothing before OR")
+		}
+		if !p.startsOperand() {
+			p.problem("nothing after OR")
+			continue
+		}
+		right := p.parseAnd()
+		switch {
+		case right == nil:
+		case expr == nil:
+			expr = right
+		default:
+			expr = OrExpr{Left: expr, Right: right}
+		}
+	}
+	return expr
+}
+
+func (p *parser) parseAnd() Expr {
+	var expr Expr
+	for {
+		t := p.peek()
+		if t == nil || t.kind == tokOR || t.kind == tokClose {
+			return expr
+		}
+		if t.kind == tokAND {
+			p.next()
+			if expr == nil {
+				p.problem("nothing before AND")
+			}
+			if !p.startsOperand() {
+				p.problem("nothing after AND")
+			}
+			continue
+		}
+		expr = andOf(expr, p.parseUnary())
+	}
+}
+
+// parseUnary is only called where startsOperand holds, and always consumes.
+func (p *parser) parseUnary() Expr {
+	switch p.peek().kind {
+	case tokNot:
+		p.next()
+		if !p.startsOperand() {
+			p.problem("nothing after NOT")
 			return nil
 		}
-		return NotExpr{Expr: inner}
+		if inner := p.parseUnary(); inner != nil {
+			return NotExpr{Expr: inner}
+		}
+		return nil
+	case tokOpen:
+		p.next()
+		inner := p.parseOr()
+		if t := p.peek(); t != nil && t.kind == tokClose {
+			p.next()
+		} else {
+			p.problem("unclosed (")
+		}
+		if inner == nil {
+			p.problem("empty ( )")
+		}
+		return inner
 	}
 	return p.parseTerm()
 }
 
 func (p *parser) parseTerm() Expr {
 	t := p.peek()
-	if t == nil {
-		return nil
-	}
-	if t.kind == tokNot || t.kind == tokOR {
-		return nil
-	}
 	p.next()
 
 	switch t.kind {
@@ -281,14 +350,12 @@ func QuoteValue(s string) string {
 	return s
 }
 
-// Unreadable names what in query matches nothing as typed: a quote left
-// open, and a comparison or date filter whose value does not parse.
+// Unreadable names what in query is skipped or matches nothing as typed: a
+// quote left open, a group or operator missing a side, and a comparison or
+// date filter whose value does not parse.
 func Unreadable(query string) []string {
-	var out []string
-	if _, open := tokenize(query); open {
-		out = append(out, "unterminated quote")
-	}
-	WalkLeaves(Parse(query), func(e Expr) bool {
+	expr, out := parse(query)
+	WalkLeaves(expr, func(e Expr) bool {
 		if f, ok := e.(FilterExpr); ok && searchkw.IsOrdinal(f.Key) && filterBuilders[f.Key](&whereBuilder{}, f) == "1=0" {
 			out = append(out, f.Key+":"+f.Val)
 		}
