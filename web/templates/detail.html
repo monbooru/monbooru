@@ -515,10 +515,13 @@
         </video>
         </div>
         {{else if .IsManga}}
+        <div class="detail-media-frame{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
         <a href="/images/{{.Image.ID}}/read?page={{if .ResumePage}}{{.ResumePage}}{{else}}1{{end}}" title="Open in reader">
-          <img src="/images/{{.Image.ID}}/page/1" alt="Cover of manga {{.Image.ID}}" class="detail-img"
+          <img src="/images/{{.Image.ID}}/page/1" alt="Cover of manga {{.Image.ID}}" class="detail-img"{{if .Placeholder}}
+               style="background-image:url('/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg');color:transparent" onload="this.style.backgroundImage='none'"{{end}}
                onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg';}else{this.onerror=null;}">
         </a>
+        </div>
         {{else}}
         <div class="detail-media-frame{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
           <a href="/images/{{.Image.ID}}/view" target="_blank"{{if not .Image.IsMissing}} class="detail-img-link" onclick="return lightbox.open(event, this.href)"{{end}}>

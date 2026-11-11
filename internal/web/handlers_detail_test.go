@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"maps"
 	"net/http"
@@ -137,6 +138,20 @@ func TestDetailPage_HoldsTheVideoBoxAndPostersItsThumbnail(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantNotIn(t, detailBody(t, srv, video.ID), "poster=")
+}
+
+func TestDetailPage_HoldsTheMangaCoverBoxAndDrawsItsThumbnail(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	id := seedManga(t, srv, "m.cbz", [][]byte{tinyPNG(t, 30, 40, color.RGBA{0, 0, 0, 255}), tinyPNG(t, 8, 8, color.RGBA{0, 0, 0, 255})})
+	body := detailBody(t, srv, id)
+	wantIn(t, body, `<div class="detail-media-frame detail-media-sized" style="--w:30;--h:40">`)
+	wantIn(t, body, fmt.Sprintf(`alt="Cover of manga %d" class="detail-img"`+"\n"+`               style="background-image:url('/thumbnails/default/%d.jpg');color:transparent"`, id, id))
+
+	if err := os.Remove(gallery.ThumbnailPath(cx.ThumbnailsPath, id)); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, id), "background-image")
 }
 
 func TestBuildAnnotationViews_ClampsToImageBounds(t *testing.T) {

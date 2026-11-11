@@ -412,17 +412,13 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		pxW, pxH = *img.Width, *img.Height
 	}
 	previewScaled := !isManga && !gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(pxW, pxH)
-	var boxW, boxH int
-	placeholder := false
-	if !isManga {
-		boxW, boxH = pxW, pxH
-		o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType)
-		// The size is the stored pixels; a browser draws them turned.
-		if ok && o >= 5 && o <= 8 {
-			boxW, boxH = pxH, pxW
-		}
-		placeholder = boxW > 0 && !noPreview && (!ok || o == 1)
+	boxW, boxH := pxW, pxH
+	o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType)
+	// The size is the stored pixels; a browser draws them turned.
+	if ok && o >= 5 && o <= 8 {
+		boxW, boxH = pxH, pxW
 	}
+	placeholder := boxW > 0 && !noPreview && (!ok || o == 1)
 
 	baseName := filepath.Base(img.CanonicalPath)
 	// FolderPath, not the disk dir: a root-level file has no folder to name.
