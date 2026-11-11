@@ -73,7 +73,7 @@ Download a build for your system from the [releases](https://github.com/monbooru
 
 Downloads come in two flavours:
 
-- **lite** is just the program. Video, AVIF and JPEG XL thumbnails need ffmpeg on your system, and auto-tagging needs ONNX Runtime.
+- **lite** is the program alone. It has no auto-tagger, and video, AVIF and JPEG XL thumbnails need ffmpeg on your system.
 - **bundled** carries ffmpeg and ONNX Runtime, so everything works out of the box.
 
 Beside the portable archives, Linux bundled builds also ship as an AppImage and as a Flatpak.
