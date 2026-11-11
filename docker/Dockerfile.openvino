@@ -11,7 +11,7 @@ RUN . ./packaging/release-env.sh && \
     -ldflags="-s -w $LDFLAGS -X '$MOD.Package=docker' -X '$MOD.Variant=openvino'" \
     -o /monbooru ./cmd/monbooru
 
-FROM openvino/ubuntu22_runtime:2026.4.0
+FROM openvino/ubuntu22_runtime:2026.4.1
 USER root
 COPY --from=build /monbooru /usr/local/bin/monbooru
 
