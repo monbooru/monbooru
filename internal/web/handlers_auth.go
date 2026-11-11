@@ -45,6 +45,7 @@ func (s *Server) standalonePageData(title string, extra map[string]any) map[stri
 		"BooruName":    s.booruName(),
 		"BooruFavicon": themeFaviconURL(theme),
 		"Theme":        theme.Path != "",
+		"ColorScheme":  themeScheme(theme),
 	}
 	for k, v := range extra {
 		data[k] = v

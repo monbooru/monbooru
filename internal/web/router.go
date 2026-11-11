@@ -756,6 +756,7 @@ type baseData struct {
 	DocURL      string
 	Build       string
 	Theme       bool
+	ColorScheme string
 	// Server-rendered so a navigation does not flash the column before
 	// main.js runs.
 	SidebarCollapsed    bool
@@ -853,6 +854,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		DocURL:              DocURL,
 		Build:               BuildLabel(),
 		Theme:               theme.Path != "",
+		ColorScheme:         themeScheme(theme),
 		SidebarCollapsed:    sidebarCollapsed(r),
 		BooruName:           s.booruName(),
 		BooruLogo:           themeLogoURL(theme),

@@ -628,3 +628,12 @@ func TestFavoriteToggleCarriesTheBurstOnlyWhenTurningOn(t *testing.T) {
 	}
 	wantIn(t, off, `title="Favorite (f)"`)
 }
+
+func TestTheHeadDeclaresTheActiveThemesColorScheme(t *testing.T) {
+	srv := newTestServer(t)
+	installThemes(t, srv, map[string]string{"plain.css": ":root{--bg:#222}"})
+	for theme, want := range map[string]string{"": "dark", "light": "light", "legacy-light": "light", "legacy-dark": "dark", "plain": "dark"} {
+		srv.cfg.Server.Theme = theme
+		wantIn(t, do(srv, "GET", "/").Body.String(), `<meta name="color-scheme" content="`+want+`">`)
+	}
+}
