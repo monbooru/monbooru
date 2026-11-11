@@ -752,7 +752,9 @@ func TestRecordedMismatchSurvivesADisagreeingClaim(t *testing.T) {
 
 func sourceURLKeysOf(t *testing.T, db *DB, imageID int64) []string {
 	t.Helper()
-	keys, err := QueryStrings(db.Read, `SELECT key FROM image_source_urls WHERE image_id = ? ORDER BY key`, imageID)
+	// Keys equal under NOCASE are one key; which spelling stays is up to
+	// write order.
+	keys, err := QueryStrings(db.Read, `SELECT lower(key) FROM image_source_urls WHERE image_id = ? ORDER BY key`, imageID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +770,6 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 		(1, 'social', '1', 'https://social.example/user_a/status/1', ''),
 		(2, 'manual', '', 'ftp://files.example/a', 'https://quote.example/"q"\')`)
 
-	// The original's Social.example key folds into the url's under NOCASE.
 	want := []string{`art.example/a\nb`, "booru.example/posts/7", "social.example/user_a/status/1"}
 	if got := sourceURLKeysOf(t, db, 1); !slices.Equal(got, want) {
 		t.Fatalf("keys = %q, want %q", got, want)
