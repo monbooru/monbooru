@@ -224,6 +224,29 @@ func TestServerStartsAndServesStatic(t *testing.T) {
 	}
 }
 
+func TestPagesLinkTheStaticFilesThePageCacheKeeps(t *testing.T) {
+	srv := newTestServer(t)
+
+	body := do(srv, "GET", "/").Body.String()
+	for _, path := range []string{"/static/shared/base.css", "/static/main.css", "/static/shared/htmx.min.js", "/static/shared/base.js", "/static/main.js"} {
+		wantIn(t, body, `"`+path+"?v="+assetVersion+`"`)
+	}
+	for target, want := range map[string]string{
+		"/static/main.css?v=" + assetVersion:        "max-age=31536000, immutable",
+		"/static/shared/base.css?v=" + assetVersion: "max-age=31536000, immutable",
+		"/static/light/logo.png?v=" + assetVersion:  "max-age=31536000, immutable",
+		"/static/shared/jetbrains-mono.woff2":       "no-cache",
+	} {
+		w := do(srv, "GET", target)
+		wantCode(t, w, http.StatusOK)
+		if got := w.Header().Get("Cache-Control"); got != want {
+			t.Errorf("GET %s: Cache-Control %q, want %q", target, got, want)
+		}
+	}
+	w := do(srv, "GET", "/static/shared/jetbrains-mono.woff2", [2]string{"If-None-Match", `"` + assetVersion + `"`})
+	wantCode(t, w, http.StatusNotModified)
+}
+
 func TestTrailingSlashRedirect(t *testing.T) {
 	srv := newTestServer(t)
 
@@ -472,7 +495,7 @@ func TestTopbarUsesTheBundledLogoWithNoTheme(t *testing.T) {
 	w := do(srv, "GET", "/")
 
 	body := w.Body.String()
-	wantIn(t, body, `src="/static/logo.png"`)
+	wantIn(t, body, `src="/static/logo.png?v=`+assetVersion+`"`)
 	wantNotIn(t, body, `src="/static/favicon.png"`)
 }
 

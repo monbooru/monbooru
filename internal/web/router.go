@@ -128,7 +128,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	}
 
 	funcs := templateFuncs()
-	maps.Copy(funcs, webui.Funcs())
+	maps.Copy(funcs, webui.Funcs(assetVersion))
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(webFS.FS, "templates/*.html", "templates/partials/*.html")
 	if err == nil {
 		tmpl, err = tmpl.ParseFS(webui.Templates, "*.html")
@@ -354,9 +354,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes(rt *routes) {
 	// The thumbnail route needs no lock: it takes only the directory from
 	// its context.
-	rt.free("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(s.staticFS))).ServeHTTP)
-	rt.free("GET /static/shared/", http.StripPrefix("/static/shared/", http.FileServer(http.FS(webui.Static))).ServeHTTP)
-	rt.free("GET /static/light/", http.StripPrefix("/static/light/", http.FileServer(http.FS(s.lightFS))).ServeHTTP)
+	rt.free("GET /static/", http.StripPrefix("/static/", webui.StaticHandler(s.staticFS, assetVersion)).ServeHTTP)
+	rt.free("GET /static/shared/", http.StripPrefix("/static/shared/", webui.StaticHandler(webui.Static, assetVersion)).ServeHTTP)
+	rt.free("GET /static/light/", http.StripPrefix("/static/light/", webui.StaticHandler(s.lightFS, assetVersion)).ServeHTTP)
 	rt.free("GET /theme.css", s.serveThemeCSS)
 	rt.free("GET /theme.logo", s.serveThemeLogo)
 	rt.free("GET /theme.favicon", s.serveThemeFavicon)
@@ -1055,11 +1055,13 @@ func (s *Server) galleries() []config.Gallery {
 	return slices.Clone(s.cfg.Galleries)
 }
 
+var assetVersion = webui.AssetVersion(webFS.FS, webui.Static, registry.FS)
+
 func themeLogoURL(e webui.Theme) string {
 	if e.Logo != "" {
 		return "/theme.logo"
 	}
-	return cmp.Or(builtinArt[e.Name], "/static/") + "logo.png"
+	return cmp.Or(builtinArt[e.Name], "/static/") + "logo.png?v=" + assetVersion
 }
 
 // Versioned: browsers keep favicons outside the page cache and Firefox

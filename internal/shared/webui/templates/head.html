@@ -4,7 +4,7 @@
   <title>{{.Title}}</title>
   {{with .CSRFToken}}<meta name="csrf-token" content="{{.}}">{{end}}
   {{with .BooruFavicon}}<link rel="icon" type="image/png" href="{{.}}">{{end}}
-  <link rel="stylesheet" href="/static/shared/base.css">
-  <link rel="stylesheet" href="/static/main.css">
+  <link rel="stylesheet" href="{{static "/static/shared/base.css"}}">
+  <link rel="stylesheet" href="{{static "/static/main.css"}}">
   {{if .Theme}}<link rel="stylesheet" href="/theme.css">{{end}}
 {{end}}

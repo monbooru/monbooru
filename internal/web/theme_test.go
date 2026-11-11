@@ -92,7 +92,7 @@ func TestInstalledThemeOverridesABuiltin(t *testing.T) {
 	if e.Builtin {
 		t.Errorf("active = %+v, want the installed copy", e)
 	}
-	if got := themeLogoURL(e); got != "/static/light/logo.png" {
+	if got := themeLogoURL(e); got != "/static/light/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the light art", got)
 	}
 	if got := themeMascots(e)["lost"]; got != "/static/light/mascot-lost.png" {
@@ -103,8 +103,8 @@ func TestInstalledThemeOverridesABuiltin(t *testing.T) {
 func TestBuiltinThemesDrawTheMascotAndTheLegacyOnesDoNot(t *testing.T) {
 	srv := newTestServer(t)
 	for _, tc := range []struct{ theme, logo, lost string }{
-		{"dark", "/static/logo.png", "/static/mascot-lost.png"},
-		{"light", "/static/light/logo.png", "/static/light/mascot-lost.png"},
+		{"dark", "/static/logo.png?v=" + assetVersion, "/static/mascot-lost.png"},
+		{"light", "/static/light/logo.png?v=" + assetVersion, "/static/light/mascot-lost.png"},
 		{"legacy-dark", "/theme.logo", ""},
 		{"legacy-light", "/theme.logo", ""},
 	} {
@@ -274,7 +274,7 @@ func TestThemeRoutesFollowTheActiveTheme(t *testing.T) {
 	if code, _ := get("/theme.logo"); code != http.StatusNotFound {
 		t.Errorf("/theme.logo for a logo-less theme = %d", code)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the bundled one", got)
 	}
 }
@@ -355,7 +355,7 @@ func TestBuiltinLightServesItsSheetAndTheAppsLightArt(t *testing.T) {
 	if code, body := get("/theme.css"); code != http.StatusOK || !strings.Contains(body, "color-scheme: light") {
 		t.Errorf("/theme.css = %d %q", code, body)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/light/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/light/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the light art", got)
 	}
 	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png" {
@@ -372,7 +372,7 @@ func TestBuiltinLightServesItsSheetAndTheAppsLightArt(t *testing.T) {
 	if code, _ := get("/theme.favicon"); code != http.StatusNotFound {
 		t.Errorf("/theme.favicon under dark = %d", code)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the bundled one", got)
 	}
 }
