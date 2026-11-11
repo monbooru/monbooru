@@ -384,6 +384,16 @@ func tagNamePredicate(col, wildcard, tag string) (pred string, arg any, ok bool)
 	return "", nil, false
 }
 
+// Appending the top code point, not incrementing the last byte: under
+// NOCASE, `Z`+1 is `[`, which sorts below every `z...` term.
+const prefixCeil = "\U0010FFFF"
+
+// Everything but `*` is literal: the values matched are full of
+// underscores.
+func globPattern(s string) string {
+	return strings.ReplaceAll(db.EscapeLike(s), "*", "%")
+}
+
 func resolveDriverCanonicals(database *db.DB, leaf TagExpr) ([]int64, int64, bool) {
 	pred, arg, ok := tagNamePredicate("t.name", leaf.Wildcard, leaf.Tag)
 	if !ok {
