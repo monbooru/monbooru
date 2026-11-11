@@ -1537,6 +1537,7 @@ document.body.addEventListener('htmx:historyRestore', function() {
     readSelection();
     syncSelectionBoxes();
     updateBatchBar();
+    pruneSelection();
     initInboxUpload();
   }
   ['tags-q-input', 'collections-q-input'].forEach(function(id) {
@@ -2010,6 +2011,32 @@ function readSelection() {
   selectAllMatching = !!stash.all;
 }
 
+// A batch edit or another client can take a pick out of the listing while
+// the URL that keys the stash stays the same. The rows on screen match, so
+// only the others are asked about.
+function pruneSelection() {
+  if (selectAllMatching || !document.getElementById('gallery-grid')) return;
+  var onScreen = {};
+  document.querySelectorAll('.thumb-checkbox').forEach(function(cb) { onScreen[cb.value] = true; });
+  var away = pickedIDs.filter(function(id) { return !onScreen[id]; });
+  if (away.length === 0) return;
+  var key = selectionKey();
+  var q = new URLSearchParams(location.search).get('q') || '';
+  fetch('/internal/search/ids?q=' + encodeURIComponent(q) + '&ids=' + encodeURIComponent(away.join(',')), {
+    headers: {'Accept': 'application/json'},
+  }).then(function(res) {
+    return res.ok ? res.json() : null;
+  }).then(function(data) {
+    if (!data || selectAllMatching || key !== selectionKey()) return;
+    var gone = {};
+    away.forEach(function(id) { gone[id] = true; });
+    data.ids.forEach(function(id) { delete gone[id]; });
+    pickedIDs = pickedIDs.filter(function(id) { return !gone[id]; });
+    writeSelection();
+    updateBatchBar();
+  }).catch(function() {});
+}
+
 // For the /tags rows only; the gallery persists its own selection on
 // every change.
 function stashSelection(ids) {
@@ -2038,6 +2065,7 @@ document.addEventListener('DOMContentLoaded', function() {
     cb.checked = tagIDs.indexOf(cb.value) !== -1;
   });
   updateBatchBar();
+  pruneSelection();
   if (typeof updateTagBatchBar === 'function') updateTagBatchBar();
 });
 
@@ -2580,6 +2608,7 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     readSelection();
     syncSelectionBoxes();
     updateBatchBar();
+    pruneSelection();
     restoreGalleryFocusFromHash();
     initInboxUpload();
     return;
