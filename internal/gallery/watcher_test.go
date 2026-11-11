@@ -200,8 +200,8 @@ func TestWatcher_WaitIngestsReturnsOnceTheRunningIngestEnds(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- w.WaitIngests(context.Background()) }()
 	select {
-	case <-done:
-		t.Fatal("WaitIngests returned while an ingest was running")
+	case err := <-done:
+		t.Fatalf("WaitIngests returned while an ingest was running: %v", err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	w.mu.Lock()
