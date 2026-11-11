@@ -821,3 +821,35 @@ func TestBootstrapOrdersCategoriesTheWayTheImagePageDid(t *testing.T) {
 		t.Errorf("a later boot reset the order: first = %q, want general", got)
 	}
 }
+
+func TestInWriteTxWaitsOutAnotherWriter(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Write.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	held, err := db.Read.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	if _, err := held.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = held.ExecContext(ctx, `ROLLBACK`)
+	}()
+
+	err = InWriteTx(db.Write, func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM t`).Scan(&n); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM t`)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("a write that reads first, under another connection's write lock: %v", err)
+	}
+}

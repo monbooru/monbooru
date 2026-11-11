@@ -119,7 +119,10 @@ func Open(path string) (*DB, error) {
 	rd.SetMaxIdleConns(8)
 	rd.SetConnMaxIdleTime(5 * time.Minute)
 
-	wr, err := sql.Open("sqlite", dsn)
+	// Immediate: a transaction that reads before it writes gets SQLITE_BUSY at
+	// once, busy_timeout or not, when another connection holds the write
+	// lock, and the readers' ANALYZE takes it.
+	wr, err := sql.Open("sqlite", dsn+"&_txlock=immediate")
 	if err != nil {
 		_ = rd.Close()
 		return nil, fmt.Errorf("opening write pool: %w", err)
