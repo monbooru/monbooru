@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -285,5 +287,61 @@ func TestSearchIDs_StopsAtTheCapAndSaysSo(t *testing.T) {
 	mustUnmarshal(t, w.Body.Bytes(), &out)
 	if len(out.IDs) != 1 || !out.Truncated {
 		t.Fatalf("ids = %v truncated = %v, want one id and truncated", out.IDs, out.Truncated)
+	}
+}
+
+func TestSearchIDs_KeepsTheGivenIDsStillInTheListing(t *testing.T) {
+	srv := newTestServer(t)
+	safe, explicit := seedRatedPair(t, srv)
+	cx := srv.active()
+	plain := seedImage(t, srv, "plain.png", 12, 12)
+	cat, err := cx.TagSvc.GetOrCreateTag("cat", cx.GeneralCategoryID)
+	if err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+	mustAddTag(t, cx.TagSvc, safe, cat.ID, false, nil)
+	mustAddTag(t, cx.TagSvc, explicit, cat.ID, false, nil)
+	cx.InvalidateCaches()
+
+	ids := func(target string) []int64 {
+		t.Helper()
+		w := do(srv, "GET", target, [2]string{"Cookie", "monbooru_rating_ceiling=sensitive"})
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d: %s", target, w.Code, w.Body.String())
+		}
+		var out struct {
+			IDs       []int64 `json:"ids"`
+			Truncated bool    `json:"truncated"`
+		}
+		mustUnmarshal(t, w.Body.Bytes(), &out)
+		if out.Truncated {
+			t.Fatalf("%s: truncated", target)
+		}
+		slices.Sort(out.IDs)
+		return out.IDs
+	}
+	list := func(v ...int64) string {
+		s := make([]string, len(v))
+		for i, id := range v {
+			s[i] = strconv.FormatInt(id, 10)
+		}
+		return url.QueryEscape(strings.Join(s, ","))
+	}
+
+	got := ids("/internal/search/ids?q=&ids=" + list(explicit, plain, 999999))
+	if want := []int64{plain}; !slices.Equal(got, want) {
+		t.Errorf("no query: ids = %v, want %v (the explicit row hidden, the unknown id dropped, the unasked row left out)", got, want)
+	}
+	got = ids("/internal/search/ids?q=cat&ids=" + list(plain))
+	if len(got) != 0 {
+		t.Errorf("q=cat: ids = %v, want none", got)
+	}
+
+	old := searchIDsCap
+	searchIDsCap = 1
+	t.Cleanup(func() { searchIDsCap = old })
+	got = ids("/internal/search/ids?q=&ids=" + list(safe, plain))
+	if want := []int64{safe, plain}; !slices.Equal(got, want) {
+		t.Errorf("under a cap of 1: ids = %v, want %v", got, want)
 	}
 }
