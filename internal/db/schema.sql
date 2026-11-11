@@ -395,6 +395,8 @@ CREATE INDEX IF NOT EXISTS idx_sd_metadata_seed         ON sd_metadata(seed)    
 CREATE INDEX IF NOT EXISTS idx_comfyui_metadata_seed    ON comfyui_metadata(seed)            WHERE seed IS NOT NULL;
 -- NOCASE so a lowercase comfyui: query seeks the stored CamelCase term.
 CREATE INDEX IF NOT EXISTS idx_comfyui_terms_term ON comfyui_terms(term COLLATE NOCASE, image_id);
+-- Every image delete's FK check seeks it, or scans dup_groups per row.
+CREATE INDEX IF NOT EXISTS idx_dup_groups_original ON dup_groups(original_image_id);
 CREATE INDEX IF NOT EXISTS idx_dup_group_members_group ON dup_group_members(group_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_alt_group_members_group ON alt_group_members(group_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_derivative_edges_source ON derivative_edges(source_image_id);
