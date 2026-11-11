@@ -1131,6 +1131,7 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .btn-inbox.active:hover { background: color-mix(in srgb, var(--accent) 34%, transparent); }
 
 .detail-media {
+  --media-max-h: max(45vh, calc(100vh - 430px));
   text-align: center;
   margin-bottom: 16px;
 }
@@ -1146,7 +1147,13 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
   display: inline-block;
 }
 
-.detail-img, .detail-video { max-height: max(45vh, calc(100vh - 430px)); }
+.detail-img, .detail-video { max-height: var(--media-max-h); }
+.detail-media-sized { width: min(100%, var(--media-max-h) * var(--w) / var(--h)); }
+.detail-media-sized .detail-img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--w) / var(--h);
+}
 
 .detail-media-frame {
   position: relative;

@@ -1,14 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"html"
+	"image"
+	"image/jpeg"
 	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -75,6 +79,27 @@ func detailBody(t *testing.T, srv *Server, id int64) string {
 	t.Helper()
 	w := do(srv, "GET", fmt.Sprintf("/images/%d", id))
 	return w.Body.String()
+}
+
+func TestDetailPage_HoldsTheImageBoxBeforeItLoads(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	wantIn(t, detailBody(t, srv, seedImage(t, srv, "wide.png", 40, 10)), `<div class="detail-media-frame detail-media-sized" style="--w:40;--h:10">`)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 40, 10)), nil); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00")
+	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
+	turned := filepath.Join(cx.GalleryPath, "turned.jpg")
+	mustWriteFile(t, turned, slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:]), 0o644)
+	rec, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, turned, "")
+	wantIn(t, detailBody(t, srv, rec.ID), `style="--w:10;--h:40"`)
+
+	unsized := seedImage(t, srv, "unsized.png", 10, 10)
+	mustExec(t, cx.DB.Write, `UPDATE images SET width = NULL, height = NULL WHERE id = ?`, unsized)
+	wantIn(t, detailBody(t, srv, unsized), `<div class="detail-media-frame">`)
 }
 
 func TestBuildAnnotationViews_ClampsToImageBounds(t *testing.T) {

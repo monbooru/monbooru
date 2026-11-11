@@ -156,6 +156,8 @@ type detailData struct {
 	// why the gallery leaves it out, empty when the next sync restores it.
 	OnDisk  bool
 	LeftOut string
+	// The box the image is drawn in, held before its bytes arrive.
+	BoxW, BoxH int
 }
 
 // External links go by sha because an image id can be reused after a delete.
@@ -408,6 +410,14 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		pxW, pxH = *img.Width, *img.Height
 	}
 	previewScaled := !isManga && !gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(pxW, pxH)
+	var boxW, boxH int
+	if !isManga && !gallery.IsVideoType(img.FileType) {
+		boxW, boxH = pxW, pxH
+		// The size is the stored pixels; a browser draws them turned.
+		if o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType); ok && o >= 5 && o <= 8 {
+			boxW, boxH = pxH, pxW
+		}
+	}
 
 	baseName := filepath.Base(img.CanonicalPath)
 	// FolderPath, not the disk dir: a root-level file has no folder to name.
@@ -482,6 +492,8 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		PreviewNote:       previewNote,
 		PreviewScaled:     previewScaled,
 		PreviewMaxDim:     gallery.ViewMaxDim,
+		BoxW:              boxW,
+		BoxH:              boxH,
 		RewrittenBy:       gallery.RewrittenBy(s.db().Read, img.ID),
 		OnDisk:            onDisk,
 		LeftOut:           leftOut,
