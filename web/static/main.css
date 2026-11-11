@@ -1149,7 +1149,15 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 
 .detail-img, .detail-video { max-height: var(--media-max-h); }
 .detail-media-sized {
-  width: min(100%, (var(--media-max-h) - 2px) * var(--w) / var(--h) + 2px, max(var(--w) * 1px, 198px * var(--w) / var(--h)) + 2px);
+  --floor: 198px;
+  --edge: 2px;
+  width: min(100%, (var(--media-max-h) - var(--edge)) * var(--w) / var(--h) + var(--edge), max(var(--w) * 1px, var(--floor) * var(--w) / var(--h)) + var(--edge));
+}
+.detail-media-video { --floor: 0px; --edge: 0px; }
+.detail-media-sized .detail-video {
+  width: 100%;
+  height: auto;
+  aspect-ratio: var(--w) / var(--h);
 }
 .detail-media-sized .detail-img {
   box-sizing: content-box;

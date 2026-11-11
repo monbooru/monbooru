@@ -414,7 +414,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	previewScaled := !isManga && !gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(pxW, pxH)
 	var boxW, boxH int
 	placeholder := false
-	if !isManga && !gallery.IsVideoType(img.FileType) {
+	if !isManga {
 		boxW, boxH = pxW, pxH
 		o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType)
 		// The size is the stored pixels; a browser draws them turned.

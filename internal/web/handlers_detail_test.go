@@ -116,6 +116,29 @@ func TestDetailPage_DrawsTheThumbnailWhileTheImageLoads(t *testing.T) {
 	wantNotIn(t, detailBody(t, srv, id), "background-image")
 }
 
+func TestDetailPage_HoldsTheVideoBoxAndPostersItsThumbnail(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	src := filepath.Join(cx.GalleryPath, "clip.mp4")
+	mustWriteFile(t, src, append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"), make([]byte, 64)...), 0o644)
+	video, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, src, "")
+	mustExec(t, cx.DB.Write, `UPDATE images SET width = 1920, height = 1080 WHERE id = ?`, video.ID)
+	thumb := gallery.ThumbnailPath(cx.ThumbnailsPath, video.ID)
+	if err := os.MkdirAll(filepath.Dir(thumb), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, thumb, []byte("jpeg"), 0o644)
+
+	body := detailBody(t, srv, video.ID)
+	wantIn(t, body, `<div class="detail-media-frame detail-media-video detail-media-sized" style="--w:1920;--h:1080">`)
+	wantIn(t, body, fmt.Sprintf(`poster="/thumbnails/default/%d.jpg"`, video.ID))
+
+	if err := os.Remove(thumb); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, video.ID), "poster=")
+}
+
 func TestBuildAnnotationViews_ClampsToImageBounds(t *testing.T) {
 	w, h := 40, 30
 	img := &models.Image{Width: &w, Height: &h}
