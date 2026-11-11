@@ -97,9 +97,23 @@ func TestDetailPage_HoldsTheImageBoxBeforeItLoads(t *testing.T) {
 	rec, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, turned, "")
 	wantIn(t, detailBody(t, srv, rec.ID), `style="--w:10;--h:40"`)
 
+	wantNotIn(t, detailBody(t, srv, rec.ID), "background-image")
+
 	unsized := seedImage(t, srv, "unsized.png", 10, 10)
 	mustExec(t, cx.DB.Write, `UPDATE images SET width = NULL, height = NULL WHERE id = ?`, unsized)
 	wantIn(t, detailBody(t, srv, unsized), `<div class="detail-media-frame">`)
+}
+
+func TestDetailPage_DrawsTheThumbnailWhileTheImageLoads(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	id := seedImage(t, srv, "wide.png", 40, 10)
+	wantIn(t, detailBody(t, srv, id), fmt.Sprintf(`style="background-image:url('/thumbnails/default/%d.jpg');color:transparent" onload="this.style.backgroundImage='none'"`, id))
+
+	if err := os.Remove(gallery.ThumbnailPath(cx.ThumbnailsPath, id)); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, id), "background-image")
 }
 
 func TestBuildAnnotationViews_ClampsToImageBounds(t *testing.T) {

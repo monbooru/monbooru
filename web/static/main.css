@@ -1153,6 +1153,9 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
   width: 100%;
   height: auto;
   aspect-ratio: var(--w) / var(--h);
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
 }
 
 .detail-media-frame {

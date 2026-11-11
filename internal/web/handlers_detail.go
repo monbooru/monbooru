@@ -158,6 +158,8 @@ type detailData struct {
 	LeftOut string
 	// The box the image is drawn in, held before its bytes arrive.
 	BoxW, BoxH int
+	// The thumbnail fills the box meanwhile, unless it would show turned.
+	Placeholder bool
 }
 
 // External links go by sha because an image id can be reused after a delete.
@@ -411,12 +413,15 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	previewScaled := !isManga && !gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(pxW, pxH)
 	var boxW, boxH int
+	placeholder := false
 	if !isManga && !gallery.IsVideoType(img.FileType) {
 		boxW, boxH = pxW, pxH
+		o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType)
 		// The size is the stored pixels; a browser draws them turned.
-		if o, ok := meta.EXIFOrientation(img.CanonicalPath, img.FileType); ok && o >= 5 && o <= 8 {
+		if ok && o >= 5 && o <= 8 {
 			boxW, boxH = pxH, pxW
 		}
+		placeholder = boxW > 0 && !noPreview && (!ok || o == 1)
 	}
 
 	baseName := filepath.Base(img.CanonicalPath)
@@ -494,6 +499,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		PreviewMaxDim:     gallery.ViewMaxDim,
 		BoxW:              boxW,
 		BoxH:              boxH,
+		Placeholder:       placeholder,
 		RewrittenBy:       gallery.RewrittenBy(s.db().Read, img.ID),
 		OnDisk:            onDisk,
 		LeftOut:           leftOut,
