@@ -750,6 +750,53 @@ func TestRecordedMismatchSurvivesADisagreeingClaim(t *testing.T) {
 	}
 }
 
+func sourceURLKeysOf(t *testing.T, db *DB, imageID int64) []string {
+	t.Helper()
+	keys, err := QueryStrings(db.Read, `SELECT key FROM image_source_urls WHERE image_id = ? ORDER BY key`, imageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
+func TestSourceURLKeysFollowTheSources(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `INSERT INTO images (id, sha256, canonical_path, file_type, file_size) VALUES (1, 'a', '/g/1.png', 'png', 1), (2, 'b', '/g/2.png', 'png', 1)`)
+	mustExec(t, db.Write, `INSERT INTO image_sources (image_id, site, post_id, url, original) VALUES
+		(1, 'booru', '7', 'https://booru.example/posts/7', 'https://www.Social.example/user_a/status/1'||char(13,10)||'a credit line'||char(10)||'  http://art.example/a\nb  '),
+		(1, 'social', '1', 'https://social.example/user_a/status/1', ''),
+		(2, 'manual', '', 'ftp://files.example/a', 'https://quote.example/"q"\')`)
+
+	// The original's Social.example key folds into the url's under NOCASE.
+	want := []string{`art.example/a\nb`, "booru.example/posts/7", "social.example/user_a/status/1"}
+	if got := sourceURLKeysOf(t, db, 1); !slices.Equal(got, want) {
+		t.Fatalf("keys = %q, want %q", got, want)
+	}
+	if got := sourceURLKeysOf(t, db, 2); !slices.Equal(got, []string{`quote.example/"q"\`}) {
+		t.Errorf("keys = %q, want only the http(s) original", got)
+	}
+
+	mustExec(t, db.Write, `UPDATE image_sources SET original = '' WHERE image_id = 1 AND site = 'booru'`)
+	if got, want := sourceURLKeysOf(t, db, 1), []string{"booru.example/posts/7", "social.example/user_a/status/1"}; !slices.Equal(got, want) {
+		t.Errorf("after clearing the original: keys = %q, want %q (the social row still carries its url)", got, want)
+	}
+	mustExec(t, db.Write, `DELETE FROM image_sources WHERE image_id = 1 AND site = 'booru'`)
+	if got := sourceURLKeysOf(t, db, 1); !slices.Equal(got, []string{"social.example/user_a/status/1"}) {
+		t.Errorf("after deleting a source: keys = %q", got)
+	}
+
+	mustExec(t, db.Write, `DROP TABLE image_source_urls`)
+	mustBootstrap(t, db)
+	if n := countRows(t, db, "image_source_urls"); n != 2 {
+		t.Errorf("backfilled %d keys, want 2", n)
+	}
+	mustExec(t, db.Write, `DELETE FROM images WHERE id = 1`)
+	if got := sourceURLKeysOf(t, db, 1); len(got) != 0 {
+		t.Errorf("a deleted image kept keys %q", got)
+	}
+}
+
 func countRows(t *testing.T, database *DB, from string, args ...any) int {
 	t.Helper()
 	var n int
