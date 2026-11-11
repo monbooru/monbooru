@@ -2770,6 +2770,46 @@ func TestExecute_SourceFilterMatchesAnyOrigin(t *testing.T) {
 	}
 }
 
+func TestExecute_SourceURLFilter(t *testing.T) {
+	database, env := setupSearchDB(t)
+	direct := ingestTestImageWithID(t, database, env, "url_direct.png")
+	credited := ingestTestImageWithID(t, database, env, "url_credited.png")
+	sibling := ingestTestImageWithID(t, database, env, "url_sibling.png")
+	ingestTestImage(t, database, env, "url_none.png")
+	mustExec(t, database.Write, `INSERT INTO image_sources (image_id, site, post_id, url, original) VALUES
+		(?, 'social', '1', 'https://social.example/user_a/status/1', ''),
+		(?, 'booru', '7', 'https://booru.example/posts/7', 'a credit line'||char(10)||'https://www.social.example/user_a/status/2'),
+		(?, 'social', '3', 'http://social.example/user_ab/status/3', '')`, direct, credited, sibling)
+
+	for _, tc := range []struct {
+		q    string
+		want []int64
+	}{
+		{"sourceurl:social.example/user_a/", []int64{direct, credited}},
+		{"sourceurl:social.example/user_a", []int64{direct, credited, sibling}},
+		{`sourceurl:"https://social.example/user_a/"`, []int64{direct, credited}},
+		{"sourceurl:HTTP://WWW.Social.Example/user_a/", []int64{direct, credited}},
+		{"sourceurl:booru.example", []int64{credited}},
+		{"sourceurl:*/status/2", []int64{credited}},
+		{"sourceurl:*user_a*", []int64{direct, credited, sibling}},
+		{"sourceurl:social.example/*/status/1", []int64{direct}},
+		{"sourceurl:social.example/user?a", nil},
+		{"sourceurl:*", nil},
+		{"sourceurl:", nil},
+	} {
+		checkSearchIDs(t, database, tc.q, tc.want)
+	}
+}
+
+func TestSourceURLFilterSeeksItsKeys(t *testing.T) {
+	database, _ := setupSearchDB(t)
+	for _, q := range []string{"sourceurl:social.example/user_a", "sourceurl:social.example/*/status"} {
+		where, args, _ := buildWhere(Parse(q))
+		plan := strings.Join(explainPlan(t, database, "SELECT i.id FROM images i WHERE "+where, args), "\n")
+		wantIn(t, plan, "SEARCH image_source_urls USING PRIMARY KEY (key>? AND key<?)")
+	}
+}
+
 func TestBuildWhere_SourceEmpty(t *testing.T) {
 	for _, val := range []string{"", "none", "NONE"} {
 		where, args, _ := buildWhere(FilterExpr{Key: "source", Val: val})
