@@ -1148,10 +1148,15 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 }
 
 .detail-img, .detail-video { max-height: var(--media-max-h); }
-.detail-media-sized { width: min(100%, var(--media-max-h) * var(--w) / var(--h)); }
+.detail-media-sized {
+  width: min(100%, (var(--media-max-h) - 2px) * var(--w) / var(--h) + 2px, max(var(--w) * 1px, 198px * var(--w) / var(--h)) + 2px);
+}
 .detail-media-sized .detail-img {
-  width: 100%;
+  box-sizing: content-box;
+  width: calc(100% - 2px);
   height: auto;
+  min-height: 198px;
+  max-height: calc(var(--media-max-h) - 2px);
   aspect-ratio: var(--w) / var(--h);
   background-position: center;
   background-size: contain;
