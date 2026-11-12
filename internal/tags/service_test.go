@@ -1286,6 +1286,32 @@ func TestCreateAlias_FlattensDependentAliases(t *testing.T) {
 	}
 }
 
+func TestCreateAlias_RefusesRepointingAnExistingAlias(t *testing.T) {
+	database, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	a := mustTag(t, svc, "aaa", catID)
+	b := mustTag(t, svc, "bbb", catID)
+	mustCreateAlias(t, svc, "ccc", catID, a.ID)
+
+	_, err := svc.CreateAlias("ccc", catID, b.ID)
+	var taken *ErrAliasExists
+	if !errors.As(err, &taken) || taken.CanonicalID != a.ID || taken.Canonical != "general:aaa" {
+		t.Fatalf("CreateAlias(ccc -> bbb) err = %v, want ErrAliasExists naming general:aaa", err)
+	}
+	if _, err := svc.CreateAliasToNewTag("ccc", catID, "fresh_canon", catID); !errors.As(err, &taken) {
+		t.Fatalf("CreateAliasToNewTag(ccc -> fresh_canon) err = %v, want ErrAliasExists", err)
+	}
+	if n := countRows(t, database, "tags WHERE name = ?", "fresh_canon"); n != 0 {
+		t.Errorf("refused alias left %d fresh_canon rows, want 0", n)
+	}
+	if resolved, _ := svc.GetOrCreateTag("ccc", catID); resolved.ID != a.ID {
+		t.Errorf("ccc resolves to %d, want %d", resolved.ID, a.ID)
+	}
+	if again := mustCreateAlias(t, svc, "ccc", catID, a.ID); again.CanonicalTagID == nil || *again.CanonicalTagID != a.ID {
+		t.Errorf("re-creating ccc -> aaa = %+v, want the same alias", again)
+	}
+}
+
 func TestListTags_AliasFilterReturnsAliasesWithCanonicalJoin(t *testing.T) {
 	_, svc := setupTestDB(t)
 	catID := generalCategoryID(t, svc)

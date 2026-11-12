@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/tags"
@@ -223,6 +224,19 @@ func TestCreateAlias_ACategoryPrefixFilesTheAliasThere(t *testing.T) {
 		t.Errorf("alias = %v:%v, want artist:synonym", resp["category"], resp["name"])
 	}
 	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "artist:", "canonical_id": canonID}, http.StatusBadRequest)
+}
+
+func TestCreateAlias_AnAliasOfAnotherTagIsAConflict(t *testing.T) {
+	env := newTestEnv(t)
+	first := int64(apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "first"}, http.StatusCreated)["id"].(float64))
+	second := int64(apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "second"}, http.StatusCreated)["id"].(float64))
+	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": first}, http.StatusCreated)
+
+	resp := apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": second}, http.StatusConflict)
+	if msg, _ := resp["error"].(string); !strings.Contains(msg, "general:first") {
+		t.Errorf("error = %q, want it to name general:first", msg)
+	}
+	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": first}, http.StatusCreated)
 }
 
 func TestCreateAlias_MissingCanonical(t *testing.T) {

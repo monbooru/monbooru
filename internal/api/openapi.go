@@ -796,7 +796,7 @@ func buildSpec(baseURL string) map[string]any {
 						"201": resp("The alias row", "#/components/schemas/TagRow"),
 						"400": resp("Missing fields or an invalid alias target", "#/components/schemas/Error"),
 						"404": resp("Canonical tag not found", "#/components/schemas/Error"),
-						"409": resp("The name already names a tag with image_tags rows; merge it instead, or rejected for a rejected tag", "#/components/schemas/Error"),
+						"409": resp("The name already names a tag with image_tags rows, merge it instead; or an alias of another tag, repoint it instead; or rejected for a rejected tag", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/resolve": map[string]any{

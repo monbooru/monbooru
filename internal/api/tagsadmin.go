@@ -78,7 +78,8 @@ func writeSentinelError(w http.ResponseWriter, err error, table []sentinelStatus
 
 func writeTagError(w http.ResponseWriter, err error) {
 	var coll *tags.ErrCategoryCollision
-	if errors.As(err, &coll) {
+	var taken *tags.ErrAliasExists
+	if errors.As(err, &coll) || errors.As(err, &taken) {
 		contract.WriteError(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
