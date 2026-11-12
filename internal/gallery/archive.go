@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/fsx"
 )
@@ -102,6 +103,16 @@ func (m *Manga) pageReader(n int) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("page %d out of range [1,%d]", n+1, len(m.Pages))
 	}
 	return m.Pages[n].file.Open()
+}
+
+func (m *Manga) pageOrientation(n int) int {
+	rc, err := m.pageReader(n)
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = rc.Close() }()
+	o, _ := metadata.EXIFOrientationFrom(rc, models.ExtFileType(m.Pages[n].OriginalName))
+	return o
 }
 
 func (m *Manga) extractPage(n int, dst string) error {

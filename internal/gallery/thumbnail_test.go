@@ -528,3 +528,32 @@ func TestEnsureViewRendition_TurnsByEXIFOrientation(t *testing.T) {
 		t.Errorf("rendition %dx%d red at %q, want 15x30 red at \"tr\"", w, h, corner)
 	}
 }
+
+func TestGenerate_TurnsCBZPageThumbnailsByTheirEXIF(t *testing.T) {
+	dir := t.TempDir()
+	cbz := writeTestZip(t, dir, "m.cbz", map[string][]byte{"01.jpg": orientedJPEG(t, 6), "02.jpg": orientedJPEG(t, 8)})
+	if err := generateMangaThumbnails(cbz, dir, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	imgDir := mangaImageDir(dir, 1)
+	for _, c := range []struct{ path, corner string }{
+		{ThumbnailPath(dir, 1), "tr"},
+		{mangaPageThumbPath(imgDir, 1), "tr"},
+		{mangaPageThumbPath(imgDir, 2), "bl"},
+	} {
+		if corner, w, h := redCorner(t, c.path); corner != c.corner || w != 20 || h != 40 {
+			t.Errorf("%s: %dx%d red at %q, want 20x40 red at %q", filepath.Base(c.path), w, h, corner, c.corner)
+		}
+	}
+
+	if err := os.Remove(mangaPageThumbPath(imgDir, 2)); err != nil {
+		t.Fatal(err)
+	}
+	lazy, err := EnsureMangaPageThumb(dir, cbz, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corner, w, h := redCorner(t, lazy); corner != "bl" || w != 20 || h != 40 {
+		t.Errorf("lazy page thumb %dx%d red at %q, want 20x40 red at \"bl\"", w, h, corner)
+	}
+}

@@ -9,6 +9,18 @@ import (
 )
 
 func decodeFileEXIF(path, fileType string) *exifData {
+	if fileType != "jpeg" && fileType != "webp" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	return decodeReaderEXIF(f, fileType)
+}
+
+func decodeReaderEXIF(r io.Reader, fileType string) *exifData {
 	var find func(io.Reader) []byte
 	switch fileType {
 	case "jpeg":
@@ -18,12 +30,7 @@ func decodeFileEXIF(path, fileType string) *exifData {
 	default:
 		return nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = f.Close() }()
-	x, _ := decodeEXIF(find(f))
+	x, _ := decodeEXIF(find(r))
 	return x
 }
 

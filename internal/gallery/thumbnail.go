@@ -504,7 +504,7 @@ func generateOneMangaPageThumb(archive *Manga, idx int, dstPath string) error {
 	if err != nil {
 		return fmt.Errorf("decode page %d: %w", idx+1, err)
 	}
-	return writeJPEGAtomic(scaleImage(src, thumbMaxDim), dstPath, thumbQuality)
+	return writeJPEGAtomic(Orient(scaleImage(src, thumbMaxDim), archive.pageOrientation(idx)), dstPath, thumbQuality)
 }
 
 func generateImageThumb(srcPath, dstPath, fileType string) error {

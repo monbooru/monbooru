@@ -4,6 +4,7 @@
 package metadata
 
 import (
+	"io"
 	"maps"
 	"os"
 	"slices"
@@ -79,7 +80,14 @@ func collectEXIFTags(x *exifData) []models.SDParam {
 }
 
 func EXIFOrientation(path, fileType string) (int, bool) {
-	x := decodeFileEXIF(path, fileType)
+	return exifOrientation(decodeFileEXIF(path, fileType))
+}
+
+func EXIFOrientationFrom(r io.Reader, fileType string) (int, bool) {
+	return exifOrientation(decodeReaderEXIF(r, fileType))
+}
+
+func exifOrientation(x *exifData) (int, bool) {
 	if x == nil {
 		return 0, false
 	}
