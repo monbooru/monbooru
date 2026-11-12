@@ -22,6 +22,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	ort "github.com/yalue/onnxruntime_go"
@@ -734,6 +735,9 @@ func prepareInputs(path string, loaded []loadedTagger) ([]*image.RGBA, error) {
 		return nil, fmt.Errorf("image has no pixels (%dx%d)", img.Bounds().Dx(), img.Bounds().Dy())
 	}
 
+	// Turned after the padding: the square is centred, so it turns the
+	// same, and the full-size frame is never copied.
+	o, _ := metadata.EXIFOrientation(path, models.ExtFileType(path))
 	type padKey struct {
 		size int
 		fill [3]uint8
@@ -743,7 +747,7 @@ func prepareInputs(path string, loaded []loadedTagger) ([]*image.RGBA, error) {
 	for i, lt := range loaded {
 		k := padKey{lt.inputSize, padFill(lt.profile)}
 		if padded[k] == nil {
-			padded[k] = padAndResize(img, lt.inputSize, lt.profile)
+			padded[k] = gallery.Orient(padAndResize(img, lt.inputSize, lt.profile), o).(*image.RGBA)
 		}
 		inputs[i] = padded[k]
 	}
