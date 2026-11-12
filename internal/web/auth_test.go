@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 	"golang.org/x/crypto/bcrypt"
@@ -454,19 +455,66 @@ func TestSameOriginReferer(t *testing.T) {
 	}
 }
 
-func TestPairedTokenNotRevocable(t *testing.T) {
-	srv := newTestServer(t)
-	tok := pairPeer(srv, "monloader")
-
-	req := httptest.NewRequest("DELETE", "/settings/auth/tokens/"+tok.ID, nil)
-	req.SetPathValue("id", tok.ID)
+func revokeToken(srv *Server, id string) string {
+	req := httptest.NewRequest("DELETE", "/settings/auth/tokens/"+id, nil)
+	req.SetPathValue("id", id)
 	w := httptest.NewRecorder()
 	srv.settingsTokenRevoke(w, req)
+	return w.Body.String()
+}
 
-	if len(srv.cfg.Auth.Tokens) != 1 {
-		t.Fatalf("paired token was revoked directly; want it kept (manage via pairing)")
+func TestRevokingAPluginTokenRemovesItsPairing(t *testing.T) {
+	var teardown string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/pair/remove" {
+			teardown = r.Header.Get("Authorization")
+		}
+	}))
+	defer peer.Close()
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Plugins = []config.PluginConfig{{Name: "relay", PeerToken: "sek", APIURL: peer.URL}}
+	})
+	tok := pairPeer(srv, "relay")
+
+	body := revokeToken(srv, tok.ID)
+
+	if srv.pairedWith("relay") {
+		t.Error("the token outlived its revoke")
 	}
-	wantIn(t, w.Body.String(), "pairing")
+	if teardown != "Bearer sek" {
+		t.Errorf("the peer was called back with %q", teardown)
+	}
+	wantIn(t, body, "relay pairing removed")
+	wantIn(t, body, `id="plugin-rows"`)
+}
+
+func TestRevokingAPeerWithNoPeerToken(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Plugins = []config.PluginConfig{{Name: "script"}}
+	})
+	tok := pairPeer(srv, "script")
+
+	body := revokeToken(srv, tok.ID)
+
+	if srv.pairedWith("script") {
+		t.Errorf("the token outlived its revoke: %s", body)
+	}
+	wantIn(t, body, "script pairing removed")
+}
+
+func TestRevokingTheMonloaderTokenWarnsWhenUnreachable(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Monloader.APIURL = "http://127.0.0.1:1"
+		c.Monloader.APIToken = "sek"
+	})
+	tok := pairPeer(srv, monloader.App)
+
+	body := revokeToken(srv, tok.ID)
+
+	if srv.pairedWith(monloader.App) || srv.cfg.Monloader.APIToken != "" {
+		t.Errorf("the monloader pairing outlived its revoke: %+v", srv.cfg.Monloader)
+	}
+	wantIn(t, body, "could not reach monloader")
 }
 
 func TestPairedTokenPrivilegesLocked(t *testing.T) {
