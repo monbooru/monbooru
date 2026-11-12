@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -298,6 +300,49 @@ func TestSearchWarning(t *testing.T) {
 		if got := searchWarning(c.query, expr); got != c.want {
 			t.Errorf("%s: searchWarning(%q) = %q, want %q", c.name, c.query, got, c.want)
 		}
+	}
+}
+
+func TestSearchTime(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0.00 ms"},
+		{420 * time.Microsecond, "0.42 ms"},
+		{42*time.Millisecond + 370*time.Microsecond, "42.37 ms"},
+		{999 * time.Millisecond, "999.00 ms"},
+		{time.Second, "1.00 s"},
+		{1240 * time.Millisecond, "1.24 s"},
+	}
+	for _, c := range cases {
+		if got := searchTime(c.in); got != c.want {
+			t.Errorf("searchTime(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestGallery_TheCountAddsItsTimeToTheRows(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.UI.PageSize = 2
+	for i := range 5 {
+		seedImage(t, srv, "took_"+strconv.Itoa(i)+".png", 10+i, 10)
+	}
+
+	body := mustGetBody(t, srv, "/?q=width:>0&page=2")
+	wantIn(t, body, `class="result-time"`)
+	m := countURLRe.FindStringSubmatch(body)
+	if m == nil || !strings.Contains(m[1], "took=") {
+		t.Fatalf("the deferred count carries no row time: %v", m)
+	}
+
+	frag := mustGetBody(t, srv, "/internal/search/count?q=width:>0&count=1&took=1500000")
+	got := regexp.MustCompile(`\((\d+\.\d\d) s\)`).FindStringSubmatch(frag)
+	if got == nil {
+		t.Fatalf("no time in seconds in the count fragment: %s", sliceAround(frag, "result-time", 120))
+	}
+	if secs, _ := strconv.ParseFloat(got[1], 64); secs < 1.5 {
+		t.Errorf("count time = %s s, want at least the 1.5 s the rows took", got[1])
 	}
 }
 
