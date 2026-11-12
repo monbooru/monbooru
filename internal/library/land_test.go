@@ -236,6 +236,21 @@ func TestLand_AGalleryNamedByARelativePath(t *testing.T) {
 	}
 }
 
+func TestLandStageString(t *testing.T) {
+	for _, tc := range []struct {
+		stage LandStage
+		want  string
+	}{
+		{LandWrite, "write"},
+		{LandIngest, "ingest"},
+		{LandStageOf(errors.New("not a landing")), "LandStage(-1)"},
+	} {
+		if got := tc.stage.String(); got != tc.want {
+			t.Errorf("LandStage(%d).String() = %q, want %q", int(tc.stage), got, tc.want)
+		}
+	}
+}
+
 func writeTemp(t *testing.T, body []byte) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "upload")

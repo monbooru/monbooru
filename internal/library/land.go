@@ -24,6 +24,24 @@ const (
 	LandIngest
 )
 
+func (s LandStage) String() string {
+	switch s {
+	case LandPlace:
+		return "place"
+	case LandWrite:
+		return "write"
+	case LandSize:
+		return "size"
+	case LandType:
+		return "type"
+	case LandCheck:
+		return "check"
+	case LandIngest:
+		return "ingest"
+	}
+	return fmt.Sprintf("LandStage(%d)", int(s))
+}
+
 // LandError names the step a landing failed at.
 type LandError struct {
 	Stage LandStage
@@ -41,6 +59,17 @@ func LandStageOf(err error) LandStage {
 		return le.Stage
 	}
 	return -1
+}
+
+// LogLandFailure keeps a refused file for the debug log and warns of a
+// failure on the server's side.
+func LogLandFailure(what string, err error) {
+	switch stage := LandStageOf(err); stage {
+	case LandPlace, LandSize, LandType, LandCheck:
+		logx.Debugf("%s: %s refused: %v", what, stage, err)
+	default:
+		logx.Warnf("%s: %s failed: %v", what, stage, err)
+	}
 }
 
 type LandSpec struct {

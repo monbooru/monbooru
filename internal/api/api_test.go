@@ -2453,6 +2453,25 @@ func TestCreateImage_Multipart_BoundsALongName(t *testing.T) {
 	}
 }
 
+func TestCreateImage_Multipart_NamesWhyTheWriteFailed(t *testing.T) {
+	env := newTestEnv(t)
+	if err := os.Chmod(env.galleryDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(env.galleryDir, 0o755) })
+	if f, err := os.Create(filepath.Join(env.galleryDir, "probe")); err == nil {
+		_ = f.Close()
+		t.Skip("the gallery folder stays writable (root)")
+	}
+
+	w := env.postUpload(t, "upload.png", pngFileBytes(t, 12, 12), nil)
+
+	mustCode(t, w, http.StatusInternalServerError)
+	if body := w.Body.String(); !strings.Contains(body, "failed to save upload: permission denied") || strings.Contains(body, env.galleryDir) {
+		t.Errorf("body = %s, want the errno without the path", body)
+	}
+}
+
 func TestCreateImage_Multipart_RejectsMalformedTags(t *testing.T) {
 	env := newTestEnv(t)
 

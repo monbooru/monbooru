@@ -16,6 +16,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -331,7 +332,8 @@ func (h *Handler) replaceImageFile(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(io.MultiWriter(staged, shaH, md5H), file); err != nil {
 		_ = staged.Close()
 		discardStaged()
-		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to save upload")
+		logx.Warnf("api replaceImage save: %v", err)
+		contract.WriteError(w, http.StatusInternalServerError, "internal_error", saveFailure(err))
 		return
 	}
 	_ = staged.Close()
@@ -980,6 +982,15 @@ func markRescued(g *library.Gallery, id int64, in createInput) error {
 	return g.Edit(func(d *db.DB) error { return gallery.MarkSourceRescued(d, id, in.source, in.postID, in.rescuedMD5) })
 }
 
+// saveFailure names the errno and never the path, which would show the
+// server's layout.
+func saveFailure(err error) string {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return "failed to save upload: " + pe.Err.Error()
+	}
+	return "failed to save upload"
+}
+
 func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 	g, ok := h.resolveGallery(w, r)
 	if !ok {
@@ -1027,11 +1038,12 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		landed, err = g.LandInPlace(r.Context(), in.imgPath, spec)
 	}
 	if err != nil {
+		library.LogLandFailure("api createImage", err)
 		switch library.LandStageOf(err) {
 		case library.LandPlace:
 			contract.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		case library.LandWrite:
-			contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to save upload")
+			contract.WriteError(w, http.StatusInternalServerError, "internal_error", saveFailure(err))
 		case library.LandSize:
 			contract.WriteError(w, http.StatusRequestEntityTooLarge, contract.CodeFileTooLarge, fmt.Sprintf("file exceeds max size (%d MB)", maxMB))
 		case library.LandType:
@@ -1039,7 +1051,6 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		case library.LandCheck:
 			contract.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_type", "file does not decode as an image")
 		default:
-			logx.Warnf("api createImage ingest: %v", err)
 			serverError(w, err)
 		}
 		return

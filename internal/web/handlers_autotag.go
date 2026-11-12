@@ -118,13 +118,13 @@ func (s *Server) uploadPost(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
+			library.LogLandFailure(fmt.Sprintf("upload %q", fh.Filename), err)
 			switch library.LandStageOf(err) {
 			case library.LandPlace:
 				ignored++
 			case library.LandType:
 				unsupported++
 			case library.LandIngest:
-				logx.Warnf("upload ingest %q: %v", fh.Filename, err)
 				if errors.Is(err, gallery.ErrUnsupportedType) {
 					unsupported++
 				} else {
