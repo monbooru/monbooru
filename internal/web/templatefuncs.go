@@ -148,6 +148,7 @@ func templateFuncs() template.FuncMap {
 		},
 		"plural":      models.Plural,
 		"abbrevCount": abbrevCount,
+		"searchTime":  searchTime,
 		// Always quoted: a term may carry spaces the parser would split on.
 		"comfySearch": func(term string) string {
 			if term == "" {
@@ -303,6 +304,14 @@ func abbrevCount(n int) string {
 	default:
 		return abbrevUnit(n, 1000000, "M")
 	}
+}
+
+// A cached search takes well under a millisecond, so the decimals stay.
+func searchTime(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%.2f ms", float64(d)/float64(time.Millisecond))
+	}
+	return fmt.Sprintf("%.2f s", d.Seconds())
 }
 
 func abbrevUnit(n, div int, suffix string) string {

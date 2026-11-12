@@ -357,6 +357,7 @@ button.footer-rating-link { color: var(--fg-dim); }
   #gallery-header select[name="order"] { appearance: none; padding: 0 8px; text-align: center; }
 }
 .result-count { color: var(--fg); }
+.result-time { color: var(--fg-dim); }
 #batch-count { color: var(--fg); }
 
 .view-prefs { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-left: auto; }

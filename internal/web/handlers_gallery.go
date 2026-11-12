@@ -60,8 +60,11 @@ type galleryData struct {
 	SortSelectOOB     bool
 	PluginSlot        pluginSlotView
 	CountURL          string
-	PagerPrev         string
-	PagerNext         string
+	// What the searches behind this listing took on the server; the
+	// deferred count adds its own.
+	SearchTime time.Duration
+	PagerPrev  string
+	PagerNext  string
 	// A cursor page's label drifts off its place while matches arrive or
 	// leave above it; these say rows lie past an edge the label hides.
 	PagerMorePrev bool
@@ -164,7 +167,9 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 
 	htmxGridTarget := isHTMXRequest(r) && r.Header.Get("HX-Target") == "gallery-grid"
 
+	searchStart := time.Now()
 	result, err := search.Execute(r.Context(), s.source(), sq)
+	took := time.Since(searchStart)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return
@@ -207,7 +212,9 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		if page > totalPages {
 			page = totalPages
 			sq.Page, sq.After, sq.Before = page, 0, 0
+			searchStart = time.Now()
 			result, err = search.Execute(r.Context(), s.source(), sq)
+			took += time.Since(searchStart)
 			if err != nil {
 				if r.Context().Err() != nil {
 					return
@@ -281,6 +288,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		TaggerReason:      taggerReason,
 		PluginSlot:        s.pluginSlot(r, config.SlotBatchBar, 0, ""),
 		ActiveTagTerms:    computeActiveTagTerms(queryStr),
+		SearchTime:        took,
 	}
 	if seedID, ok := search.SimilaritySeedID(expr); ok {
 		visible, _ := s.active().VisibleCount()
@@ -310,7 +318,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if result.TotalUnknown || hiddenLater {
-		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, cursorRows && len(result.Results) >= pageSize)
+		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, cursorRows && len(result.Results) >= pageSize, took)
 	}
 	// The fragment uses it too, for its collapsed sidebar placeholder.
 	data.SidebarURL = buildSidebarURL(queryStr, ids)
@@ -347,14 +355,16 @@ func pagerCursor(first, last int64) (prev, next string) {
 }
 
 // The count fragment re-renders the pagers, so it takes the listing's
-// resolved sort, order and seed and the page's first and last ids.
-func buildCountURL(q, sort, order string, page int, seed int64, count bool, first, last int64, morePrev, fullCursorPage bool) string {
+// resolved sort, order and seed and the page's first and last ids. The
+// count's time adds to the rows' time, which rides along in microseconds.
+func buildCountURL(q, sort, order string, page int, seed int64, count bool, first, last int64, morePrev, fullCursorPage bool, took time.Duration) string {
 	v := setNonEmpty(url.Values{}, "q", q, "sort", sort, "order", order, "page", strconv.Itoa(page))
 	if seed != 0 {
 		v.Set("seed", strconv.FormatInt(seed, 10))
 	}
 	if count {
 		v.Set("count", "1")
+		v.Set("took", strconv.FormatInt(took.Microseconds(), 10))
 	}
 	if first != 0 {
 		v.Set("first", strconv.FormatInt(first, 10))
@@ -392,7 +402,10 @@ func (s *Server) galleryCount(w http.ResponseWriter, r *http.Request) {
 	if q.Get("count") == "1" {
 		sq := viewQuery(search.Parse(queryStr), queryStr, data.Sort, data.Order, ceiling)
 		sq.RandomSeed = data.RandomSeed
+		took, _ := strconv.ParseInt(q.Get("took"), 10, 64)
+		countStart := time.Now()
 		total, err := search.Count(r.Context(), s.source(), sq)
+		data.SearchTime = time.Duration(max(took, 0))*time.Microsecond + time.Since(countStart)
 		if err != nil {
 			if r.Context().Err() != nil {
 				return
