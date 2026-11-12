@@ -2438,6 +2438,21 @@ func TestCreateImage_Multipart_FoldsANameAFilesystemRefuses(t *testing.T) {
 	}
 }
 
+func TestCreateImage_Multipart_BoundsALongName(t *testing.T) {
+	env := newTestEnv(t)
+	name := strings.Repeat("a", 300) + ".png"
+	bounded := strings.Repeat("a", 180)
+
+	mustCode(t, env.postUpload(t, name, pngFileBytes(t, 12, 12), nil), http.StatusCreated)
+	mustCode(t, env.postUpload(t, name, pngFileBytes(t, 13, 13), nil), http.StatusCreated)
+
+	for _, want := range []string{bounded + ".png", bounded + "_1.png"} {
+		if _, err := os.Stat(filepath.Join(env.galleryDir, want)); err != nil {
+			t.Errorf("%d-byte landing missing: %v", len(want), err)
+		}
+	}
+}
+
 func TestCreateImage_Multipart_RejectsMalformedTags(t *testing.T) {
 	env := newTestEnv(t)
 
