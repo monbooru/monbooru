@@ -241,12 +241,13 @@ func TestBootstrap_AnalyzesImagesInFull(t *testing.T) {
 	}
 }
 
-func TestTagDeleteChildLookupsSeekAnIndex(t *testing.T) {
+func TestDeleteChildLookupsSeekAnIndex(t *testing.T) {
 	db := openTestDB(t)
 	mustBootstrap(t, db)
 	for _, c := range []struct{ query, index string }{
 		{`SELECT image_id FROM image_tag_sources WHERE tag_id = 1`, "idx_image_tag_sources_tag"},
 		{`SELECT id FROM tags WHERE canonical_tag_id = 1`, "idx_tags_canonical"},
+		{`SELECT id FROM dup_groups WHERE original_image_id = 1`, "idx_dup_groups_original"},
 	} {
 		details, err := QueryAll(db.Read, func(r *sql.Rows) (string, error) {
 			var id, parent, notused int
