@@ -98,7 +98,7 @@ func TestDetailPage_HoldsTheImageBoxBeforeItLoads(t *testing.T) {
 	rec, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, turned, "")
 	wantIn(t, detailBody(t, srv, rec.ID), `style="--w:10;--h:40"`)
 
-	wantNotIn(t, detailBody(t, srv, rec.ID), "background-image")
+	wantIn(t, detailBody(t, srv, rec.ID), "background-image")
 
 	unsized := seedImage(t, srv, "unsized.png", 10, 10)
 	mustExec(t, cx.DB.Write, `UPDATE images SET width = NULL, height = NULL WHERE id = ?`, unsized)

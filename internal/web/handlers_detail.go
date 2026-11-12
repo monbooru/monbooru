@@ -418,7 +418,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	if ok && o >= 5 && o <= 8 {
 		boxW, boxH = pxH, pxW
 	}
-	placeholder := boxW > 0 && !noPreview && (!ok || o == 1)
+	placeholder := boxW > 0 && !noPreview
 
 	baseName := filepath.Base(img.CanonicalPath)
 	// FolderPath, not the disk dir: a root-level file has no folder to name.

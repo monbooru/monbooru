@@ -23,6 +23,7 @@ import (
 	"golang.org/x/image/webp"
 
 	"github.com/monbooru/monbooru/internal/db"
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/shared/fsx"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
@@ -82,7 +83,8 @@ func EnsureViewRendition(srcPath, dstDir string, imageID int64, fileType string,
 	if maxDim > 0 {
 		src = scaleImage(src, maxDim)
 	}
-	if err := writeJPEGAtomic(src, dst, thumbQuality); err != nil {
+	o, _ := metadata.EXIFOrientation(srcPath, fileType)
+	if err := writeJPEGAtomic(Orient(src, o), dst, thumbQuality); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -380,7 +382,7 @@ func writeThumbnails(srcPath, dstDir string, imageID int64, fileType string, pag
 	if fileType == "cbz" {
 		return generateMangaThumbnails(srcPath, dstDir, imageID, pagesInline)
 	}
-	if err := generateImageThumb(srcPath, dstPath); err != nil {
+	if err := generateImageThumb(srcPath, dstPath, fileType); err != nil {
 		return err
 	}
 	if fileType == "gif" {
@@ -505,7 +507,7 @@ func generateOneMangaPageThumb(archive *Manga, idx int, dstPath string) error {
 	return writeJPEGAtomic(scaleImage(src, thumbMaxDim), dstPath, thumbQuality)
 }
 
-func generateImageThumb(srcPath, dstPath string) error {
+func generateImageThumb(srcPath, dstPath, fileType string) error {
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("opening source: %w", err)
@@ -520,7 +522,8 @@ func generateImageThumb(srcPath, dstPath string) error {
 	// bitmap alive across it.
 	large := decodedBytes(src) >= largeDecodeBytes
 
-	thumb := scaleImage(src, thumbMaxDim)
+	o, _ := metadata.EXIFOrientation(srcPath, fileType)
+	thumb := Orient(scaleImage(src, thumbMaxDim), o)
 	if err := writeJPEGAtomic(thumb, dstPath, thumbQuality); err != nil {
 		return err
 	}
@@ -552,6 +555,49 @@ func scaleImage(src image.Image, maxDim int) image.Image {
 
 	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	return dst
+}
+
+// Orient turns img as an EXIF Orientation of o asks; 1 and unknown values
+// come back untouched.
+func Orient(img image.Image, o int) image.Image {
+	if o < 2 || o > 8 {
+		return img
+	}
+	b := img.Bounds()
+	src, ok := img.(*image.RGBA)
+	if !ok || b.Min != (image.Point{}) {
+		src = image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+		draw.Draw(src, src.Bounds(), img, b.Min, draw.Src)
+	}
+	w, h := b.Dx(), b.Dy()
+	dw, dh := w, h
+	if o >= 5 {
+		dw, dh = h, w
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	for y := range h {
+		for x := range w {
+			var dx, dy int
+			switch o {
+			case 2:
+				dx, dy = w-1-x, y
+			case 3:
+				dx, dy = w-1-x, h-1-y
+			case 4:
+				dx, dy = x, h-1-y
+			case 5:
+				dx, dy = y, x
+			case 6:
+				dx, dy = h-1-y, x
+			case 7:
+				dx, dy = h-1-y, w-1-x
+			case 8:
+				dx, dy = y, w-1-x
+			}
+			copy(dst.Pix[dy*dst.Stride+dx*4:dy*dst.Stride+dx*4+4], src.Pix[y*src.Stride+x*4:y*src.Stride+x*4+4])
+		}
+	}
 	return dst
 }
 
