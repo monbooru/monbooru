@@ -37,6 +37,7 @@ func TestCopySourcesFromDuplicatesToOriginal(t *testing.T) {
 	addSourceRow(t, database, b, "site_b", "7", "https://b.example/7")
 	mustExec(t, database.Write, `UPDATE image_sources SET md5 = ?, commentary = 'note from user_a', post_width = 800
 		WHERE image_id = ? AND site = 'site_b'`, strings.Repeat("b", 32), b)
+	mustExec(t, database.Write, `UPDATE images SET width = 100, height = 100 WHERE id IN (?, ?)`, orig, b)
 	mustExec(t, database.Write, `INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body, manual)
 		VALUES (?, 'site_b', '7', 1, 2, 3, 4, 'pulled', 0), (?, 'site_b', '7', 5, 6, 7, 8, 'drawn', 1)`, b, b)
 	addSourceRow(t, database, b, "site_a", "1", "https://a.example/other")
@@ -113,5 +114,39 @@ func TestCopySourcesGivesASourcelessOriginalItsPrimary(t *testing.T) {
 	}
 	if source != "site_b" || url != "https://b.example/7" {
 		t.Errorf("images.source, url = %q, %q; want the copied origin mirrored", source, url)
+	}
+}
+
+func TestCopySourcesScalesNotesToTheOriginal(t *testing.T) {
+	cases := []struct {
+		name         string
+		origW, origH any
+		dupW, dupH   any
+		want         string // x,y,w,h on the original; empty when no note is copied
+	}{
+		{"same size", 1000, 500, 1000, 500, "10,20,30,40"},
+		{"the original is twice as large", 2000, 1000, 1000, 500, "20,40,60,80"},
+		{"the original is smaller", 500, 250, 1000, 500, "5,10,15,20"},
+		{"the duplicate's size is unknown", 1000, 500, nil, nil, ""},
+		{"the original's size is unknown", nil, nil, 1000, 500, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			database, svc, orig, b, _, gid := dupTrio(t)
+			mustExec(t, database.Write, `UPDATE images SET width = ?, height = ? WHERE id = ?`, c.origW, c.origH, orig)
+			mustExec(t, database.Write, `UPDATE images SET width = ?, height = ? WHERE id = ?`, c.dupW, c.dupH, b)
+			addSourceRow(t, database, b, "site_b", "7", "https://b.example/7")
+			mustExec(t, database.Write, `INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body)
+				VALUES (?, 'site_b', '7', 10, 20, 30, 40, 'pulled')`, b)
+
+			if _, err := svc.CopySourcesFromDuplicatesToOriginal(gid); err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			_ = database.Read.QueryRow(`SELECT x || ',' || y || ',' || w || ',' || h FROM image_annotations WHERE image_id = ?`, orig).Scan(&got)
+			if got != c.want {
+				t.Errorf("note on the original = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
