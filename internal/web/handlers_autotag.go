@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"mime/multipart"
@@ -125,12 +124,6 @@ func (s *Server) uploadPost(w http.ResponseWriter, r *http.Request) {
 				ignored++
 			case library.LandType:
 				unsupported++
-			case library.LandIngest:
-				if errors.Is(err, gallery.ErrUnsupportedType) {
-					unsupported++
-				} else {
-					unsaved++
-				}
 			default:
 				unsaved++
 			}

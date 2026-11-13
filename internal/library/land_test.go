@@ -91,13 +91,15 @@ func TestLand_KeepsAFileTheIngestFailedOnOnlyWhenAsked(t *testing.T) {
 }
 
 func TestLand_RemovesAFileOfNoSupportedType(t *testing.T) {
-	cx := openTestGallery(t)
-	_, err := land(t, cx, "notes.txt", []byte("not an image"), LandSpec{Origin: "upload", KeepOnFailure: true})
-	if LandStageOf(err) != LandType {
-		t.Fatalf("err %v, want a type failure", err)
-	}
-	if exists(filepath.Join(cx.GalleryPath, "notes.txt")) {
-		t.Error("an unsupported file stayed")
+	for _, name := range []string{"notes.txt", "clip.mp4", "book.cbz"} {
+		cx := openTestGallery(t)
+		_, err := land(t, cx, name, []byte("not an image"), LandSpec{Origin: "upload", KeepOnFailure: true})
+		if LandStageOf(err) != LandType {
+			t.Errorf("%s: err %v, want a type failure", name, err)
+		}
+		if exists(filepath.Join(cx.GalleryPath, name)) {
+			t.Errorf("%s: an unsupported file stayed", name)
+		}
 	}
 }
 

@@ -310,17 +310,19 @@ func TestUploadPost_NoFilesRejected(t *testing.T) {
 }
 
 func TestUploadPost_UnsupportedTypeCountsAsError(t *testing.T) {
-	srv := newTestServer(t)
-	w := uploadFiles(t, srv, map[string][]byte{
-		"malicious.exe": []byte("MZ\x90\x00" + strings.Repeat("\x00", 32)),
-	}, "")
+	for _, name := range []string{"malicious.exe", "clip.mp4"} {
+		srv := newTestServer(t)
+		w := uploadFiles(t, srv, map[string][]byte{
+			name: []byte("MZ\x90\x00" + strings.Repeat("\x00", 32)),
+		}, "")
 
-	body := w.Body.String()
-	wantIn(t, body, "1 error: unsupported file type")
+		body := w.Body.String()
+		wantIn(t, body, "1 error: unsupported file type")
 
-	cx := srv.active()
-	if _, err := os.Stat(filepath.Join(cx.GalleryPath, "malicious.exe")); !os.IsNotExist(err) {
-		t.Error("unsupported-type file should be removed from disk")
+		cx := srv.active()
+		if _, err := os.Stat(filepath.Join(cx.GalleryPath, name)); !os.IsNotExist(err) {
+			t.Errorf("unsupported-type file %s should be removed from disk", name)
+		}
 	}
 }
 

@@ -189,8 +189,12 @@ func (cx *Gallery) land(ctx context.Context, path string, spec LandSpec, inPlace
 		}
 	}
 	img, dup, err := gallery.Ingest(cx.Handle, path, spec.Origin)
+	if errors.Is(err, gallery.ErrUnsupportedType) {
+		discard()
+		return LandResult{}, landErr(LandType, err)
+	}
 	if err != nil {
-		if !spec.KeepOnFailure || errors.Is(err, gallery.ErrUnsupportedType) {
+		if !spec.KeepOnFailure {
 			discard()
 		}
 		return LandResult{}, landErr(LandIngest, err)

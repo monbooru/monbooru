@@ -446,7 +446,7 @@ func (h *Handler) replaceImageFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		discardStaged()
 		logx.Warnf("api replace image %d: %v", id, err)
-		h.refuse(w, g, id, "the file replacement failed", http.StatusInternalServerError, "internal_error", err.Error())
+		h.refuse(w, g, id, "the file replacement failed", http.StatusInternalServerError, "internal_error", "the file replacement failed")
 		return
 	}
 
@@ -1051,7 +1051,7 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		case library.LandCheck:
 			contract.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_type", "file does not decode as an image")
 		default:
-			serverError(w, err)
+			contract.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to ingest the file")
 		}
 		return
 	}
