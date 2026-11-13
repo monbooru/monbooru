@@ -1,0 +1,30 @@
+{{define "partials/copy_sources_preview.html"}}
+{{$n := len .Sources}}
+<p>
+  {{if .Sources}}
+  {{plural $n "This" "These"}} <strong>{{$n}}</strong> {{plural $n "source" "sources"}} will be copied onto the original (image #{{.OriginalID}}), with {{plural $n "its" "their"}} commentary and notes:
+  {{else}}
+  No new sources to copy: the original already carries every source from the duplicates.
+  {{end}}
+</p>
+{{if .Sources}}
+<div class="copy-tags-preview-groups">
+  <ul class="copy-tags-preview-list">
+    {{range .Sources}}
+    <li class="mono-small">{{.Site}}{{with .PostID}} #{{.}}{{end}}{{with .URL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">{{urlDomain .}}</a>{{end}} <span class="field-hint">from #{{.ImageID}}</span></li>
+    {{end}}
+  </ul>
+</div>
+{{end}}
+<div class="dialog-actions">
+  {{if .Sources}}
+  <form hx-post="/relations/dup-group/{{.GroupID}}/copy-sources"
+        hx-target="#flash-walker-marked" hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful){document.getElementById('copy-sources-preview-dialog').close();if(event.detail.xhr.responseText.indexOf('flash-err') === -1)setTimeout(function(){window.location.reload()},1500)}"
+        style="display:inline">
+    <button type="submit">Copy {{$n}} {{plural $n "source" "sources"}}</button>
+  </form>
+  {{end}}
+  <button type="button" onclick="document.getElementById('copy-sources-preview-dialog').close()">Cancel</button>
+</div>
+{{end}}

@@ -58,12 +58,13 @@ func duplicatePaths(r *http.Request, cx *library.Gallery, offset, limit int) (wi
 }
 
 type markedDuplicateRow struct {
-	GroupID         int64
-	OriginalID      int64
-	OriginalMissing bool
-	DuplicateID     int64
-	MarkedAt        string
-	HasTagsToCopy   bool
+	GroupID          int64
+	OriginalID       int64
+	OriginalMissing  bool
+	DuplicateID      int64
+	MarkedAt         string
+	HasTagsToCopy    bool
+	HasSourcesToCopy bool
 }
 
 type relationsWalkerData struct {
@@ -163,8 +164,8 @@ func (s *Server) markedWalkerPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load duplicates", http.StatusInternalServerError)
 		return
 	}
-	if err := annotateTagsToCopy(cx, out); err != nil {
-		logx.Warnf("marked walker tags-to-copy: %v", err)
+	if err := annotateCopyable(cx, out); err != nil {
+		logx.Warnf("marked walker copyable tags and sources: %v", err)
 	}
 	s.renderTemplate(w, "relations_duplicates_marked.html", relationsWalkerData{
 		baseData:   s.base(r, "relations", "Duplicate images - "+s.booruName()),
@@ -189,19 +190,24 @@ func originalsGone(cx *library.Gallery) func(id int64, missing bool, path string
 	}
 }
 
-func annotateTagsToCopy(cx *library.Gallery, rows []markedDuplicateRow) error {
+func annotateCopyable(cx *library.Gallery, rows []markedDuplicateRow) error {
 	var groupIDs []int64
 	for _, dr := range rows {
 		if !slices.Contains(groupIDs, dr.GroupID) {
 			groupIDs = append(groupIDs, dr.GroupID)
 		}
 	}
-	eligible, err := cx.RelationsSvc.GroupsWithTagsToCopy(groupIDs)
+	withTags, err := cx.RelationsSvc.GroupsWithTagsToCopy(groupIDs)
+	if err != nil {
+		return err
+	}
+	withSources, err := cx.RelationsSvc.GroupsWithSourcesToCopy(groupIDs)
 	if err != nil {
 		return err
 	}
 	for i := range rows {
-		rows[i].HasTagsToCopy = eligible[rows[i].GroupID]
+		rows[i].HasTagsToCopy = withTags[rows[i].GroupID]
+		rows[i].HasSourcesToCopy = withSources[rows[i].GroupID]
 	}
 	return nil
 }
