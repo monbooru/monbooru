@@ -2263,11 +2263,6 @@ dialog:focus-visible { outline: none; }
 
 .cat-order-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .cat-table .cat-grip { width: 1%; text-align: center; }
-.cat-grip-btn { background: none; border: 0; padding: 0 4px; color: var(--fg-dim); cursor: grab; touch-action: none; }
-.cat-grip-btn:hover, .cat-grip-btn:focus-visible { color: var(--fg); }
-.cat-grip-btn:focus-visible { outline: 1px solid var(--link); outline-offset: 1px; }
-.cat-dragging { outline: 1px dashed var(--fg); outline-offset: -1px; }
-.cat-dragging .cat-grip-btn { color: var(--accent); cursor: grabbing; }
 .cat-color-pair { display: inline-flex; gap: 6px; align-items: center; }
 .cat-swatch { padding: 0; width: 30px; height: 22px; }
 .cat-hex { width: 13ch; padding: 1px 4px; background: transparent; border-color: transparent; }

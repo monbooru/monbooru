@@ -11,7 +11,7 @@
   <div class="table-scroll">
   <table class="grid-table cat-table">
     <thead><tr><th class="cat-grip">Order</th><th>Name</th><th>Color</th><th>Actions</th></tr></thead>
-    <tbody id="cat-list" data-default-order="{{range $i, $id := .DefaultOrder}}{{if $i}},{{end}}{{$id}}{{end}}">
+    <tbody id="cat-list" data-reorder data-default-order="{{range $i, $id := .DefaultOrder}}{{if $i}},{{end}}{{$id}}{{end}}">
       {{range .Categories}}
       {{template "partials/category_row.html" .}}
       {{end}}
@@ -115,7 +115,6 @@ var catList = document.getElementById('cat-list');
 var catOrderReset = document.getElementById('cat-order-reset');
 var catSaved = catOrder();
 var catKeyTimer = null;
-var catDrag = null;
 syncCatOrderReset();
 
 function catOrder() {
@@ -147,82 +146,22 @@ function saveCatOrder() {
   });
 }
 
-// The neighbours move rather than the dragged or focused row: moving that
-// row out of the DOM would drop its pointer capture or its focus.
-function moveCatRow(tr, up) {
-  var other = up ? tr.previousElementSibling : tr.nextElementSibling;
-  if (!other) return false;
-  catList.insertBefore(other, up ? tr.nextElementSibling : tr);
-  return true;
-}
-
 catOrderReset.addEventListener('click', function() {
   setCatOrder(catList.dataset.defaultOrder);
   saveCatOrder();
 });
 
-catList.addEventListener('keydown', function(e) {
-  var grip = e.target.closest('.cat-grip-btn');
-  if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
-  e.preventDefault();
-  var tr = grip.closest('tr');
-  if (!moveCatRow(tr, e.key === 'ArrowUp')) return;
+catList.addEventListener('reorder', function(e) {
+  if (!e.detail.keyboard) {
+    saveCatOrder();
+    return;
+  }
   syncCatOrderReset();
-  var rows = Array.from(catList.rows);
+  var tr = e.detail.row, rows = Array.from(catList.rows);
   document.getElementById('cat-order-live').textContent =
     tr.querySelector('td:nth-child(2) span').textContent + ', ' + (rows.indexOf(tr) + 1) + ' of ' + rows.length;
   clearTimeout(catKeyTimer);
   catKeyTimer = setTimeout(saveCatOrder, 400);
-});
-
-catList.addEventListener('pointerdown', function(e) {
-  var grip = e.target.closest('.cat-grip-btn');
-  if (!grip || e.button !== 0) return;
-  e.preventDefault();
-  grip.setPointerCapture(e.pointerId);
-  catDrag = {tr: grip.closest('tr'), before: catOrder(), y: e.clientY, timer: setInterval(scrollCatDrag, 30)};
-  catDrag.tr.classList.add('cat-dragging');
-});
-
-catList.addEventListener('pointermove', function(e) {
-  if (!catDrag) return;
-  catDrag.y = e.clientY;
-  followCatDrag();
-});
-
-function followCatDrag() {
-  var tr = catDrag.tr;
-  while (tr.previousElementSibling && catDrag.y < midY(tr.previousElementSibling)) moveCatRow(tr, true);
-  while (tr.nextElementSibling && catDrag.y > midY(tr.nextElementSibling)) moveCatRow(tr, false);
-}
-
-function midY(el) {
-  var r = el.getBoundingClientRect();
-  return r.top + r.height / 2;
-}
-
-function scrollCatDrag() {
-  var box = document.getElementById('content').getBoundingClientRect();
-  var step = catDrag.y < box.top + 40 ? -12 : catDrag.y > box.bottom - 40 ? 12 : 0;
-  if (!step) return;
-  document.getElementById('content').scrollTop += step;
-  followCatDrag();
-}
-
-function endCatDrag(keep) {
-  if (!catDrag) return;
-  clearInterval(catDrag.timer);
-  catDrag.tr.classList.remove('cat-dragging');
-  var before = catDrag.before;
-  catDrag = null;
-  if (keep) saveCatOrder();
-  else setCatOrder(before);
-}
-
-catList.addEventListener('pointerup', function() { endCatDrag(true); });
-catList.addEventListener('pointercancel', function() { endCatDrag(false); });
-document.addEventListener('keydown', function(e) {
-  if (catDrag && e.key === 'Escape') endCatDrag(false);
 });
 
 var addSwatch = document.getElementById('add-cat-swatch');
