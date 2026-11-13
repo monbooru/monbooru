@@ -1567,6 +1567,38 @@ document.addEventListener('input', function(e) {
   });
 });
 
+const isQueryOp = t => /^(or|and)$/i.test(t);
+const isGroupOpen = t => t === '(' || t === '-(';
+
+// AND binds tighter than OR, so a term added after a top-level OR would
+// only join its last side.
+function hasTopLevelOr(terms) {
+  let depth = 0;
+  return terms.some(t => {
+    if (isGroupOpen(t)) depth++;
+    else if (t === ')') depth = Math.max(depth - 1, 0);
+    return depth === 0 && /^or$/i.test(t);
+  });
+}
+
+// Drops the empty groups and dangling operators a removed term leaves.
+function tidyQueryTerms(terms) {
+  for (let i = 0; i < terms.length;) {
+    const prev = terms[i - 1], t = terms[i], next = terms[i + 1];
+    if (isGroupOpen(t) && next === ')') {
+      const negated = t === '(' && (prev === '-' || /^not$/i.test(prev || ''));
+      terms.splice(negated ? i - 1 : i, negated ? 3 : 2);
+    } else if (isQueryOp(t) && (!prev || !next || isQueryOp(next) || next === ')' || isGroupOpen(prev))) {
+      terms.splice(i, 1);
+    } else {
+      i++;
+      continue;
+    }
+    i = 0;
+  }
+  return terms;
+}
+
 // The button's term is category:name, but the query may hold the bare
 // name, so both forms are removed.
 document.addEventListener('click', function(e) {
@@ -1580,9 +1612,13 @@ document.addEventListener('click', function(e) {
   const colon = tagName.indexOf(':');
   const bare = colon >= 0 ? tagName.slice(colon + 1) : tagName;
   const terms = si.value.trim().split(/\s+/).filter(Boolean);
-  const filtered = terms.filter(t => t !== tagName && t !== bare);
-  if (filtered.length === terms.length) filtered.push(tagName);
-  si.value = filtered.join(' ');
+  if (btn.classList.contains('active')) {
+    si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
+  } else {
+    // A query that ends on an operator is waiting for this term.
+    const wrap = hasTopLevelOr(terms) && !isQueryOp(terms[terms.length - 1]);
+    si.value = (wrap ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
+  }
   submitSearch();
 });
 

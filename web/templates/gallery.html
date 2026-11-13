@@ -628,12 +628,18 @@ function confirmBatchTag() {
     'Tag operation failed.');
 }
 
+// fav:true in front of a top-level OR would only join its first side, so
+// the query goes in a group, as the sidebar + button does.
 function toggleFavFilter() {
   var si = document.getElementById('search-input');
   if (!si) return;
   var tokens = si.value.split(/\s+/).filter(function(t) { return t && t.toLowerCase() !== 'fav:true'; });
   var hadFav = tokens.length !== si.value.split(/\s+/).filter(Boolean).length;
-  if (!hadFav) tokens.unshift('fav:true');
+  if (hadFav) {
+    tokens = tidyQueryTerms(tokens);
+  } else {
+    tokens = ['fav:true'].concat(hasTopLevelOr(tokens) ? ['('].concat(tokens, ')') : tokens);
+  }
   si.value = tokens.join(' ');
   submitSearch();
 }
