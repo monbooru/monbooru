@@ -99,11 +99,22 @@ func (s *Service) CopySourcesFromDuplicatesToOriginal(groupID int64) (int, error
 				continue
 			}
 			added++
-			// Operator-drawn notes sit on the duplicate's pixels, so only the pulled ones come.
+			// Operator-drawn notes stay with the duplicate. Boxes are in each
+			// file's own pixels, so pulled ones are scaled to the original's
+			// size, and skipped when either size is unknown.
 			if _, err := tx.Exec(
 				`INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body, manual, fetched_at)
-				 SELECT ?, site, post_id, x, y, w, h, body, 0, fetched_at
-				 FROM image_annotations WHERE image_id = ? AND site = ? AND post_id = ? AND manual = 0`,
+				 SELECT o.id, a.site, a.post_id,
+				        CAST(round(a.x * o.width * 1.0 / d.width) AS INTEGER),
+				        CAST(round(a.y * o.height * 1.0 / d.height) AS INTEGER),
+				        CAST(round(a.w * o.width * 1.0 / d.width) AS INTEGER),
+				        CAST(round(a.h * o.height * 1.0 / d.height) AS INTEGER),
+				        a.body, 0, a.fetched_at
+				 FROM image_annotations a
+				 JOIN images d ON d.id = a.image_id
+				 JOIN images o ON o.id = ?
+				 WHERE a.image_id = ? AND a.site = ? AND a.post_id = ? AND a.manual = 0
+				   AND d.width > 0 AND d.height > 0 AND o.width > 0 AND o.height > 0`,
 				original, r.ImageID, r.Site, r.PostID); err != nil {
 				return err
 			}
