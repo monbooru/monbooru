@@ -330,7 +330,10 @@ func (rt *routes) write(pattern string, h http.HandlerFunc) { rt.add(pattern, mo
 
 func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, modeFree, h) }
 
-func (s *Server) StartWatchers() { s.set.StartBackground() }
+func (s *Server) StartWatchers() {
+	s.set.StartBackground()
+	s.turnUpgradedThumbs()
+}
 
 func (s *Server) background(name string) library.Background {
 	watch, maxMB := s.watcherSettings()

@@ -158,7 +158,7 @@ type detailData struct {
 	LeftOut string
 	// The box the image is drawn in, held before its bytes arrive.
 	BoxW, BoxH int
-	// The thumbnail fills the box meanwhile, unless it would show turned.
+	// The thumbnail fills the box meanwhile.
 	Placeholder bool
 }
 

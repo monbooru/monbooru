@@ -2,17 +2,24 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
+	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/galleryio"
 	"github.com/monbooru/monbooru/internal/models"
@@ -67,6 +74,143 @@ func TestRebuildThumbsJob_FillsAStillsMissingSize(t *testing.T) {
 	}
 	if w != 64 || h != 48 {
 		t.Errorf("size = %dx%d, want 64x48", w, h)
+	}
+}
+
+func sidewaysJPEG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := range 20 {
+		for x := range 40 {
+			img.Set(x, y, color.RGBA{0, 0, 255, 255})
+			if x < 10 && y < 10 {
+				img.Set(x, y, color.RGBA{255, 0, 0, 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00")
+	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
+	return slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:])
+}
+
+func unturnThumbnail(t *testing.T, database *db.DB, thumbnailsPath, src string, id int64) int64 {
+	t.Helper()
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, gallery.ThumbnailPath(thumbnailsPath, id), buf.Bytes(), 0o644)
+	h, err := gallery.RecomputeAndStorePhash(context.Background(), database, id, thumbnailsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func thumbnailSize(t *testing.T, path string) (int, int) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	cfg, err := jpeg.DecodeConfig(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Width, cfg.Height
+}
+
+func storedPhash(t *testing.T, database *db.DB, id int64) int64 {
+	t.Helper()
+	var h int64
+	if err := database.Read.QueryRow(`SELECT phash FROM images WHERE id = ?`, id).Scan(&h); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func TestRebuildThumbsJob_RecomputesThePhash(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	src := filepath.Join(cx.GalleryPath, "phone.jpg")
+	mustWriteFile(t, src, sidewaysJPEG(t), 0o644)
+	img, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, src, "")
+	if old := unturnThumbnail(t, cx.DB, cx.ThumbnailsPath, src, img.ID); old == *img.Phash {
+		t.Fatal("the fixture hashes the same turned and unturned")
+	}
+
+	if err := srv.startRebuildThumbsJob(cx); err != nil {
+		t.Fatalf("startRebuildThumbsJob: %v", err)
+	}
+	drainJob(t, srv)
+
+	if got := storedPhash(t, cx.DB, img.ID); got != *img.Phash {
+		t.Errorf("phash = %x after the rebuild, want the turned thumbnail's %x", got, *img.Phash)
+	}
+}
+
+func TestStartWatchers_TurnsAnUpgradedLibrarysThumbnails(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "data")
+	g := config.Gallery{
+		Name:           "default",
+		GalleryPath:    filepath.Join(dir, "gallery"),
+		DBPath:         filepath.Join(dataPath, "default", "monbooru.db"),
+		ThumbnailsPath: filepath.Join(dataPath, "default", "thumbnails"),
+	}
+	mustMkdirAll(t, g.GalleryPath, 0o755)
+	mustMkdirAll(t, filepath.Dir(g.DBPath), 0o755)
+	mustWriteFile(t, g.DBPath, mustBootstrappedDB(t), 0o644)
+	database, err := db.Open(g.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(g.GalleryPath, "phone.jpg")
+	mustWriteFile(t, src, sidewaysJPEG(t), 0o644)
+	img, _ := mustIngest(t, database, g.GalleryPath, g.ThumbnailsPath, src, "")
+	if old := unturnThumbnail(t, database, g.ThumbnailsPath, src, img.ID); old == *img.Phash {
+		t.Fatal("the fixture hashes the same turned and unturned")
+	}
+	mustExec(t, database.Write, `PRAGMA user_version = 16`)
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Paths.DataPath = dataPath
+		c.Galleries = []config.Gallery{g}
+		c.DefaultGallery = g.Name
+	})
+	srv.StartWatchers()
+	deadline := time.Now().Add(30 * time.Second)
+	for st := srv.jobs.Get(); st == nil || st.Running; st = srv.jobs.Get() {
+		if time.Now().After(deadline) {
+			t.Fatal("no turning job finished within 30s")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := srv.jobs.Get().Summary; got != "Turned 1 thumbnail by its EXIF orientation." {
+		t.Errorf("summary = %q", got)
+	}
+	if w, h := thumbnailSize(t, gallery.ThumbnailPath(g.ThumbnailsPath, img.ID)); w != 20 || h != 40 {
+		t.Errorf("thumbnail %dx%d, want it turned to 20x40", w, h)
+	}
+	if got := storedPhash(t, srv.active().DB, img.ID); got != *img.Phash {
+		t.Errorf("phash = %x, want a fresh ingest's %x", got, *img.Phash)
 	}
 }
 

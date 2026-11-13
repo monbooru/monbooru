@@ -77,7 +77,7 @@ const NormalizeWindowsFolderPathSQL = `UPDATE images SET folder_path = ltrim(rep
 
 // Bump bootstrapSchemaVersion for a new one-shot or an index the planner
 // needs stats for: ANALYZE runs once per bump.
-const bootstrapSchemaVersion = 16
+const bootstrapSchemaVersion = 17
 
 // A library below MinUpgradeUserVersion was last opened outside the
 // two-minor upgrade window; UpgradeVia is a release that still upgrades
@@ -93,6 +93,9 @@ var ErrLibraryTooOld = errors.New("library too old to upgrade directly")
 type DB struct {
 	Read  *sql.DB
 	Write *sql.DB
+	// UnturnedThumbs is set by Bootstrap on a library last opened before
+	// thumbnails were turned by their EXIF orientation.
+	UnturnedThumbs bool
 	// Two passes each holding part of one pool would wait on each other
 	// forever.
 	eachConn sync.Mutex

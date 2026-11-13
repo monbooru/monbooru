@@ -42,6 +42,9 @@ func Bootstrap(db *DB) error {
 		b.exec("null infinite comfyui cfg_scale", `UPDATE comfyui_metadata SET cfg_scale = NULL WHERE cfg_scale IN (9e999, -9e999)`)
 		b.exec("null infinite community_rating", `UPDATE manga_metadata SET community_rating = NULL WHERE community_rating IN (9e999, -9e999)`)
 	}
+	if existing && marker < 17 {
+		db.UnturnedThumbs = true
+	}
 	b.ensureColumn("image_sources", "commentary_translated", `ALTER TABLE image_sources ADD COLUMN commentary_translated TEXT NOT NULL DEFAULT ''`)
 	b.exec("create idx_image_sources_parent_url", `CREATE INDEX IF NOT EXISTS idx_image_sources_parent_url ON image_sources(parent_url) WHERE parent_url != ''`)
 	// Must match upgrade.CandidateWhere, or the planner stops using it.

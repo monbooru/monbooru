@@ -115,6 +115,16 @@ func (m *Manga) pageOrientation(n int) int {
 	return o
 }
 
+// CoverOrientation is the EXIF orientation of a cbz's first page, 0 for none.
+func CoverOrientation(path string) int {
+	m, err := OpenManga(path)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = m.Close() }()
+	return m.pageOrientation(0)
+}
+
 func (m *Manga) extractPage(n int, dst string) error {
 	rc, err := m.pageReader(n)
 	if err != nil {
