@@ -1614,7 +1614,9 @@ document.addEventListener('click', function(e) {
   if (btn.classList.contains('active')) {
     si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
   } else {
-    si.value = (hasTopLevelOr(terms) ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
+    // A query that ends on an operator is waiting for this term.
+    const wrap = hasTopLevelOr(terms) && !isQueryOp(terms[terms.length - 1]);
+    si.value = (wrap ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
   }
   submitSearch();
 });
