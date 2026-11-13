@@ -306,12 +306,29 @@ func abbrevCount(n int) string {
 	}
 }
 
-// A cached search takes well under a millisecond, so the decimals stay.
+// Three significant digits, as a cached search takes well under a
+// millisecond; the unit promotes at 999.5 ms, which rounds to "1000".
 func searchTime(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%.2f ms", float64(d)/float64(time.Millisecond))
+	if d < 999500*time.Microsecond {
+		return threeDigits(float64(d)/float64(time.Millisecond)) + " ms"
 	}
-	return fmt.Sprintf("%.2f s", d.Seconds())
+	return threeDigits(d.Seconds()) + " s"
+}
+
+// Fixed-point rather than %g, which turns a long search into "1.23e+03".
+func threeDigits(v float64) string {
+	dec := 2
+	for x := v; x >= 10 && dec > 0; x /= 10 {
+		dec--
+	}
+	for x := v; x > 0 && x < 1; x *= 10 {
+		dec++
+	}
+	s := strconv.FormatFloat(v, 'f', dec, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
 }
 
 func abbrevUnit(n, div int, suffix string) string {
