@@ -34,6 +34,13 @@ func ResolveTopK(overrides map[string]int, cat string) int {
 	return DefaultTopKFallback
 }
 
+func CategoryThreshold(global float64, perCat map[string]float64, cat string) float64 {
+	if v, ok := perCat[cat]; ok {
+		return v
+	}
+	return global
+}
+
 // The [2, 10] clamp: one flicker across a long archive is not enough, and
 // a sparse but real label on a long manga still gets through.
 func ResolveMinHits(fraction float64, frameCount int) int {
@@ -104,11 +111,7 @@ func AggregateInferenceScores(perFrame [][]float32, labels []CandidateLabel, opt
 			continue
 		}
 		mean := e.sum / float32(e.hits)
-		threshold := opts.GlobalThreshold
-		if v, ok := opts.CategoryThresholds[lbl.CatName]; ok {
-			threshold = float32(v)
-		}
-		if mean < threshold {
+		if mean < float32(CategoryThreshold(float64(opts.GlobalThreshold), opts.CategoryThresholds, lbl.CatName)) {
 			continue
 		}
 		byCat[lbl.CatID] = append(byCat[lbl.CatID],

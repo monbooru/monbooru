@@ -687,10 +687,7 @@ func taggerLane(t tagger.TaggerStatus, v tagger.LabelView, name, cat string, cat
 		maps.Parts = []pathPart{part("no rule", "dim")}
 	}
 	lane.Steps[0] = maps
-	threshold := t.ConfidenceThreshold
-	if v, ok := t.CategoryThresholds[cat]; ok {
-		threshold = v
-	}
+	threshold := tagger.CategoryThreshold(t.ConfidenceThreshold, t.CategoryThresholds, cat)
 	cats := &pathBox{Href: configure + "thresholds", Parts: []pathPart{colored(cat+" ", catColor(cat)), part(fmt.Sprintf("≥ %.2f", threshold), "fg")}}
 	if slices.Contains(t.DisabledCategories, cat) {
 		cats.Parts, cats.State = []pathPart{colored(cat+" ", catColor(cat)), part("off", "err")}, "stop"
