@@ -255,9 +255,9 @@ func (s *Server) runMemoryReclaim() {
 			mins := s.cfg.Tagger.IdleReleaseAfterMinutes
 			s.cfgMu.RUnlock()
 			if mins > 0 {
-				before := readVmRSS()
+				before := desktop.ProcStatus("self", "VmRSS")
 				if tagger.ReleaseIdle(time.Duration(mins) * time.Minute) {
-					after := readVmRSS()
+					after := desktop.ProcStatus("self", "VmRSS")
 					if before > 0 && after > 0 && before > after {
 						logx.Infof("memory reclaim: released idle auto-tagger session (-%s)", webui.HumanBytes(int64(before-after)))
 					} else {

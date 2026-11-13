@@ -13,6 +13,7 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/session"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 )
 
@@ -174,11 +175,19 @@ func (s *Server) desktopJobWarning() string {
 	return runningJobName(st.JobType) + " is running and will not resume."
 }
 
+func (s *Server) desktopPower(r *http.Request) webui.DesktopPower {
+	warning := s.desktopJobWarning()
+	return webui.DesktopPower{
+		Name:           "monbooru",
+		PollURL:        "/internal/desktop-power",
+		RestartWarning: warning,
+		QuitWarning:    warning,
+		CSRFToken:      s.sessions.CSRFToken(session.FromContext(r.Context())),
+	}
+}
+
 func (s *Server) desktopPowerFragment(w http.ResponseWriter, r *http.Request) {
-	s.renderTemplate(w, "partials/desktop_power.html", map[string]any{
-		"Warning":   s.desktopJobWarning(),
-		"CSRFToken": s.sessions.CSRFToken(session.FromContext(r.Context())),
-	})
+	s.renderTemplate(w, "webui/desktop_power", s.desktopPower(r))
 }
 
 // quitDelay lets the flushed page reach the browser before the listener closes.

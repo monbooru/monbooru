@@ -1705,10 +1705,6 @@ section#tagger .tagger-table .tagger-row-desc { display: block; margin-top: 2px;
 .tc-editor-fields label { color: var(--fg-dim); white-space: nowrap; }
 .tc-editor-fields input[type=text] { width: 12em; }
 
-.tc-export-block { max-height: 40vh; overflow-y: auto; }
-.tc-export-block span { display: block; white-space: pre; }
-.exp-add { color: var(--success); }
-.exp-del { color: var(--error); text-decoration: line-through; opacity: 0.75; }
 .exp-gap { color: var(--fg-dim); }
 .tagger-thresh-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
 .tagger-thresh-table th { font-size: 12px; }

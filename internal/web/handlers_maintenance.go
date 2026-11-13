@@ -17,6 +17,7 @@ import (
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
@@ -482,7 +483,7 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.jobs.Complete("Memory caches released.")
-	before := readVmRSS()
+	before := desktop.ProcStatus("self", "VmRSS")
 	ctxs := s.allContexts()
 	for _, cx := range ctxs {
 		if err := cx.ShrinkMemory(); errors.Is(err, db.ErrPoolBusy) {
@@ -493,7 +494,7 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 	}
 	debug.FreeOSMemory()
 	tagger.ReleaseAll()
-	after := readVmRSS()
+	after := desktop.ProcStatus("self", "VmRSS")
 	if before > 0 && after > 0 && before > after {
 		writeInlineFlash(w, "ok", "Freed "+webui.HumanBytes(int64(before-after))+".")
 		return

@@ -16,6 +16,7 @@ import (
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
@@ -45,20 +46,20 @@ func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, im
 // own peak over the RSS at the mark. Under the subprocess backend the job's
 // memory is the worker's, logged beside the parent's.
 func autotagMemoryMark() func(scope string) {
-	resetPeakRSS("self")
-	baseline := readVmRSS()
+	desktop.ResetPeak("self")
+	baseline := desktop.ProcStatus("self", "VmRSS")
 	workerPID, workerBase := "", uint64(0)
 	if pid, ok := tagger.WorkerPID(); ok {
 		workerPID = strconv.Itoa(pid)
-		resetPeakRSS(workerPID)
-		workerBase = readRSSOf(workerPID)
+		desktop.ResetPeak(workerPID)
+		workerBase = desktop.ProcStatus(workerPID, "VmRSS")
 	}
 	return func(scope string) {
 		if baseline == 0 {
 			return
 		}
 		var parts []string
-		if peak := readPeakRSS("self"); peak > baseline {
+		if peak := desktop.ProcStatus("self", "VmHWM"); peak > baseline {
 			parts = append(parts, "+"+webui.HumanBytes(int64(peak-baseline)))
 		}
 		if pid, ok := tagger.WorkerPID(); ok {
@@ -66,7 +67,7 @@ func autotagMemoryMark() func(scope string) {
 			if p == workerPID {
 				base = workerBase
 			}
-			if peak := readPeakRSS(p); peak > base {
+			if peak := desktop.ProcStatus(p, "VmHWM"); peak > base {
 				parts = append(parts, "worker +"+webui.HumanBytes(int64(peak-base)))
 			}
 		}

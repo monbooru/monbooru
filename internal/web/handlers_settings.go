@@ -47,7 +47,7 @@ type settingsData struct {
 	DesktopProfile     bool
 	DesktopFolders     []string
 	Desktop            desktop.Integration
-	DesktopJobWarning  string
+	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
 }
 
@@ -111,7 +111,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		DesktopProfile:     s.desktopLocal(r),
 		DesktopFolders:     s.availableFolders(),
 		Desktop:            s.desktopIntegration(),
-		DesktopJobWarning:  s.desktopJobWarning(),
+		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
 	})
 }
