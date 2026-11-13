@@ -308,12 +308,18 @@ func TestSearchTime(t *testing.T) {
 		in   time.Duration
 		want string
 	}{
-		{0, "0.00 ms"},
+		{0, "0 ms"},
+		{4230 * time.Nanosecond, "0.00423 ms"},
 		{420 * time.Microsecond, "0.42 ms"},
-		{42*time.Millisecond + 370*time.Microsecond, "42.37 ms"},
-		{999 * time.Millisecond, "999.00 ms"},
-		{time.Second, "1.00 s"},
+		{423700 * time.Nanosecond, "0.424 ms"},
+		{4237 * time.Microsecond, "4.24 ms"},
+		{42*time.Millisecond + 370*time.Microsecond, "42.4 ms"},
+		{999 * time.Millisecond, "999 ms"},
+		{999499 * time.Microsecond, "999 ms"},
+		{999500 * time.Microsecond, "1 s"},
 		{1240 * time.Millisecond, "1.24 s"},
+		{12345 * time.Millisecond, "12.3 s"},
+		{1234 * time.Second, "1234 s"},
 	}
 	for _, c := range cases {
 		if got := searchTime(c.in); got != c.want {
@@ -337,7 +343,7 @@ func TestGallery_TheCountAddsItsTimeToTheRows(t *testing.T) {
 	}
 
 	frag := mustGetBody(t, srv, "/internal/search/count?q=width:>0&count=1&took=1500000")
-	got := regexp.MustCompile(`\((\d+\.\d\d) s\)`).FindStringSubmatch(frag)
+	got := regexp.MustCompile(`\(([\d.]+) s\)`).FindStringSubmatch(frag)
 	if got == nil {
 		t.Fatalf("no time in seconds in the count fragment: %s", sliceAround(frag, "result-time", 120))
 	}
