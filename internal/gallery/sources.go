@@ -418,11 +418,13 @@ func sourceTx(database *db.DB, imageID int64, work func(*sql.Tx) error) error {
 		if err := work(tx); err != nil {
 			return err
 		}
-		return rebindPrimarySourceTx(tx, imageID)
+		return RebindPrimarySourceTx(tx, imageID)
 	})
 }
 
-func rebindPrimarySourceTx(tx *sql.Tx, imageID int64) error {
+// RebindPrimarySourceTx is for a write outside sourceTx that adds or drops
+// an image's origins.
+func RebindPrimarySourceTx(tx *sql.Tx, imageID int64) error {
 	var site, url string
 	err := tx.QueryRow(`SELECT site, url FROM image_sources WHERE image_id = ? ORDER BY rowid LIMIT 1`, imageID).Scan(&site, &url)
 	if errors.Is(err, sql.ErrNoRows) {
