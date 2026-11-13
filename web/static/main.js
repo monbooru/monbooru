@@ -373,6 +373,8 @@ var lightbox = (function () {
   // Past 4px (16 squared) a press is a pan, and its release must not
   // close the viewer.
   var pressMoved = false;
+  // Fingers on the stage by pointer id, and the last spread of a pinch.
+  var points = {}, pinch = null;
   var bound = false;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -440,16 +442,45 @@ var lightbox = (function () {
     var cy = e.clientY - (sr.top + sr.height / 2);
     zoomAt(cx, cy, e.deltaY < 0 ? 1.2 : 1 / 1.2);
   }
+  function startPan(x, y) {
+    panning = true;
+    px0 = x; py0 = y;
+    tx0 = tx; ty0 = ty;
+  }
+  function pinchOf() {
+    var p = Object.values(points);
+    return {
+      x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2,
+      dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+    };
+  }
   function onPointerDown(e) {
     if (e.button !== 0) return;
     stage.setPointerCapture(e.pointerId);
-    panning = true;
+    points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (Object.keys(points).length === 2) {
+      // A pinch is never a tap, so its release must not close the viewer.
+      pinch = pinchOf();
+      panning = false;
+      pressMoved = true;
+      return;
+    }
     pressMoved = false;
-    px0 = e.clientX; py0 = e.clientY;
-    tx0 = tx; ty0 = ty;
+    startPan(e.clientX, e.clientY);
     stage.classList.add('grabbing');
   }
   function onPointerMove(e) {
+    if (points[e.pointerId]) points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (pinch) {
+      // Zooms around the point between the fingers, which also pans.
+      var now = pinchOf();
+      var sr = stage.getBoundingClientRect();
+      tx += now.x - pinch.x;
+      ty += now.y - pinch.y;
+      zoomAt(now.x - (sr.left + sr.width / 2), now.y - (sr.top + sr.height / 2), now.dist / pinch.dist);
+      pinch = now;
+      return;
+    }
     if (!panning) return;
     if (!pressMoved) {
       var dx = e.clientX - px0, dy = e.clientY - py0;
@@ -460,6 +491,15 @@ var lightbox = (function () {
     apply();
   }
   function onPointerEnd(e) {
+    delete points[e.pointerId];
+    if (pinch) {
+      // The finger still down goes on panning.
+      pinch = null;
+      var rest = Object.values(points);
+      if (rest.length === 1) startPan(rest[0].x, rest[0].y);
+      else stage.classList.remove('grabbing');
+      return;
+    }
     if (!panning) return;
     panning = false;
     stage.releasePointerCapture(e.pointerId);
@@ -510,6 +550,8 @@ var lightbox = (function () {
       if (e && e.preventDefault) e.preventDefault();
       img.src = src;
       if (openLink) openLink.href = src;
+      points = {};
+      pinch = null;
       reset();
       if (!dlg.open) dlg.showModal();
       return false;
