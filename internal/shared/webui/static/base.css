@@ -560,8 +560,9 @@ a.btn-sm:hover { text-decoration: none; }
 .dir-picker-entry:hover { background: var(--bg-surface); color: var(--link); }
 .dir-picker-entry:focus-visible { outline: 1px solid var(--link); outline-offset: 0; }
 .desktop-folders { display: flex; gap: 6px; flex-wrap: wrap; }
-.desktop-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
-.desktop-power, .desktop-quit { display: flex; align-items: center; gap: 8px; }
+.desktop-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.desktop-power, .desktop-quit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.desktop-power button { white-space: nowrap; }
 #setup-page { max-width: 620px; margin: 40px auto; padding: 0 16px; }
 #setup-page h2 { margin: 18px 0 10px; }
 .setup-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
