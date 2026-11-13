@@ -174,7 +174,7 @@
         </div>
       </div>
       <div class="dialog-actions">
-        <span class="field-hint">Scroll to zoom, drag to pan, double-click to reset.</span>
+        <span class="field-hint">Scroll or pinch to zoom, drag to pan, double-click or double-tap to reset.</span>
         <button type="button" id="compare-close">Close</button>
       </div>
     </dialog>
@@ -355,35 +355,75 @@
     zoom = 1;
     applyZoom();
   }
-  // Zooms around the cursor, so the point under it stays put.
-  function zoomOnWheel(e) {
-    e.preventDefault();
-    var rect = compareStage.getBoundingClientRect();
-    var x = e.clientX - rect.left, y = e.clientY - rect.top;
-    var next = Math.min(16, Math.max(1, zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+  // Zooms around a stage point, so the image under it stays put.
+  function setZoom(next, x, y) {
+    next = Math.min(16, Math.max(1, next));
     panX = x - (x - panX) * next / zoom;
     panY = y - (y - panY) * next / zoom;
     zoom = next;
     applyZoom();
   }
+  function stagePoint(e) {
+    var rect = compareStage.getBoundingClientRect();
+    return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+  }
+  function zoomOnWheel(e) {
+    e.preventDefault();
+    var p = stagePoint(e);
+    setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), p.x, p.y);
+  }
 
-  // Zoomed in, a drag pans, and the split moves by its handle.
-  var drag = null;
+  // Zoomed in, one finger or the mouse pans and the split moves by its
+  // handle; two fingers pinch.
+  var points = {}, drag = null, lastTap = 0;
+  function pinchOf() {
+    var p = Object.values(points);
+    return {
+      x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2,
+      dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+    };
+  }
   function startDrag(e) {
     if (e.button !== 0) return;
-    var pan = zoom > 1 && !e.target.closest('.compare-divider-handle');
-    drag = {pan: pan, x: e.clientX - panX, y: e.clientY - panY};
     compareStage.setPointerCapture(e.pointerId);
+    var p = points[e.pointerId] = stagePoint(e);
+    if (Object.keys(points).length === 2) {
+      drag = {pinch: pinchOf()};
+      return;
+    }
+    var pan = zoom > 1 && !e.target.closest('.compare-divider-handle');
+    drag = {pan: pan, x: p.x - panX, y: p.y - panY, moved: false};
     if (!pan) trackSplit(e);
   }
   function moveDrag(e) {
-    if (!drag) return;
-    if (!drag.pan) { trackSplit(e); return; }
-    panX = e.clientX - drag.x;
-    panY = e.clientY - drag.y;
-    applyZoom();
+    if (!drag || !points[e.pointerId]) return;
+    var p = points[e.pointerId] = stagePoint(e);
+    drag.moved = true;
+    if (drag.pinch) {
+      var now = pinchOf();
+      panX += now.x - drag.pinch.x;
+      panY += now.y - drag.pinch.y;
+      setZoom(zoom * now.dist / drag.pinch.dist, now.x, now.y);
+      drag.pinch = now;
+    } else if (drag.pan) {
+      panX = p.x - drag.x;
+      panY = p.y - drag.y;
+      applyZoom();
+    } else {
+      trackSplit(e);
+    }
   }
-  function endDrag() { drag = null; }
+  function endDrag(e) {
+    delete points[e.pointerId];
+    // A double-click never fires for a finger, so a double tap resets here.
+    if (e.type === 'pointerup' && e.pointerType === 'touch' && drag && !drag.moved && !drag.pinch) {
+      if (e.timeStamp - lastTap < 300) resetZoom();
+      lastTap = e.timeStamp;
+    }
+    // The finger left on the glass after a pinch goes on panning.
+    var rest = Object.values(points);
+    drag = rest.length === 1 && zoom > 1 ? {pan: true, x: rest[0].x - panX, y: rest[0].y - panY, moved: true} : null;
+  }
 
   if (compareStage) {
     compareStage.addEventListener('wheel', zoomOnWheel, {passive: false});
