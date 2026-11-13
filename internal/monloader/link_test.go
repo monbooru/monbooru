@@ -260,7 +260,7 @@ func TestTeardownNotifiesAPausedPeer(t *testing.T) {
 		return LinkConfig{APIURL: stub.URL, Token: "peer-secret", Paired: true, Paused: true}
 	}, nil)
 
-	if err := l.Teardown(func() {}); err != nil {
+	if err := l.Teardown(func() error { return nil }); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
 	if gotPath != "/api/v1/pair/remove" || gotAuth != "Bearer peer-secret" {

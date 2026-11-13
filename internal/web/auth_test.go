@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
@@ -486,6 +488,47 @@ func TestRevokingAPluginTokenRemovesItsPairing(t *testing.T) {
 	}
 	wantIn(t, body, "relay pairing removed")
 	wantIn(t, body, `id="plugin-rows"`)
+}
+
+func TestRemovingAPairingTellsNoPeerWhenTheSaveFails(t *testing.T) {
+	for _, app := range []string{"relay", monloader.App} {
+		for _, route := range []string{"revoke", "remove"} {
+			var told atomic.Bool
+			stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/pair/remove" {
+					told.Store(true)
+				}
+			}))
+			srv := newTestServerWith(t, false, func(c *config.Config) {
+				c.Plugins = []config.PluginConfig{{Name: "relay", PeerToken: "sek", APIURL: stub.URL}}
+				c.Monloader.APIURL, c.Monloader.APIToken = stub.URL, "sek"
+			})
+			tok := pairPeer(srv, app)
+			notADir := filepath.Join(t.TempDir(), "file")
+			mustWriteFile(t, notADir, nil, 0o644)
+			srv.configPath = filepath.Join(notADir, "monbooru.toml")
+
+			var body string
+			if route == "revoke" {
+				body = revokeToken(srv, tok.ID)
+			} else {
+				w := httptest.NewRecorder()
+				srv.pluginPairRemove(w, pluginRemoveRequest(app))
+				body = w.Body.String()
+			}
+			stub.Close()
+
+			if !srv.pairedWith(app) {
+				t.Errorf("%s %s: the pairing went with an unsaved change", route, app)
+			}
+			if told.Load() {
+				t.Errorf("%s %s: the peer was told of an unsaved change", route, app)
+			}
+			if !strings.Contains(body, "Could not save: ") || strings.Contains(body, "flash-ok") {
+				t.Errorf("%s %s: body = %s, want the save error and no ok flash", route, app, body)
+			}
+		}
+	}
 }
 
 func TestRevokingAPeerWithNoPeerToken(t *testing.T) {

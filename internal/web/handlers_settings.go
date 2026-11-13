@@ -496,7 +496,11 @@ func (s *Server) tokenPeer(id string) string {
 func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if app := s.tokenPeer(id); app != "" {
-		notifyErr := s.removePeerPairing(r, app)
+		saveErr, notifyErr := s.removePeerPairing(r, app)
+		if saveErr != nil {
+			writeInlineFlash(w, "err", "Could not save: "+saveErr.Error())
+			return
+		}
 		logx.Infof("settings: API token %s revoked from %s", id, session.ClientIP(r))
 		if notifyErr != nil {
 			writeInlineFlash(w, "warn", "Revoked here, but could not reach "+app+" - remove the pairing there too.")

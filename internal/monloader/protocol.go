@@ -127,10 +127,13 @@ func (l *Link) GalleryRenamed(ctx context.Context, oldName, newName string) erro
 }
 
 // Teardown runs remove, which drops the pairing and its token, then tells
-// monloader with the address and token read before it.
-func (l *Link) Teardown(remove func()) error {
+// monloader with the address and token read before it. A remove error is
+// returned as it is, and monloader is not told.
+func (l *Link) Teardown(remove func() error) error {
 	base, token := l.addr(), l.cfg().Token
-	remove()
+	if err := remove(); err != nil {
+		return err
+	}
 	err := peer.NotifyTeardown(App, base, token)
 	if err != nil {
 		logx.Errorf("pairing: could not notify monloader of teardown: %v", err)
