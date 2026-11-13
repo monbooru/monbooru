@@ -339,9 +339,8 @@ var errSearchIDsFull = errors.New("search ids: cap reached")
 
 // With ids, the answer is no longer than the ask, so the cap does not apply.
 func (s *Server) searchIDs(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	sc := search.NewScope(search.Parse(q.Get("q")), readRatingCookie(r))
-	picks := parseIDList(q["ids"])
+	sc := search.NewScope(search.Parse(r.FormValue("q")), readRatingCookie(r))
+	picks := parseIDList(r.Form["ids"])
 	if len(picks) > 0 {
 		sc = sc.Among(picks)
 	}

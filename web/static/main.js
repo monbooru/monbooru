@@ -2022,8 +2022,18 @@ function pruneSelection() {
   if (away.length === 0) return;
   var key = selectionKey();
   var q = new URLSearchParams(location.search).get('q') || '';
-  fetch('/internal/search/ids?q=' + encodeURIComponent(q) + '&ids=' + encodeURIComponent(away.join(',')), {
-    headers: {'Accept': 'application/json'},
+  var csrf = getCSRFToken();
+  var headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'HX-Request': 'true',
+    'X-CSRF-Token': csrf,
+  };
+  if (activeGallery()) headers['X-Monbooru-Gallery'] = activeGallery();
+  fetch('/internal/search/ids', {
+    method: 'POST',
+    headers: headers,
+    body: new URLSearchParams({q: q, ids: away.join(','), _csrf: csrf}).toString(),
   }).then(function(res) {
     return res.ok ? res.json() : null;
   }).then(function(data) {

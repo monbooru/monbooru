@@ -345,3 +345,24 @@ func TestSearchIDs_KeepsTheGivenIDsStillInTheListing(t *testing.T) {
 		t.Errorf("under a cap of 1: ids = %v, want %v", got, want)
 	}
 }
+
+func TestSearchIDs_PostAnswersUnderThePageGallery(t *testing.T) {
+	srv := newMultiGalleryServer(t)
+	plain := seedImage(t, srv, "plain.png", 12, 12)
+	form := func() url.Values {
+		return url.Values{"q": {""}, "ids": {strconv.FormatInt(plain, 10) + ",999999"}}
+	}
+
+	w := postForm(t, srv, "/internal/search/ids", form(), [2]string{"X-Monbooru-Gallery", "default"}, [2]string{"HX-Request", "true"})
+	mustCode(t, w, http.StatusOK)
+	var out struct {
+		IDs []int64 `json:"ids"`
+	}
+	mustUnmarshal(t, w.Body.Bytes(), &out)
+	if want := []int64{plain}; !slices.Equal(out.IDs, want) {
+		t.Errorf("ids = %v, want %v", out.IDs, want)
+	}
+
+	w = postForm(t, srv, "/internal/search/ids", form(), [2]string{"X-Monbooru-Gallery", "stock"}, [2]string{"HX-Request", "true"})
+	mustCode(t, w, http.StatusConflict)
+}

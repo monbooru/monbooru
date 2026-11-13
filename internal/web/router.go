@@ -608,6 +608,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /internal/tags/suggest", s.tagSuggest)
 	rt.read("GET /internal/search/suggest", s.searchSuggest)
 	rt.read("GET /internal/search/ids", s.searchIDs)
+	rt.read("POST /internal/search/ids", s.searchIDs)
 	rt.read("GET /internal/search/count", s.galleryCount)
 	rt.read("GET /internal/folders/suggest", s.foldersSuggest)
 	rt.read("GET /internal/folders/children", s.folderChildren)
