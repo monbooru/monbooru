@@ -259,3 +259,21 @@ func TestThemeSchemeReadsTheSheetTheThemeServes(t *testing.T) {
 		}
 	}
 }
+
+func TestSheetSchemeReadsTheRootRule(t *testing.T) {
+	for _, tc := range []struct{ sheet, want string }{
+		{"/* was: color-scheme: light; */\n:root { color-scheme: dark; }", "dark"},
+		{".card { color-scheme: light; }\n:root { color-scheme: dark; }", "dark"},
+		{":root { color-scheme: light !important; }", "light"},
+		{":root { Color-Scheme: Light; }", "light"},
+		{"html{color-scheme:light dark}", "light dark"},
+		{":root, .card { --bg: #fff; color-scheme: light }", "light"},
+		{".card { color-scheme: light; }", "light"},
+		{"@media (prefers-color-scheme: light) { :root { --bg: #fff; } }", "fallback"},
+		{"", "fallback"},
+	} {
+		if got := SheetScheme([]byte(tc.sheet), "fallback"); got != tc.want {
+			t.Errorf("%q: %q, want %q", tc.sheet, got, tc.want)
+		}
+	}
+}
