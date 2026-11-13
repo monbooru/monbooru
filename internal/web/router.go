@@ -539,6 +539,8 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /relations/session/decide", s.sessionDecidePost)
 	rt.read("POST /relations/dup-group/{id}/copy-tags", s.copyTagsToOriginalPost)
 	rt.read("GET /relations/dup-group/{id}/copy-tags/preview", s.copyTagsToOriginalPreview)
+	rt.read("POST /relations/dup-group/{id}/copy-sources", s.copySourcesToOriginalPost)
+	rt.read("GET /relations/dup-group/{id}/copy-sources/preview", s.copySourcesToOriginalPreview)
 	rt.read("POST /settings/relations", s.settingsRelationsPost)
 	rt.read("POST /settings/maintenance/re-extract-metadata", s.reExtractMetadataPost)
 	rt.read("POST /settings/maintenance/rebuild-thumbnails", s.rebuildThumbnailsPost)

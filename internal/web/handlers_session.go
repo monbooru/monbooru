@@ -379,11 +379,16 @@ func writeDuplicatePostDecideHeaders(w http.ResponseWriter, cx *library.Gallery,
 	if err != nil {
 		logx.Debugf("dup post-decide unique tags: %v", err)
 	}
+	withSources, err := cx.RelationsSvc.GroupsWithSourcesToCopy([]int64{gid})
+	if err != nil {
+		logx.Debugf("dup post-decide unique sources: %v", err)
+	}
 	w.Header().Set("X-Relations-Post-Decision", "duplicate-cleanup")
 	w.Header().Set("X-Relations-Duplicate-ID", strconv.FormatInt(nonOriginal, 10))
 	w.Header().Set("X-Relations-Duplicate-OriginalID", strconv.FormatInt(original, 10))
 	w.Header().Set("X-Relations-Duplicate-GroupID", strconv.FormatInt(gid, 10))
 	w.Header().Set("X-Relations-Duplicate-HasUniqueTags", map[bool]string{true: "1", false: "0"}[withTags[gid]])
+	w.Header().Set("X-Relations-Duplicate-HasUniqueSources", map[bool]string{true: "1", false: "0"}[withSources[gid]])
 	w.WriteHeader(http.StatusNoContent)
 	return true
 }

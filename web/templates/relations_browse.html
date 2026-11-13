@@ -79,6 +79,13 @@
               style="display:inline">
           <button type="submit" class="btn-link-accent">[copy tags]</button>
         </form>
+        <form hx-post="/relations/dup-group/{{.GroupID}}/copy-sources"
+              hx-target="#flash-relations" hx-swap="innerHTML"
+              hx-confirm="Copy sources from the duplicates onto the original? Sources it already has are skipped."
+              data-confirm-ok="Copy"
+              style="display:inline">
+          <button type="submit" class="btn-link-accent">[copy sources]</button>
+        </form>
         {{template "relation_remove_form" dict "Confirm" "Dissolve this same-image group?" "OK" "Dissolve" "Label" "dissolve" "Reload" true "Fields" (dict "type" "dissolve-dup" "group_id" .GroupID)}}
         {{if eq (len .Members) 2}}
         {{template "relation_remove_form" dict "Confirm" "Dissolve this group and queue the pair for the session?" "OK" "Review again" "Label" "review again" "Fields" (dict "type" "review-again" "kind" "duplicate" "group_id" .GroupID)}}

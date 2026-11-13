@@ -186,6 +186,10 @@
         <input type="checkbox" id="postdecide-copy-tags">
         Copy unique tags onto the original first
       </label>
+      <label id="postdecide-copy-sources-label" hidden>
+        <input type="checkbox" id="postdecide-copy-sources">
+        Copy unique sources onto the original first
+      </label>
       <div id="postdecide-flash"></div>
       <div class="dialog-actions">
         <button type="button" id="postdecide-keep" class="btn-sm" autofocus>Keep file</button>
@@ -357,6 +361,7 @@
       pdState.originalID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-OriginalID') || '0', 10);
       pdState.groupID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-GroupID') || '0', 10);
       var hasUnique = xhr.getResponseHeader('X-Relations-Duplicate-HasUniqueTags') === '1';
+      var hasSources = xhr.getResponseHeader('X-Relations-Duplicate-HasUniqueSources') === '1';
       var dupHeaderEl = document.getElementById('postdecide-dup-id');
       var dupBodyEl = document.getElementById('postdecide-dup-id-body');
       var origEl = document.getElementById('postdecide-original-id');
@@ -367,6 +372,10 @@
       if (origEl) origEl.textContent = '#' + pdState.originalID;
       if (copyBox) copyBox.checked = false;
       if (copyLabel) copyLabel.hidden = !hasUnique;
+      var sourcesLabel = document.getElementById('postdecide-copy-sources-label');
+      var sourcesBox = document.getElementById('postdecide-copy-sources');
+      if (sourcesBox) sourcesBox.checked = false;
+      if (sourcesLabel) sourcesLabel.hidden = !hasSources;
       if (pdFlash) pdFlash.innerHTML = '';
       if (postdecideDlg) postdecideDlg.showModal();
       return;
@@ -380,10 +389,10 @@
     window.location.reload();
   }
   // A refused copy answers 200 with an error body, so the body decides.
-  function pdCopyTags(next) {
-    var copyBox = document.getElementById('postdecide-copy-tags');
-    if (!copyBox || !copyBox.checked || pdState.groupID <= 0) { next(); return; }
-    postForm('/relations/dup-group/' + pdState.groupID + '/copy-tags', {}, {
+  function pdCopy(what, next) {
+    var box = document.getElementById('postdecide-copy-' + what);
+    if (!box || !box.checked || pdState.groupID <= 0) { next(); return; }
+    postForm('/relations/dup-group/' + pdState.groupID + '/copy-' + what, {}, {
       hx: true, flashId: 'postdecide-flash',
       onOK: function(res) {
         res.text().then(function(t) {
@@ -393,15 +402,18 @@
       },
     });
   }
+  function pdCopyChecked(next) {
+    pdCopy('tags', function() { pdCopy('sources', next); });
+  }
   var pdKeep = document.getElementById('postdecide-keep');
   if (pdKeep) pdKeep.addEventListener('click', function() {
-    // Keep honours the copy box too: it is a choice about the tags, not
-    // the file.
-    pdCopyTags(pdDone);
+    // Keep honours the copy boxes too: they are a choice about the tags
+    // and sources, not the file.
+    pdCopyChecked(pdDone);
   });
   var pdDelete = document.getElementById('postdecide-delete');
   if (pdDelete) pdDelete.addEventListener('click', function() {
-    pdCopyTags(function() {
+    pdCopyChecked(function() {
       postForm('/relations/duplicates/marked/delete-one', {image_id: String(pdState.dupID)}, {
         hx: true, flashId: 'postdecide-flash',
         onOK: function(res) {
@@ -414,7 +426,7 @@
       });
     });
   });
-  // Esc keeps the file but, as a cancel, skips the tag copy.
+  // Esc keeps the file but, as a cancel, skips the copies.
   if (postdecideDlg) postdecideDlg.addEventListener('cancel', function(e) {
     e.preventDefault();
     postdecideDlg.close();

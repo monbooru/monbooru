@@ -822,6 +822,49 @@ func (s *Server) copyTagsToOriginalPost(w http.ResponseWriter, r *http.Request) 
 	writeInlineFlash(w, "ok", fmt.Sprintf("Copied %d tag%s to the original.", added, plural(added)))
 }
 
+func (s *Server) copySourcesToOriginalPost(w http.ResponseWriter, r *http.Request) {
+	cx, ok := s.relationsForm(w, r)
+	if !ok {
+		return
+	}
+	gid, ok := pathInt64(w, r, "id")
+	if !ok {
+		return
+	}
+	added, err := cx.RelationsSvc.CopySourcesFromDuplicatesToOriginal(gid)
+	if err != nil {
+		writeRelationError(w, err)
+		return
+	}
+	writeInlineFlash(w, "ok", fmt.Sprintf("Copied %d source%s to the original.", added, plural(added)))
+}
+
+func (s *Server) copySourcesToOriginalPreview(w http.ResponseWriter, r *http.Request) {
+	cx, ok := s.requireActive(w, r)
+	if !ok {
+		return
+	}
+	gid, ok := pathInt64(w, r, "id")
+	if !ok {
+		return
+	}
+	original, err := relations.GroupOriginal(cx.DB.Read, gid)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	sources, err := cx.RelationsSvc.SourcesToCopy(gid)
+	if err != nil {
+		http.Error(w, "load preview", http.StatusInternalServerError)
+		return
+	}
+	s.renderTemplate(w, "partials/copy_sources_preview.html", map[string]any{
+		"GroupID":    gid,
+		"OriginalID": original,
+		"Sources":    sources,
+	})
+}
+
 func parseRelationPair(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {
 	a, ok := formInt64(w, r, "a")
 	if !ok {
