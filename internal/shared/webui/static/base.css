@@ -377,6 +377,10 @@ dialog:has(.dialog-actions .btn-danger:not([hidden])) .dlg-title-sub { color: in
   color: var(--success);
 }
 .copy-flash[hidden] { display: none; }
+.export-block { background: var(--bg-surface); border: 1px solid var(--border); padding: 6px 8px; margin: 4px 0 8px; font-size: 11px; max-height: 40vh; overflow-y: auto; }
+.export-block span { display: block; white-space: pre; }
+.exp-add { color: var(--success); }
+.exp-del { color: var(--error); text-decoration: line-through; opacity: 0.75; }
 .btn-sm {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
   border: 1px solid transparent;
