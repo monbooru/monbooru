@@ -78,7 +78,7 @@ flowchart TD
     bug & idea --> issue["`**Open an issue in the repo it is about**
     see the graph below`"]
     issue --> state["`**A label says where it stands**
-    accepted, needs info, postponed or declined; a milestone is the version it is planned for`"]
+    accepted, needs info, postponed or declined, then done once the change is on dev; a milestone is the version it ships in`"]
     state -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
 
     class ship hub;
