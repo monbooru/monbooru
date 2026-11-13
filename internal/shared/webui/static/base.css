@@ -642,3 +642,8 @@ a.btn-sm:hover { text-decoration: none; }
 
 .no-results { color: var(--fg-dim); font-style: italic; padding: 8px; grid-column: 1 / -1; }
 .danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.reorder-grip { background: none; border: 0; padding: 0 4px; color: var(--fg-dim); cursor: grab; touch-action: none; }
+.reorder-grip:hover, .reorder-grip:focus-visible { color: var(--fg); }
+.reorder-grip:focus-visible { outline: 1px solid var(--link); outline-offset: 1px; }
+.reorder-dragging { outline: 1px dashed var(--fg); outline-offset: -1px; }
+.reorder-dragging .reorder-grip { color: var(--accent); cursor: grabbing; }
