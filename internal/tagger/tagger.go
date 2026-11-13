@@ -273,6 +273,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 			ID:            imageID,
 			FramePaths:    framePaths,
 			MangaProgress: fileType == "cbz" && len(framePaths) > 1,
+			FileType:      fileType,
 		})
 		cleanups = append(cleanups, cleanup)
 		frames += len(framePaths)

@@ -138,12 +138,38 @@ func TestPrepareInputsRefusesAnEmptyImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := prepareInputs(path, []loadedTagger{{loadedSession: &loadedSession{inputSize: 448, profile: Profile{Pad: "white_square"}}}}); err == nil {
+	if _, err := prepareInputs(path, "jpeg", []loadedTagger{{loadedSession: &loadedSession{inputSize: 448, profile: Profile{Pad: "white_square"}}}}); err == nil {
 		t.Error("prepareInputs took an image with no pixels")
 	}
 }
 
 func TestPrepareInputsTurnsByEXIFOrientation(t *testing.T) {
+	cases := []struct{ name, fileType string }{
+		{"turned.jpg", "jpeg"},
+		{"turned.png", "jpeg"},
+		{"page.jpg", "cbz"},
+	}
+	for _, c := range cases {
+		path := writeOrientation6JPEG(t, c.name)
+		inputs, err := prepareInputs(path, c.fileType, []loadedTagger{{loadedSession: &loadedSession{inputSize: 40, profile: Profile{Pad: "white_square"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, p := range []struct {
+			x, y int
+			red  bool
+		}{{25, 5, true}, {15, 5, false}, {25, 35, false}, {15, 35, false}} {
+			px := inputs[0].RGBAAt(p.x, p.y)
+			if red := px.R > 200 && px.B < 60; red != p.red {
+				t.Errorf("%s as %s: pixel (%d,%d) = %v, red %v, want %v", c.name, c.fileType, p.x, p.y, px, red, p.red)
+			}
+		}
+	}
+}
+
+func writeOrientation6JPEG(t *testing.T, name string) string {
+	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
 	for y := range 20 {
 		for x := range 40 {
@@ -159,25 +185,11 @@ func TestPrepareInputsTurnsByEXIFOrientation(t *testing.T) {
 	}
 	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00")
 	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
-	path := filepath.Join(t.TempDir(), "turned.jpg")
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:]), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	inputs, err := prepareInputs(path, []loadedTagger{{loadedSession: &loadedSession{inputSize: 40, profile: Profile{Pad: "white_square"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, c := range []struct {
-		x, y int
-		red  bool
-	}{{25, 5, true}, {15, 5, false}, {25, 35, false}, {15, 35, false}} {
-		px := inputs[0].RGBAAt(c.x, c.y)
-		if red := px.R > 200 && px.B < 60; red != c.red {
-			t.Errorf("pixel (%d,%d) = %v, red %v, want %v", c.x, c.y, px, red, c.red)
-		}
-	}
+	return path
 }
 
 func TestEveryConfigProviderHasACase(t *testing.T) {

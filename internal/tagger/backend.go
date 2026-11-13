@@ -75,6 +75,7 @@ type BackendImageRequest struct {
 	ID            int64
 	FramePaths    []string
 	MangaProgress bool
+	FileType      string
 }
 
 // RunResponse.Results mirrors RunRequest.Images in order.
