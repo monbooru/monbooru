@@ -1606,6 +1606,42 @@ func TestSync_ARepointDropsTheCopiesLeftInTheOldFolder(t *testing.T) {
 	}
 }
 
+func TestSync_AFileFinishedAfterTheWalkStoresItsFinalHash(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	full := mustReadFile(t, createTestPNGFile(t, t.TempDir(), "full.png"))
+	path := filepath.Join(galleryDir, "landing.png")
+	mustWriteFile(t, path, full[:len(full)/2], 0o644)
+	finished := false
+
+	progress := func(_, _ int, msg string) {
+		if !finished && strings.HasPrefix(msg, "Phase 2") {
+			finished = true
+			mustWriteFile(t, path, full, 0o644)
+		}
+	}
+
+	if _, err := Sync(context.Background(), boundHandle(database, env.boundary(), env.thumbnailsPath), env.maxFileSizeMB, env.naming, progress, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want, err := HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMD5, err := Md5File(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sha, md5 string
+	var size int64
+	if err := database.Read.QueryRow(`SELECT sha256, md5, file_size FROM images WHERE canonical_path = ?`, path).Scan(&sha, &md5, &size); err != nil {
+		t.Fatal(err)
+	}
+	if sha != want || md5 != wantMD5 || size != int64(len(full)) {
+		t.Errorf("row = (%s, %s, %d), want the finished file's (%s, %s, %d)", sha[:12], md5, size, want[:12], wantMD5, len(full))
+	}
+}
+
 func TestSync_AMissingImageFoundUnderANewPathCountsAsRestored(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	srcPath := createTestPNGFile(t, galleryDir, "original.png")

@@ -147,6 +147,13 @@ func Sync(ctx context.Context, h Handle, maxFileSizeMB int, naming Naming, progr
 			}
 			progress(i, total, "Phase 2: reconciling...")
 		}
+		if fi.md5 != "" {
+			var err error
+			if fi, err = rehashIfMoved(fi); err != nil {
+				logx.Warnf("hash failed for %q: %v", fi.path, err)
+				continue
+			}
+		}
 		if id := reconcileFile(h, bound, fi, known, bySHA, &result, onPhash); id != 0 {
 			ingested = append(ingested, id)
 		}
@@ -319,6 +326,22 @@ func walkGalleryFiles(ctx context.Context, bound *Boundary, maxBytes int64, know
 		return nil, skips, fmt.Errorf("walking gallery: %w", err)
 	}
 	return found, skips, nil
+}
+
+// A file still being written when the walk hashed it has moved on since;
+// the row must not keep the partial bytes' digests.
+func rehashIfMoved(fi syncFileInfo) (syncFileInfo, error) {
+	info, err := os.Stat(fi.path)
+	if err != nil || (info.Size() == fi.size && info.ModTime().UnixNano() == fi.mtimeNano) {
+		return fi, nil
+	}
+	sha, sum, err := hashFileDigests(fi.path)
+	if err != nil {
+		return fi, err
+	}
+	fi.sha256, fi.md5, fi.size = sha, sum, info.Size()
+	fi.mtime, fi.mtimeNano = info.ModTime().Unix(), info.ModTime().UnixNano()
+	return fi, nil
 }
 
 // One full scan beats a SELECT per walked file.
