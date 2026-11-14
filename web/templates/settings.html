@@ -270,7 +270,11 @@
     function syncImportToggle() {
       var toggle = document.getElementById('gallery-add-import-toggle');
       var row = document.getElementById('gallery-add-import-row');
-      if (toggle && row) row.hidden = !toggle.checked;
+      if (!toggle || !row) return;
+      var file = row.querySelector('input[type=file]');
+      row.hidden = !toggle.checked;
+      file.disabled = !toggle.checked;
+      if (!toggle.checked) file.value = '';
     }
     function setAddGalleryBusy(form, busy) {
       var submit = form.querySelector('button[type=submit]');
