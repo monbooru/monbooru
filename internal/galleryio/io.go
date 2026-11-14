@@ -1256,7 +1256,7 @@ func reconcileMissingFlags(x db.Execer, b *gallery.Boundary, imgs []imgPathRow) 
 
 func fileMissingFlag(b *gallery.Boundary, folder, canonical string) int {
 	path := filepath.Join(b.Root(), folder, storedBasename(canonical))
-	if _, err := os.Stat(path); err == nil && !b.Excludes(path) {
+	if _, err := os.Stat(path); err == nil && gallery.PathInside(b.Root(), path) && !b.Excludes(path) {
 		return 0
 	}
 	return 1

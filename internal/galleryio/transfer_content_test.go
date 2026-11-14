@@ -554,6 +554,23 @@ func TestTransferOneImage_RefusesAFolderTheTargetLeavesOut(t *testing.T) {
 	}
 }
 
+func TestTransferOneImage_RefusesASourceOutsideItsRoot(t *testing.T) {
+	src, dst := newGalleryPair(t)
+	img := writeImage(t, src, "in.png", makePNGBytes(t, 8, 8, 2, 7, 1))
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	mustWriteFile(t, outside, mustReadFile(t, img.CanonicalPath), 0o644)
+	if _, err := src.DB.Write.Exec(`UPDATE images SET canonical_path = ? WHERE id = ?`, outside, img.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := TransferOneImage(libGallery(src), libGallery(dst), img.ID, false); err == nil || err.Error() != "file missing from disk" {
+		t.Fatalf("transfer = %v, want the missing-file refusal", err)
+	}
+	if n := countRows(t, dst.DB, "images"); n != 0 {
+		t.Errorf("the target holds %d images, want none", n)
+	}
+}
+
 func TestTransferOneImage_FeedsTheTargetsPhash(t *testing.T) {
 	src, dst := newGalleryPair(t)
 	img := seedRichImage(t, src)
