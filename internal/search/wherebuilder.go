@@ -384,6 +384,16 @@ func tagNamePredicate(col, wildcard, tag string) (pred string, arg any, ok bool)
 	return "", nil, false
 }
 
+// Appending the top code point, not incrementing the last byte: under
+// NOCASE, `Z`+1 is `[`, which sorts below every `z...` term.
+const prefixCeil = "\U0010FFFF"
+
+// Everything but `*` is literal: the values matched are full of
+// underscores.
+func globPattern(s string) string {
+	return strings.ReplaceAll(db.EscapeLike(s), "*", "%")
+}
+
 func resolveDriverCanonicals(database *db.DB, leaf TagExpr) ([]int64, int64, bool) {
 	pred, arg, ok := tagNamePredicate("t.name", leaf.Wildcard, leaf.Tag)
 	if !ok {
@@ -778,6 +788,7 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"inbox":      boolCol("i.is_inbox"),
 	"ai":         (*whereBuilder).buildAIFilter,
 	"source":     (*whereBuilder).buildSourceFilter,
+	"sourceurl":  (*whereBuilder).buildSourceURLFilter,
 	"cat":        (*whereBuilder).buildCatFilter,
 	"width":      comp("i.width %s ?", parseIntValue),
 	"height":     comp("i.height %s ?", parseIntValue),
@@ -951,6 +962,41 @@ func (b *whereBuilder) buildSourceFilter(e FilterExpr) string {
 	}
 	b.args = append(b.args, e.Val)
 	return "i.id IN (SELECT image_id FROM image_sources WHERE site = ? COLLATE NOCASE)"
+}
+
+// sourceurl: without a * is a prefix; with one it is a glob over the
+// whole key, still seeking the literal start before the first *.
+func (b *whereBuilder) buildSourceURLFilter(e FilterExpr) string {
+	key := sourceURLKey(strings.TrimSpace(e.Val))
+	if strings.Trim(key, "*") == "" {
+		return "1=0"
+	}
+	stem, _, glob := strings.Cut(key, "*")
+	var preds []string
+	if stem != "" {
+		b.args = append(b.args, stem, stem+prefixCeil)
+		preds = append(preds, "key >= ? AND key < ?")
+	}
+	if glob {
+		b.args = append(b.args, globPattern(key))
+		preds = append(preds, `key LIKE ? ESCAPE '\'`)
+	}
+	return "i.id IN (SELECT image_id FROM image_source_urls WHERE " + strings.Join(preds, " AND ") + ")"
+}
+
+// sourceURLKey is the key image_source_urls stores for a URL: past its
+// scheme and a leading www.
+func sourceURLKey(s string) string {
+	for _, scheme := range []string{"https://", "http://"} {
+		if len(s) >= len(scheme) && strings.EqualFold(s[:len(scheme)], scheme) {
+			s = s[len(scheme):]
+			break
+		}
+	}
+	if len(s) >= 4 && strings.EqualFold(s[:4], "www.") {
+		s = s[4:]
+	}
+	return s
 }
 
 func (b *whereBuilder) buildCatFilter(e FilterExpr) string {
