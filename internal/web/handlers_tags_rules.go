@@ -278,10 +278,15 @@ func (s *Server) tagRulesPanel(w http.ResponseWriter, r *http.Request) {
 }
 
 // tagRulesAnswers asks monloader about the tag and its first aliases; state
-// is unpaired, old, unreachable or live.
+// is unpaired, paused, old, unreachable or live.
 func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases []models.Tag) ([]monloader.TagRules, string) {
-	if !s.ml.Usable() {
+	switch {
+	case !s.pairedWith(monloader.App):
 		return nil, "unpaired"
+	case s.ml.Paused():
+		return nil, "paused"
+	case !s.ml.Usable():
+		return nil, "unreachable"
 	}
 	names := []monloader.TagName{{Tag: tag.Name, Category: tag.CategoryName}}
 	for _, a := range aliases[:min(len(aliases), maxRulesAliases)] {
@@ -316,6 +321,8 @@ func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []m
 		note := pathLane{Kind: "note", Name: "monloader", NameClass: "dim",
 			Span: &pathBox{Parts: []pathPart{part("not paired, no site lanes  ", "dim"), part("[pair…]", "link")}, Href: "/settings#plugins"}}
 		switch p.Monloader {
+		case "paused":
+			note.Span = &pathBox{Parts: []pathPart{part("paused, no site lanes", "dim")}}
 		case "unreachable":
 			note.Span = &pathBox{Parts: []pathPart{part("unreachable, no site lanes", "dim")}}
 		case "old":
