@@ -2,11 +2,14 @@ package monloader
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/monbooru/monbooru/internal/library"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -47,10 +50,17 @@ type sweepStub struct {
 	graph    map[string]contract.PTRTagInfo
 	calls    [][]string
 	conflict int
+	broken   int
 	hold     func(r *http.Request)
 }
 
 func sweepEnv(t *testing.T, stub *sweepStub, onChange func()) (*Link, *tags.Service) {
+	t.Helper()
+	l, svc, _ := sweepGallery(t, stub, onChange)
+	return l, svc
+}
+
+func sweepGallery(t *testing.T, stub *sweepStub, onChange func()) (*Link, *tags.Service, *library.Gallery) {
 	t.Helper()
 	l := stubLink(t, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -65,6 +75,10 @@ func sweepEnv(t *testing.T, stub *sweepStub, onChange func()) (*Link, *tags.Serv
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
+		if len(stub.calls) == stub.broken {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		results := map[string]contract.PTRTagInfo{}
 		for _, name := range req.Tags {
 			if info, ok := stub.graph[name]; ok {
@@ -77,7 +91,16 @@ func sweepEnv(t *testing.T, stub *sweepStub, onChange func()) (*Link, *tags.Serv
 	if err := l.jobs.Start("ptr-lookup"); err != nil {
 		t.Fatal(err)
 	}
-	return l, tags.New(cx.DB, onChange)
+	return l, tags.New(cx.DB, onChange), cx
+}
+
+func carries(t *testing.T, svc *tags.Service, imageID int64, name string) bool {
+	t.Helper()
+	_, rows, err := svc.GetImageTags(imageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.ContainsFunc(rows, func(r models.ImageTag) bool { return r.TagName == name })
 }
 
 func sweepTag(t *testing.T, svc *tags.Service, form string) int64 {
@@ -273,8 +296,85 @@ func TestPTRTagSweep_CancelledStopsBeforeTheFollowUpRound(t *testing.T) {
 	if len(stub.calls) != 1 {
 		t.Errorf("lookups = %v, want the follow-up round skipped", stub.calls)
 	}
-	if st := l.jobs.Get(); st.Summary != "PTR lookup cancelled (1/2 processed)" || st.Error != "" {
+	if st := l.jobs.Get(); st.Summary != "PTR lookup cancelled (1/2 processed); run it again to apply its implications" || st.Error != "" {
 		t.Errorf("summary = %q error = %q", st.Summary, st.Error)
+	}
+}
+
+func TestPTRTagSweep_AFailedSweepStillAppliesTheImplicationsItStored(t *testing.T) {
+	stub := &sweepStub{graph: map[string]contract.PTRTagInfo{
+		"seed": {Known: true, Implications: []string{"newparent"}},
+	}, broken: 2}
+	l, svc, cx := sweepGallery(t, stub, nil)
+	seed := sweepTag(t, svc, "seed")
+	seedPhaseImage(t, cx, 1, "aa")
+	if err := svc.AddTagToImage(1, seed, false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	l.PTRTagSweep(svc, []int64{seed}, "")
+
+	if st := l.jobs.Get(); !strings.HasPrefix(st.Error, "PTR lookup failed") {
+		t.Fatalf("error = %q, want the 500 to fail the sweep", st.Error)
+	}
+	if !carries(t, svc, 1, "newparent") {
+		t.Error("the image lacks newparent after the failed sweep stored seed => newparent")
+	}
+
+	stub.broken = 0
+	if err := l.jobs.Start("ptr-lookup"); err != nil {
+		t.Fatal(err)
+	}
+	l.PTRTagSweep(svc, []int64{seed}, "")
+	if !carries(t, svc, 1, "newparent") {
+		t.Error("the image lacks newparent after a healthy re-run")
+	}
+}
+
+func TestPTRTagSweep_ARerunAppliesWhatACancelLeftUnapplied(t *testing.T) {
+	stub := &sweepStub{graph: map[string]contract.PTRTagInfo{
+		"cat": {Known: true, Implications: []string{"animal"}},
+	}}
+	var l *Link
+	armed := false
+	l, svc, cx := sweepGallery(t, stub, func() {
+		if armed {
+			l.jobs.Cancel()
+		}
+	})
+	ids := []int64{sweepTag(t, svc, "cat")}
+	for i := range contract.MaxPTRTags {
+		ids = append(ids, sweepTag(t, svc, fmt.Sprintf("filler_%03d", i)))
+	}
+	seedPhaseImage(t, cx, 1, "aa")
+	if err := svc.AddTagToImage(1, ids[0], false, nil); err != nil {
+		t.Fatal(err)
+	}
+	armed = true
+
+	l.PTRTagSweep(svc, ids, "")
+
+	if len(stub.calls) != 1 || !slices.Contains(stub.calls[0], "cat") {
+		t.Fatalf("lookups = %d, want the cancel to land after the first chunk, which holds cat", len(stub.calls))
+	}
+	want := fmt.Sprintf("PTR lookup cancelled (%d/%d processed); run it again to apply its implications", contract.MaxPTRTags, len(ids))
+	if st := l.jobs.Get(); st.Summary != want || st.Error != "" {
+		t.Errorf("summary = %q error = %q, want %q", st.Summary, st.Error, want)
+	}
+	if carries(t, svc, 1, "animal") {
+		t.Error("a cancel propagated cat => animal; it is meant to stop quickly")
+	}
+
+	armed = false
+	if err := l.jobs.Start("ptr-lookup"); err != nil {
+		t.Fatal(err)
+	}
+	l.PTRTagSweep(svc, ids[:1], "")
+	if !carries(t, svc, 1, "animal") {
+		t.Error("the re-run left cat => animal unapplied on the image")
+	}
+	if st := l.jobs.Get(); !strings.HasPrefix(st.Summary, "PTR: added 0 aliases and 0 implications") {
+		t.Errorf("summary = %q, want nothing new counted", st.Summary)
 	}
 }
 
