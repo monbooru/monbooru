@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/galleryio"
+	"github.com/monbooru/monbooru/internal/monloader"
+	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -42,6 +44,7 @@ func stubPTRGraph(t *testing.T, srv *Server, results map[string]any, asked *[]st
 	t.Cleanup(stub.Close)
 	srv.cfg.Monloader.APIURL = stub.URL
 	srv.cfg.Monloader.APIToken = "peer-secret"
+	srv.ml.Cache.Store(monloader.Status{Conn: peer.ConnOK, PTR: true})
 }
 
 func postPTRLookup(t *testing.T, srv *Server, path string, form url.Values) {
@@ -127,9 +130,45 @@ func TestPTRLookupTag_MergeIntoItselfFailsBeforeTheSweep(t *testing.T) {
 func TestPTRLookupTag_MergeNeedsASpelling(t *testing.T) {
 	srv := newTestServer(t)
 	tag := mustTag(t, srv.tagSvc(), "lone_tag", srv.active().GeneralCategoryID)
+	srv.ml.Cache.Store(monloader.Status{Conn: peer.ConnOK, PTR: true})
 	form := url.Values{"merge": {"1"}}
 	w := postForm(t, srv, "/tags/"+strconv.FormatInt(tag.ID, 10)+"/ptr-lookup", form)
 	mustCode(t, w, http.StatusBadRequest)
+}
+
+func TestPTRLookupTag_RefusesAnAlias(t *testing.T) {
+	srv := newTestServer(t)
+	generalID := srv.active().GeneralCategoryID
+	canon := mustTag(t, srv.tagSvc(), "canon", generalID)
+	spelled := mustCreateAlias(t, srv.tagSvc(), "spelled", generalID, canon.ID)
+	var asked []string
+	stubPTRGraph(t, srv, nil, &asked)
+
+	w := postForm(t, srv, "/tags/"+strconv.FormatInt(spelled.ID, 10)+"/ptr-lookup",
+		url.Values{"as": {"other"}, "merge": {"1"}})
+	mustCode(t, w, http.StatusNotFound)
+	awaitJobsDrain(t, srv)
+
+	if n := countRows(t, srv.db(), "tags WHERE id = ? AND canonical_tag_id = ?", spelled.ID, canon.ID); n != 1 {
+		t.Error("the refused pull repointed the alias")
+	}
+	if len(asked) != 0 {
+		t.Errorf("the refused pull asked %v", asked)
+	}
+}
+
+func TestPTRLookupTag_RefusesWhileThePTRIsNotReady(t *testing.T) {
+	srv := newTestServer(t)
+	tag := mustTag(t, srv.tagSvc(), "lone_tag", srv.active().GeneralCategoryID)
+	var asked []string
+	stubPTRGraph(t, srv, nil, &asked)
+	srv.ml.Cache.Store(monloader.Status{Conn: peer.ConnOK})
+
+	w := postForm(t, srv, "/tags/"+strconv.FormatInt(tag.ID, 10)+"/ptr-lookup", url.Values{})
+	mustCode(t, w, http.StatusConflict)
+	if len(asked) != 0 {
+		t.Errorf("the refused pull asked %v", asked)
+	}
 }
 
 func TestPTRLookupTag_AppliesAliasesAndImplications(t *testing.T) {
@@ -286,6 +325,7 @@ func TestPTRLookupTag_UnavailableStopsWithoutFailing(t *testing.T) {
 	defer stub.Close()
 	srv.cfg.Monloader.APIURL = stub.URL
 	srv.cfg.Monloader.APIToken = "peer-secret"
+	srv.ml.Cache.Store(monloader.Status{Conn: peer.ConnOK, PTR: true})
 
 	postPTRLookup(t, srv, "/tags/"+strconv.FormatInt(tag.ID, 10)+"/ptr-lookup", url.Values{})
 

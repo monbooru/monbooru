@@ -19,8 +19,8 @@ func (s *Server) ptrLookupSearchPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ptrLookupTagPost(w http.ResponseWriter, r *http.Request) {
-	id, ok := idAndForm(w, r)
-	if !ok {
+	id, _, ok := s.ptrTagTarget(w, r, s.ml.PTRReady, "the Public Tag Repository is unavailable")
+	if !ok || !parseFormOK(w, r) {
 		return
 	}
 	as := strings.TrimSpace(r.FormValue("as"))
