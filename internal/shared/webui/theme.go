@@ -277,6 +277,11 @@ func ServeThemeFile(w http.ResponseWriter, r *http.Request, t Theme, path string
 		return
 	}
 	if t.Builtin {
+		// An embedded file has no modification time to revalidate on.
+		if body, err := fs.ReadFile(builtin, path); err == nil {
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", `"`+sha256Hex(body)[:12]+`"`)
+		}
 		http.ServeFileFS(w, r, builtin, path)
 		return
 	}
