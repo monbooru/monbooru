@@ -555,6 +555,41 @@ func TestFolderChildren_KeepsTheSearchedFolderPastTheCap(t *testing.T) {
 	wantNotIn(t, body, `[more]`)
 }
 
+func TestFolderChildren_KeepsTheSearchedFolderInAnotherCase(t *testing.T) {
+	srv := newTestServer(t)
+	mustExec(t, srv.db().Write, `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < 502)
+		INSERT INTO images (sha256, canonical_path, folder_path, file_type, file_size, ingested_at)
+		SELECT 'sha-' || i, printf('F%03d/x.png', i), printf('F%03d', i), 'png', 5, datetime('now') FROM n`)
+	srv.active().InvalidateCaches()
+
+	body := mustGetBody(t, srv, "/internal/folders/children?path=&q="+url.QueryEscape("folder:f501"))
+	for _, want := range []string{`title="F501/"`, `title="1 more folder">[more]`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("first page lacks %s", want)
+		}
+	}
+}
+
+func TestSidebarFolders_OpenTheSearchedPathBeforeTheOpenLevels(t *testing.T) {
+	srv := newTestServer(t)
+	mustExec(t, srv.db().Write, `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < 4 * 501)
+		INSERT INTO images (sha256, canonical_path, folder_path, file_type, file_size, ingested_at)
+		SELECT 'sha-' || i, printf('%s/c%03d/x.png', char(97 + i / 501), i % 501), printf('%s/c%03d', char(97 + i / 501), i % 501), 'png', 5, datetime('now') FROM n`)
+	mustExec(t, srv.db().Write, `INSERT INTO images (sha256, canonical_path, folder_path, file_type, file_size, ingested_at)
+		VALUES ('sha-zy', 'z/y/w/x.png', 'z/y/w', 'png', 5, datetime('now'))`)
+	srv.active().InvalidateCaches()
+
+	body := do(srv, "GET", "/internal/sidebar-browse?q="+url.QueryEscape("folder:z/y"), [2]string{"Cookie", "monbooru_folders=__tree__,a,b,c,d"}).Body.String()
+	for _, want := range []string{`title="y/">y/</a>`, `title="w/">w/</a>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("tree lacks %s", want)
+		}
+	}
+	if i, j := strings.Index(body, `title="d/"`), strings.Index(body, `title="z/"`); i < 0 || j < i {
+		t.Errorf("z/ at %d, d/ at %d: want z/ after d/", j, i)
+	}
+}
+
 func TestFolderChildren_LeavesOutWhatTheCeilingHides(t *testing.T) {
 	srv := newTestServer(t)
 	cx := srv.active()

@@ -2351,6 +2351,11 @@ function initSectionToggle(toggleId, listId, cookieKey, forceOpen, defaultOpen) 
   if (title) title.onclick = clickToggle;
 }
 
+// folder: matches as SQLite's NOCASE does, A-Z only.
+function asciiLower(s) {
+  return s.replace(/[A-Z]/g, function(c) { return c.toLowerCase(); });
+}
+
 // Kept in JS, not the DOM: OOB swaps replace #sidebar-inner on every
 // refresh, even with no URL change. Without it the URL-driven force-open
 // undoes a collapse the operator just made.
@@ -2371,7 +2376,7 @@ function initFolderTree() {
   var q = urlParams.get('q') || '';
   var folderMatch = q.match(/(?:^|\s)folder(?:only)?:(?:"([^"]+)"|([^\s]*))/);
   if (folderMatch) {
-    currentFolder = folderMatch[1] || folderMatch[2];
+    currentFolder = asciiLower(folderMatch[1] || folderMatch[2]);
   }
 
   initSectionToggle('tags-toggle', 'tag-groups', '__tags__', false, true);
@@ -2390,7 +2395,8 @@ function initFolderTree() {
     var list = document.getElementById(targetId);
     if (!list) return;
 
-    var urlDriven = currentFolder && (currentFolder === path || currentFolder.startsWith(path + '/'));
+    var low = asciiLower(path);
+    var urlDriven = currentFolder && (currentFolder === low || currentFolder.startsWith(low + '/'));
     var shouldExpand = expanded.has(path) || (urlChanged && urlDriven);
 
     if (shouldExpand) {

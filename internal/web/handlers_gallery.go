@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
@@ -528,10 +529,11 @@ type folderOpen struct {
 }
 
 func readFolderOpen(r *http.Request, query string) folderOpen {
-	return folderOpen{keys: folderCookieKeys(r), current: queryFolder(query)}
+	return folderOpen{keys: folderCookieKeys(r), current: db.ASCIILower(queryFolder(query))}
 }
 
 func (o folderOpen) onPath(path string) bool {
+	path = db.ASCIILower(path)
 	return o.current == path || strings.HasPrefix(o.current, path+"/")
 }
 
@@ -582,8 +584,13 @@ func (o folderOpen) level(node *gallery.FolderNode, offset int, query string, bu
 	}
 	*budget -= len(shown)
 	lv.Rows = make([]folderRow, len(shown))
+	if j := slices.Index(shown, pin); j >= 0 {
+		lv.Rows[j] = o.row(&kids[pin], query, budget)
+	}
 	for j, i := range shown {
-		lv.Rows[j] = o.row(&kids[i], query, budget)
+		if i != pin {
+			lv.Rows[j] = o.row(&kids[i], query, budget)
+		}
 	}
 	return lv
 }
