@@ -407,6 +407,22 @@ func TestResolveTags_ImpliesTheWholeClosure(t *testing.T) {
 	}
 }
 
+func TestResolveTags_NamesAnAliasTargetWithItsCategory(t *testing.T) {
+	env := newTestEnv(t)
+	general, _, _ := tags.CategoryIDByName(env.database, "general")
+	character, _, _ := tags.CategoryIDByName(env.database, "character")
+	svc := env.gallery.TagSvc
+	miku := mustTag(t, svc, "hatsune_miku", character)
+	if _, err := svc.CreateAlias("miku", general, miku.ID); err != nil {
+		t.Fatal(err)
+	}
+	resp := apiJSON(t, env, "POST", "/api/v1/tags/resolve", map[string]any{"names": []string{"miku"}}, http.StatusOK)
+	row := resp["results"].([]any)[0].(map[string]any)
+	if row["status"] != "alias" || row["resolves_to"] != "character:hatsune_miku" {
+		t.Errorf("miku = %v, want an alias resolving to character:hatsune_miku", row)
+	}
+}
+
 func TestResolveTags_SaysWhatArrivesAsWhat(t *testing.T) {
 	env := newTestEnv(t)
 	general, _, _ := tags.CategoryIDByName(env.database, "general")
