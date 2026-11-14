@@ -3,6 +3,7 @@ package monloader
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/tags"
@@ -157,7 +158,7 @@ func ptrSpellingStems(form string) []string {
 	var out []string
 	seen := map[string]bool{}
 	push := func(n string) {
-		if len(n) < 4 || seen[n] {
+		if utf8.RuneCountInString(n) < 4 || seen[n] {
 			return
 		}
 		seen[n] = true
