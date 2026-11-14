@@ -1586,6 +1586,26 @@ func TestSync_ARepointWithTheOldCopyLeftMovesTheRowOnce(t *testing.T) {
 	}
 }
 
+func TestSync_ARepointDropsTheCopiesLeftInTheOldFolder(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	a := createTestPNGFile(t, galleryDir, "a.png")
+	mustWriteFile(t, filepath.Join(galleryDir, "b.png"), mustReadFile(t, a), 0o644)
+	env.sync(t, database)
+	moved := filepath.Join(filepath.Dir(galleryDir), "new-disk")
+	mustMkdirAll(t, moved, 0o755)
+	for _, name := range []string{"a.png", "b.png"} {
+		mustWriteFile(t, filepath.Join(moved, name), mustReadFile(t, a), 0o644)
+	}
+	env.galleryPath = moved
+
+	env.sync(t, database)
+	env.sync(t, database)
+
+	if n := countRows(t, database, "image_paths WHERE path LIKE ?", galleryDir+string(filepath.Separator)+"%"); n != 0 {
+		t.Errorf("paths left in the old folder = %d, want 0", n)
+	}
+}
+
 func TestSync_AMissingImageFoundUnderANewPathCountsAsRestored(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	srcPath := createTestPNGFile(t, galleryDir, "original.png")

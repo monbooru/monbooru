@@ -773,6 +773,23 @@ func TestWatcher_DoesNotPromoteACopyInAFencedFolder(t *testing.T) {
 	}
 }
 
+func TestWatcher_DoesNotPromoteACopyOutsideTheRoot(t *testing.T) {
+	t.Parallel()
+	w, database, galleryDir, _ := newTestWatcher(t)
+	img := solidPNG(t, 8, 8, [3]uint8{63, 93, 153})
+	first := filepath.Join(galleryDir, "one.png")
+	mustWriteFile(t, first, img, 0o644)
+	rec, _ := mustIngest(t, database, galleryDir, w.handle.ThumbnailsPath, first, "")
+	outside := filepath.Join(t.TempDir(), "two.png")
+	mustWriteFile(t, outside, img, 0o644)
+	mustExec(t, database.Write, `INSERT INTO image_paths (image_id, path, is_canonical) VALUES (?, ?, 0)`, rec.ID, outside)
+	mustRemove(t, first)
+
+	if w.promoteSurvivingCopy(rec.ID, first) {
+		t.Fatal("promoted a copy outside the gallery root")
+	}
+}
+
 func TestWatcher_DropsEventsFromAFolderFencedOffWhileRunning(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()

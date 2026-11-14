@@ -502,10 +502,14 @@ func respelling(root, canonical, walked string) bool {
 	return err == nil && SameFile(info, canonical)
 }
 
-// CanonicalGone also holds for a path outside the root or one the boundary
-// refuses: after a repoint the old copy can still be on disk.
+// After a repoint the old copy can still be on disk, so a path outside the
+// root counts as left out whether or not it is there.
+func leftOut(bound *Boundary, path string) bool {
+	return !PathInside(bound.Root(), path) || bound.Check(path) != nil
+}
+
 func CanonicalGone(bound *Boundary, path string) bool {
-	if !PathInside(bound.Root(), path) || bound.Check(path) != nil {
+	if leftOut(bound, path) {
 		return true
 	}
 	_, err := os.Stat(path)
@@ -608,8 +612,8 @@ func markImagesMissingChunked(ctx context.Context, database *db.DB, ids []int64)
 }
 
 // A path the walk skipped (size cap, unreadable) keeps its row until its
-// file is gone. An excluded path goes even when present: that copy is
-// another gallery's.
+// file is gone. A left-out path goes even when present: that copy is
+// another gallery's, or the old folder's.
 func pruneStaleAliasPaths(ctx context.Context, database *db.DB, bound *Boundary, foundPaths map[string]struct{}) error {
 	type aliasPath struct {
 		id              int64
@@ -628,7 +632,7 @@ func pruneStaleAliasPaths(ctx context.Context, database *db.DB, bound *Boundary,
 		if _, ok := foundPaths[a.path]; ok {
 			continue
 		}
-		if bound.Check(a.path) != nil {
+		if leftOut(bound, a.path) {
 			staleIDs = append(staleIDs, a.id)
 			continue
 		}
