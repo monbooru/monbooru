@@ -721,7 +721,7 @@
     editor.querySelector('.tc-edit-mute').checked = row.dataset.muted === '1';
     // Left alone, Enter would submit the dialog's form and close the pop-in.
     editor.addEventListener('keydown', function(ev) {
-      if (ev.key !== 'Enter') return;
+      if (ev.key !== 'Enter' || ev.target.closest('button')) return;
       ev.preventDefault();
       apply.click();
     });
