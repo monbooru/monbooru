@@ -411,6 +411,29 @@ func TestPTRTagSweep_AnAnswerWithoutResultsReadsAsUnknown(t *testing.T) {
 	}
 }
 
+func TestPTRTagSweep_PassesARejectedTagBy(t *testing.T) {
+	stub := &sweepStub{graph: map[string]contract.PTRTagInfo{
+		"junk":           {Known: true, Implications: []string{"parent_of_junk"}, ImpliedBy: []string{"child_of_junk"}},
+		"parent_of_junk": {Known: true, Implications: []string{"grandparent"}},
+	}}
+	l, svc := sweepEnv(t, stub, nil)
+	junk := sweepTag(t, svc, "junk")
+	if err := svc.RejectTag(junk); err != nil {
+		t.Fatal(err)
+	}
+
+	l.PTRTagSweep(svc, []int64{junk}, "")
+
+	if len(stub.calls) != 0 {
+		t.Errorf("lookups = %v, want none for a rejected tag", stub.calls)
+	}
+	for _, name := range []string{"parent_of_junk", "child_of_junk", "grandparent"} {
+		if got := canonicalOf(t, svc, name); got != "" {
+			t.Errorf("%s was created around the rejected tag", name)
+		}
+	}
+}
+
 func TestApplyPTRTagInfo_KeepsTheOperatorsCatalog(t *testing.T) {
 	_, svc := sweepEnv(t, &sweepStub{}, nil)
 	cat := sweepTag(t, svc, "cat")
