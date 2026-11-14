@@ -1074,7 +1074,7 @@ func themeLogoURL(e webui.Theme) string {
 // does not revalidate them, so a fixed URL keeps the first icon seen.
 func themeFaviconURL(e webui.Theme) string {
 	if e.Favicon == "" {
-		return cmp.Or(builtinArt[e.Name], "/static/") + "favicon.png"
+		return cmp.Or(builtinArt[e.Name], "/static/") + "favicon.png?v=" + assetVersion
 	}
 	return "/theme.favicon?v=" + themeFaviconVersion(e)
 }

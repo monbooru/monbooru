@@ -389,7 +389,7 @@ func TestFavicon_DefaultsToTheBundledIconOnEveryPage(t *testing.T) {
 	for _, page := range pages {
 		w := do(srv, "GET", page)
 
-		if !strings.Contains(w.Body.String(), `href="/static/favicon.png"`) {
+		if !strings.Contains(w.Body.String(), `href="/static/favicon.png?v=`+assetVersion+`"`) {
 			t.Errorf("%s: default favicon link missing", page)
 		}
 	}
@@ -400,7 +400,7 @@ func TestFaviconIco_DefaultsToBundledFavicon(t *testing.T) {
 
 	w := do(srv, "GET", "/favicon.ico")
 
-	if loc := w.Header().Get("Location"); loc != "/static/favicon.png" {
+	if loc := w.Header().Get("Location"); loc != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("GET /favicon.ico redirected to %q, want the bundled icon", loc)
 	}
 }
@@ -496,7 +496,7 @@ func TestTopbarUsesTheBundledLogoWithNoTheme(t *testing.T) {
 
 	body := w.Body.String()
 	wantIn(t, body, `src="/static/logo.png?v=`+assetVersion+`"`)
-	wantNotIn(t, body, `src="/static/favicon.png"`)
+	wantNotIn(t, body, `src="/static/favicon.png`)
 }
 
 func TestBooruName_DefaultsToMonbooru(t *testing.T) {

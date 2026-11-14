@@ -210,7 +210,7 @@ func TestSeedThemesDirMovesAnUntouchedCopyToTheAppsLightArt(t *testing.T) {
 			t.Errorf("the untouched copy kept the previous %s", file)
 		}
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the light art", got)
 	}
 
@@ -299,6 +299,22 @@ func TestThemeFileRevalidatesAgainstItsMtime(t *testing.T) {
 	}
 }
 
+func TestBuiltinThemeFileRevalidatesAgainstItsBytes(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.Server.Theme = "legacy-dark"
+	for _, path := range []string{"/theme.css", "/theme.logo", "/theme.favicon"} {
+		rr := do(srv, "GET", path)
+		etag := rr.Header().Get("ETag")
+		if rr.Code != http.StatusOK || rr.Header().Get("Cache-Control") != "no-cache" || etag == "" {
+			t.Errorf("%s = %d, headers %v", path, rr.Code, rr.Header())
+			continue
+		}
+		if rr = do(srv, "GET", path, [2]string{"If-None-Match", etag}); rr.Code != http.StatusNotModified {
+			t.Errorf("%s conditional GET = %d, want 304", path, rr.Code)
+		}
+	}
+}
+
 func installThemesAtOneMtime(t *testing.T, srv *Server, files map[string]string) {
 	t.Helper()
 	dir := installThemes(t, srv, files)
@@ -358,7 +374,7 @@ func TestBuiltinLightServesItsSheetAndTheAppsLightArt(t *testing.T) {
 	if got := themeLogoURL(srv.activeTheme()); got != "/static/light/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the light art", got)
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the light art", got)
 	}
 
@@ -388,17 +404,17 @@ func TestThemeLogoLeavesTheFaviconAlone(t *testing.T) {
 	if got := themeLogoURL(srv.activeTheme()); got != "/theme.logo" {
 		t.Fatalf("logo url = %q, want the theme's", got)
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the bundled icon", got)
 	}
 
 	rr := do(srv, "GET", "/")
 	body := rr.Body.String()
-	wantIn(t, body, `href="/static/favicon.png"`)
+	wantIn(t, body, `href="/static/favicon.png?v=`+assetVersion+`"`)
 	wantIn(t, body, `src="/theme.logo"`)
 
 	rr = do(srv, "GET", "/favicon.ico")
-	if loc := rr.Header().Get("Location"); loc != "/static/favicon.png" {
+	if loc := rr.Header().Get("Location"); loc != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("/favicon.ico redirected to %q, want the bundled icon", loc)
 	}
 
