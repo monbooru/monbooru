@@ -378,6 +378,39 @@ func TestPTRTagSweep_ARerunAppliesWhatACancelLeftUnapplied(t *testing.T) {
 	}
 }
 
+func TestPTRTagSweep_AnAnswerWithoutResultsReadsAsUnknown(t *testing.T) {
+	for _, body := range []string{`{}`, `{"results": null}`} {
+		t.Run(body, func(t *testing.T) {
+			calls := 0
+			l := stubLink(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls == 1 {
+					_, _ = w.Write([]byte(body))
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"results": map[string]contract.PTRTagInfo{
+					"kitty": {Known: true, Implications: []string{"animal"}},
+				}})
+			})
+			if err := l.jobs.Start("ptr-lookup"); err != nil {
+				t.Fatal(err)
+			}
+			svc := tags.New(testGallery(t).DB, nil)
+			cat := sweepTag(t, svc, "cat")
+			general, _, _ := svc.ParseForm("kitty")
+			if _, err := svc.CreateAlias("kitty", general, cat); err != nil {
+				t.Fatal(err)
+			}
+
+			l.PTRTagSweep(svc, []int64{cat}, "")
+
+			if names, _ := impliedNames(t, svc, cat); !slices.Equal(names, []string{"animal"}) {
+				t.Errorf("implied = %v, want cat -> animal through the alias", names)
+			}
+		})
+	}
+}
+
 func TestApplyPTRTagInfo_KeepsTheOperatorsCatalog(t *testing.T) {
 	_, svc := sweepEnv(t, &sweepStub{}, nil)
 	cat := sweepTag(t, svc, "cat")

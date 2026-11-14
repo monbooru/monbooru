@@ -285,6 +285,9 @@ func (l *Link) PTRTagLookup(ctx context.Context, names []string) (map[string]con
 	if err != nil {
 		return nil, err
 	}
+	if out.Results == nil {
+		return map[string]contract.PTRTagInfo{}, nil
+	}
 	return out.Results, nil
 }
 
