@@ -149,6 +149,30 @@ func TestMergeGroupsPost(t *testing.T) {
 	})
 }
 
+func TestBrowseGroupsPost_RedirectKeepsSortAndPage(t *testing.T) {
+	srv := newTestServer(t)
+	for _, salt := range []string{"keep-a-", "keep-b-", "keep-c-"} {
+		seedDupGroup(t, srv, salt)
+	}
+	gids, err := db.QueryStrings(srv.db().Read, `SELECT id FROM dup_groups ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "/relations/browse?kind=duplicate&page=3&sort=size"
+
+	w := postMerge(t, srv, "dup", url.Values{"group_id": gids[:2], "sort": {"size"}, "page": {"3"}})
+	mustCode(t, w, http.StatusSeeOther)
+	if loc := w.Header().Get("Location"); loc != want {
+		t.Errorf("merge: Location = %q, want %q", loc, want)
+	}
+
+	w = postForm(t, srv, "/relations/browse-groups/dissolve?kind=duplicate", url.Values{"group_id": {gids[2]}, "sort": {"size"}, "page": {"3"}})
+	mustCode(t, w, http.StatusSeeOther)
+	if loc := w.Header().Get("Location"); loc != want {
+		t.Errorf("dissolve: Location = %q, want %q", loc, want)
+	}
+}
+
 func TestDissolveGroupsPost(t *testing.T) {
 	t.Run("duplicate", func(t *testing.T) {
 		srv := newTestServer(t)

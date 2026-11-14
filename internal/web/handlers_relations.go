@@ -727,7 +727,18 @@ func (s *Server) mergeGroupsPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	hxRedirect(w, r, "/relations/browse?kind="+cmp.Or(browseKindByShortName[kind], "duplicate"))
+	hxRedirect(w, r, browseGroupsReturn(r, cmp.Or(browseKindByShortName[kind], "duplicate")))
+}
+
+// The page clamp absorbs a page the action emptied.
+func browseGroupsReturn(r *http.Request, kind string) string {
+	v := url.Values{"kind": {kind}}
+	for _, k := range []string{"sort", "page"} {
+		if x := r.FormValue(k); x != "" {
+			v.Set(k, x)
+		}
+	}
+	return "/relations/browse?" + v.Encode()
 }
 
 var dissolveOpFor = map[string]string{
@@ -766,8 +777,7 @@ func (s *Server) dissolveGroupsPost(w http.ResponseWriter, r *http.Request) {
 		flashStatus(w, http.StatusBadRequest, "Unknown dissolve kind.")
 		return
 	}
-	target := "/relations/browse?kind=" + kind
-	hxRedirect(w, r, target)
+	hxRedirect(w, r, browseGroupsReturn(r, kind))
 }
 
 func parseIDList(raw []string) []int64 {

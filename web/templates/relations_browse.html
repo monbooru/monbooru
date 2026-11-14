@@ -276,13 +276,20 @@
     }
     resp.text().then(function(t) { document.getElementById('flash-relations').innerHTML = t; });
   }
+  function keepView(params) {
+    var here = new URLSearchParams(location.search);
+    ['sort', 'page'].forEach(function(k) {
+      if (here.get(k)) params.set(k, here.get(k));
+    });
+    return params;
+  }
   function submitDissolve(kind, values) {
     var field = 'group_id';
     if (kind === 'version' || kind === 'derivative') field = 'root_id';
     else if (kind === 'not_related') field = 'pair';
     var params = new URLSearchParams();
     values.forEach(function(v) { params.append(field, v); });
-    postForm('/relations/browse-groups/dissolve?kind=' + encodeURIComponent(kind), params, {
+    postForm('/relations/browse-groups/dissolve?kind=' + encodeURIComponent(kind), keepView(params), {
       hx: true,
       flashId: 'flash-relations',
       onOK: onBrowseGroupsResponse,
@@ -351,7 +358,7 @@
     if (keepOriginalFrom !== null && keepOriginalFrom !== '') {
       params.append('keep_original_from', keepOriginalFrom);
     }
-    postForm(url, params, {
+    postForm(url, keepView(params), {
       hx: true,
       flashId: 'flash-relations',
       onOK: onBrowseGroupsResponse,
