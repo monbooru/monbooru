@@ -163,6 +163,9 @@ func (m *Manga) coverDimensions() (int, int, error) {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return 0, 0, fmt.Errorf("the cover is %dx%d, it has no pixels", cfg.Width, cfg.Height)
 	}
+	if quarterTurn(m.pageOrientation(0)) {
+		return cfg.Height, cfg.Width, nil
+	}
 	return cfg.Width, cfg.Height, nil
 }
 

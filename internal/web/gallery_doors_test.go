@@ -29,6 +29,7 @@ var galleryCallsOutsideADoor = []string{
 	"gallery.CountCollections",
 	"gallery.CoverOrientation",
 	"gallery.DetectFileType",
+	"gallery.DisplayDimensions",
 	"gallery.EnsureMangaPage",
 	"gallery.EnsureMangaPageView",
 	"gallery.EnsureViewRendition",

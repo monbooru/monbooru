@@ -52,6 +52,33 @@ func TestRebuildThumbsJob_KeepsRefusalsOutOfTheTally(t *testing.T) {
 	}
 }
 
+func TestRebuildThumbsJob_TurnsAnOldRowsSize(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	src := filepath.Join(cx.GalleryPath, "turned.jpg")
+	mustWriteFile(t, src, sidewaysJPEG(t), 0o644)
+	img, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, src, "")
+	mustExec(t, cx.DB.Write, `UPDATE images SET width = 40, height = 20 WHERE id = ?`, img.ID)
+
+	if err := srv.startRebuildThumbsJob(cx); err != nil {
+		t.Fatalf("startRebuildThumbsJob: %v", err)
+	}
+	drainJob(t, srv)
+
+	if w, h := storedSize(t, cx.DB, img.ID); w != 20 || h != 40 {
+		t.Errorf("size = %dx%d, want the shown 20x40", w, h)
+	}
+}
+
+func storedSize(t *testing.T, database *db.DB, id int64) (int, int) {
+	t.Helper()
+	var w, h int
+	if err := database.Read.QueryRow(`SELECT width, height FROM images WHERE id = ?`, id).Scan(&w, &h); err != nil {
+		t.Fatal(err)
+	}
+	return w, h
+}
+
 func TestRebuildThumbsJob_FillsAStillsMissingSize(t *testing.T) {
 	srv := newTestServer(t)
 	cx := srv.active()
@@ -184,6 +211,7 @@ func TestStartWatchers_TurnsAnUpgradedLibrarysThumbnails(t *testing.T) {
 	if old := unturnThumbnail(t, database, g.ThumbnailsPath, src, img.ID); old == *img.Phash {
 		t.Fatal("the fixture hashes the same turned and unturned")
 	}
+	mustExec(t, database.Write, `UPDATE images SET width = 40, height = 20 WHERE id = ?`, img.ID)
 	mustExec(t, database.Write, `PRAGMA user_version = 16`)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
@@ -211,6 +239,9 @@ func TestStartWatchers_TurnsAnUpgradedLibrarysThumbnails(t *testing.T) {
 	}
 	if got := storedPhash(t, srv.active().DB, img.ID); got != *img.Phash {
 		t.Errorf("phash = %x, want a fresh ingest's %x", got, *img.Phash)
+	}
+	if w, h := storedSize(t, srv.active().DB, img.ID); w != 20 || h != 40 {
+		t.Errorf("size = %dx%d, want the shown 20x40", w, h)
 	}
 }
 

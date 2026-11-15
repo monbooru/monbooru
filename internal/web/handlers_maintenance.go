@@ -359,10 +359,11 @@ func (s *Server) startRebuildThumbsJob(cx *library.Gallery) error {
 			Path     string
 			FileType string
 			Width    sql.NullInt64
+			Height   sql.NullInt64
 		}
 		imgs, err := db.QueryAll(cx.DB.Read, db.ScanRow(func(img *imgRow) []any {
-			return []any{&img.ID, &img.Path, &img.FileType, &img.Width}
-		}), `SELECT id, canonical_path, file_type, width FROM images WHERE is_missing = 0`)
+			return []any{&img.ID, &img.Path, &img.FileType, &img.Width, &img.Height}
+		}), `SELECT id, canonical_path, file_type, width, height FROM images WHERE is_missing = 0`)
 		if err != nil {
 			s.jobs.Fail(err.Error())
 			return
@@ -396,6 +397,12 @@ func (s *Server) startRebuildThumbsJob(cx *library.Gallery) error {
 				if w, h, ok := gallery.ProbeVideoDimensions(img.Path); ok {
 					if err := cx.SetDimensions(ctx, img.ID, w, h); err != nil {
 						logx.Warnf("backfill video dimensions for %d: %v", img.ID, err)
+					}
+				}
+			} else if img.FileType == models.FileTypeJPEG || img.FileType == models.FileTypeWEBP || img.FileType == models.FileTypeCBZ {
+				if w, h, ok := gallery.DisplayDimensions(img.Path, img.FileType); ok && (int64(w) != img.Width.Int64 || int64(h) != img.Height.Int64) {
+					if err := cx.SetDimensions(ctx, img.ID, w, h); err != nil {
+						logx.Warnf("backfill dimensions for %d: %v", img.ID, err)
 					}
 				}
 			}
@@ -473,6 +480,13 @@ func (s *Server) turnUpgradedThumbs() {
 				}
 				if _, err := cx.RecomputePhash(ctx, img.ID); err != nil {
 					logx.Debugf("turn phash %d: %v", img.ID, err)
+				}
+				if o >= 5 {
+					if w, h, ok := gallery.DisplayDimensions(img.Path, img.FileType); ok {
+						if err := cx.SetDimensions(ctx, img.ID, w, h); err != nil {
+							logx.Warnf("turn dimensions for %d: %v", img.ID, err)
+						}
+					}
 				}
 				turned++
 			}

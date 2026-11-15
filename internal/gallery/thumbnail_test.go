@@ -516,6 +516,34 @@ func TestGenerate_TurnsTheThumbnailByEXIFOrientation(t *testing.T) {
 	}
 }
 
+func TestIngest_StoresATurnedStillsSizeAsShown(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	size := func(img *models.Image) string {
+		if img.Width == nil || img.Height == nil {
+			return "none"
+		}
+		return strconv.Itoa(*img.Width) + "x" + strconv.Itoa(*img.Height)
+	}
+	for o := 1; o <= 8; o++ {
+		src := filepath.Join(galleryDir, "turned"+strconv.Itoa(o)+".jpg")
+		mustWriteFile(t, src, orientedJPEG(t, o), 0o644)
+		img, _ := mustIngest(t, database, env.galleryPath, env.thumbnailsPath, src, models.OriginIngest)
+		want := "40x20"
+		if o >= 5 {
+			want = "20x40"
+		}
+		if got := size(img); got != want {
+			t.Errorf("orientation %d: size %s, want %s", o, got, want)
+		}
+	}
+
+	cbz := writeTestZip(t, galleryDir, "turned.cbz", map[string][]byte{"01.jpg": orientedJPEG(t, 6), "02.jpg": orientedJPEG(t, 1)})
+	img, _ := mustIngest(t, database, env.galleryPath, env.thumbnailsPath, cbz, models.OriginIngest)
+	if got := size(img); got != "20x40" {
+		t.Errorf("cbz with a turned cover: size %s, want 20x40", got)
+	}
+}
+
 func TestEnsureViewRendition_TurnsByEXIFOrientation(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "turned.jpg")
