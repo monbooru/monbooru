@@ -42,23 +42,58 @@ function bridge() {
 	return typeof window.ksu !== "undefined" ? window.ksu : null;
 }
 
+/* The manager's bridge takes the callback as a string of JavaScript and runs
+ * `expression(code, stdout, stderr)` in this page afterwards. A function
+ * cannot cross that boundary: it would be stringified into source the page
+ * then fails to parse, and the call would look like it never returned. So
+ * every call is named here and the bridge calls back by name. */
+var answered = {};
+var answerSeq = 0;
+
+window.monbooruBridge = {
+	returned: function (name, code, out, err) {
+		var settle = answered[name];
+		if (!settle) return;
+		delete answered[name];
+		settle(code, out, err);
+	}
+};
+
 /* Runs one fixed ctl.sh subcommand and resolves with its stdout. */
-function exec(cmd) {
+function exec(cmd, timeoutMs) {
 	return new Promise(function (resolve, reject) {
 		var ksu = bridge();
 		if (!ksu || typeof ksu.exec !== "function") {
 			reject(new Error("no shell bridge"));
 			return;
 		}
+
+		var name = "call" + (++answerSeq);
+		var done = false;
+		var timer = window.setTimeout(function () {
+			if (done) return;
+			done = true;
+			delete answered[name];
+			reject(new Error("the manager did not answer"));
+		}, timeoutMs || 12000);
+
+		answered[name] = function (code, out, err) {
+			if (done) return;
+			done = true;
+			window.clearTimeout(timer);
+			if (Number(code) === 0) {
+				resolve(out || "");
+				return;
+			}
+			reject(new Error(firstLine(err || out) || "exit " + code));
+		};
+
 		try {
-			ksu.exec(cmd, "{}", function (code, out, err) {
-				if (Number(code) === 0) {
-					resolve(out || "");
-					return;
-				}
-				reject(new Error(firstLine(err || out) || "exit " + code));
-			});
+			ksu.exec(cmd, "{}", 'window.monbooruBridge.returned.bind(null, "' + name + '")');
 		} catch (e) {
+			done = true;
+			window.clearTimeout(timer);
+			delete answered[name];
 			reject(e);
 		}
 	});
@@ -148,7 +183,7 @@ function act(action) {
 	if (busy || ACTIONS.indexOf(action) < 0) return;
 	clearNotice();
 	setBusy(true, action);
-	exec(CTL + " " + action).then(function () {
+	exec(CTL + " " + action, 90000).then(function () {
 		say(action === "stop" ? "stopped" : "started");
 	}).catch(function (err) {
 		showNotice(err.message);
@@ -269,7 +304,7 @@ function init() {
 	var ksu = bridge();
 	if (ksu && typeof ksu.enableEdgeToEdge === "function") {
 		try {
-			ksu.enableEdgeToEdge();
+			ksu.enableEdgeToEdge(true);
 		} catch (e) {
 			/* older managers do not have it */
 		}
