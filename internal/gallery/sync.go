@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/monbooru/monbooru/internal/db"
-	"github.com/monbooru/monbooru/internal/lookup"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
@@ -725,20 +724,14 @@ func applyInPlaceEdit(h Handle, path, newSHA, newMD5 string, newMtime, newMtimeN
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}
-		if _, err := setMissingTx(tx, []int64{imageID}, false); err != nil {
-			return fmt.Errorf("mark row present: %w", err)
+		// A placeholder read keeps its bytes, so its copies still match.
+		if err := rewroteBytesTx(tx, imageID, oldSHA != newSHA, facts.sd, facts.comfy); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(
 			`UPDATE image_paths SET mtime_unix = ?, mtime_nsec = ? WHERE path = ?`, newMtime, newMtimeNano, path,
 		); err != nil {
 			return fmt.Errorf("update image_paths mtime: %w", err)
-		}
-		// The recorded lookup misses are about bytes this row no longer has.
-		if err := lookup.DeleteForImage(tx, imageID); err != nil {
-			return fmt.Errorf("clear lookup history: %w", err)
-		}
-		if err := replaceGenerationMetadata(context.Background(), tx, imageID, facts.sd, facts.comfy); err != nil {
-			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM manga_metadata WHERE image_id = ?`, imageID); err != nil {
 			return fmt.Errorf("clear manga_metadata: %w", err)

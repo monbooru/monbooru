@@ -987,6 +987,45 @@ func TestSync_DetectsSameSizeInPlaceEdit(t *testing.T) {
 	}
 }
 
+func TestInPlaceEdit_DropsTheCopiesOfTheOldBytes(t *testing.T) {
+	edit := map[string]func(*testing.T, *db.DB, *syncEnv, string){
+		"sync": func(t *testing.T, database *db.DB, env *syncEnv, _ string) { env.sync(t, database) },
+		"ingest": func(t *testing.T, database *db.DB, env *syncEnv, path string) {
+			mustIngest(t, database, env.galleryPath, env.thumbnailsPath, path, "")
+		},
+	}
+	for name, apply := range edit {
+		t.Run(name, func(t *testing.T) {
+			database, env, galleryDir := setupSyncTest(t)
+			path := createTestPNGFile(t, galleryDir, "edit.png")
+			copyPath := filepath.Join(galleryDir, "z-copy.png")
+			mustWriteFile(t, copyPath, mustReadFile(t, path), 0o644)
+			env.sync(t, database)
+			if n := countRows(t, database, "image_paths WHERE path = ? AND is_canonical = 0", copyPath); n != 1 {
+				t.Fatalf("%s is not listed as a copy before the edit", copyPath)
+			}
+
+			info := mustStat(t, path)
+			overwrite := mustReadFile(t, path)
+			for i := 8; i < len(overwrite); i++ {
+				overwrite[i] = byte((i * 7) ^ 0x5a)
+			}
+			mustWriteFile(t, path, overwrite, 0o644)
+			future := info.ModTime().Add(2 * time.Second)
+			mustChtimes(t, path, future, future)
+			apply(t, database, env, path)
+
+			if n := countRows(t, database, "image_paths WHERE is_canonical = 0"); n != 0 {
+				t.Errorf("copies after the edit = %d, want 0: the copy still holds the old bytes", n)
+			}
+			env.sync(t, database)
+			if n := countRows(t, database, "images WHERE canonical_path = ?", copyPath); n != 1 {
+				t.Errorf("the old copy is the canonical file of %d images after a sync, want 1", n)
+			}
+		})
+	}
+}
+
 func TestInPlaceEdit_AFailedThumbnailClearsThePhash(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	path := createTestPNGFileSize(t, galleryDir, "rehash.png", 10, 10)
