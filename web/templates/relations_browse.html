@@ -209,6 +209,7 @@
     <h4 class="dlg-title">Merge same-image groups{{template "webui/dialog_x"}}</h4>
     <p class="field-hint">Which group's original wins on the merged row?</p>
     <ul id="merge-dup-choices" class="merge-dup-choices"></ul>
+    <div id="merge-dup-flash"></div>
     {{template "dialog_actions" dict "ID" "merge-dup-dialog" "Submit" "Merge" "Class" "btn-success"}}
   </form>
 </dialog>
@@ -268,13 +269,15 @@
     }, '', 'Remove');
   });
   // A refusal answers 200 with its message instead of a redirect.
-  function onBrowseGroupsResponse(resp) {
-    var redirect = resp.headers.get('HX-Redirect');
-    if (redirect) {
-      window.location.href = redirect;
-      return;
-    }
-    resp.text().then(function(t) { document.getElementById('flash-relations').innerHTML = t; });
+  function onBrowseGroupsResponse(flashId) {
+    return function(resp) {
+      var redirect = resp.headers.get('HX-Redirect');
+      if (redirect) {
+        window.location.href = redirect;
+        return;
+      }
+      resp.text().then(function(t) { document.getElementById(flashId).innerHTML = t; });
+    };
   }
   function keepView(params) {
     var here = new URLSearchParams(location.search);
@@ -292,7 +295,7 @@
     postForm('/relations/browse-groups/dissolve?kind=' + encodeURIComponent(kind), keepView(params), {
       hx: true,
       flashId: 'flash-relations',
-      onOK: onBrowseGroupsResponse,
+      onOK: onBrowseGroupsResponse('flash-relations'),
     });
   }
   // Only the dup and alt tabs render the merge button.
@@ -303,7 +306,7 @@
     if (sel.length < 2) return;
     if (mergeKind === 'alt') {
       showConfirm('Merge ' + sel.length + ' variant groups into one?', function() {
-        submitMerge(sel.map(function(cb) { return cb.value; }), '/relations/browse-groups/merge?kind=alt', null);
+        submitMerge(sel.map(function(cb) { return cb.value; }), '/relations/browse-groups/merge?kind=alt', null, 'flash-relations');
       }, '', 'Merge');
       return;
     }
@@ -311,6 +314,7 @@
     var choices = document.getElementById('merge-dup-choices');
     if (!dlg || !choices) return;
     choices.innerHTML = '';
+    clearSlots('merge-dup-flash');
     var defaultGroupID = null;
     sel.forEach(function(cb) {
       var card = cb.closest('.relations-card');
@@ -349,10 +353,10 @@
       if (ids.length < 2) return;
       var keep = dupForm.querySelector('input[name="keep_original_from"]:checked');
       submitMerge(ids, '/relations/browse-groups/merge?kind=dup',
-        keep ? keep.value : '');
+        keep ? keep.value : '', 'merge-dup-flash');
     });
   }
-  function submitMerge(ids, url, keepOriginalFrom) {
+  function submitMerge(ids, url, keepOriginalFrom, flashId) {
     var params = new URLSearchParams();
     ids.forEach(function(id) { params.append('group_id', id); });
     if (keepOriginalFrom !== null && keepOriginalFrom !== '') {
@@ -360,8 +364,8 @@
     }
     postForm(url, keepView(params), {
       hx: true,
-      flashId: 'flash-relations',
-      onOK: onBrowseGroupsResponse,
+      flashId: flashId,
+      onOK: onBrowseGroupsResponse(flashId),
     });
   }
 })();
