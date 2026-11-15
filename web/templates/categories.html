@@ -315,7 +315,10 @@ function doDeleteCategory(catId, action, targetCatId) {
       document.getElementById('delete-cat-dialog').close();
       window.location.href = window.location.pathname + window.location.search;
     },
-    onErr: function(t) { setFlashText(document.getElementById('del-cat-flash'), 'err', t); }
+    onErr: function(t) {
+      var inDialog = document.getElementById('delete-cat-dialog').open;
+      setFlashText(document.getElementById(inDialog ? 'del-cat-flash' : 'cat-flash'), 'err', t);
+    }
   });
 }
 </script>
