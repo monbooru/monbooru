@@ -359,6 +359,7 @@ function handlePagesGridKey(e) {
       e.preventDefault(); jumpGridCursor('last', cells); return true;
     case 'Enter':
     case 'o':
+      if (e.target.closest('a, button')) return false;
       var link = page.querySelector('.manga-page-cell.focused a');
       if (link && link.href) { window.location.href = link.href; return true; }
       return false;
