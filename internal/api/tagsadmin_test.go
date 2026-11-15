@@ -236,6 +236,9 @@ func TestCreateAlias_AnAliasOfAnotherTagIsAConflict(t *testing.T) {
 	if msg, _ := resp["error"].(string); !strings.Contains(msg, "general:first") {
 		t.Errorf("error = %q, want it to name general:first", msg)
 	}
+	if msg, _ := resp["error"].(string); !strings.Contains(msg, "/api/v1/tags/merge") || strings.Contains(msg, "page") {
+		t.Errorf("error = %q, want it to point at the merge route, not a page", msg)
+	}
 	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": first}, http.StatusCreated)
 }
 
