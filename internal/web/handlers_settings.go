@@ -33,6 +33,7 @@ type settingsData struct {
 	Config             *config.Config
 	Taggers            []tagger.TaggerStatus
 	TaggerRows         []taggerRow
+	TaggerBuilt        bool
 	ScheduleStatus     schedule.Status
 	ScheduleScope      scheduleScope
 	Stats              statsData
@@ -97,6 +98,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Config:             cfg,
 		Taggers:            taggers,
 		TaggerRows:         taggerRows,
+		TaggerBuilt:        tagger.Built(),
 		ScheduleStatus:     s.sched.Status(),
 		ScheduleScope:      scheduleScopeView(cfg, taggers, base.MonloaderPaired),
 		Stats:              s.gatherStats(),

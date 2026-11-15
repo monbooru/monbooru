@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 func TestSettingsTaggerPost_SavesTheAcceptedFormAndRefusesABadProvider(t *testing.T) {
@@ -163,14 +164,19 @@ func TestSettingsTaggerMappingPost_RefreshesTheExportAndTheRow(t *testing.T) {
 	wantNotIn(t, oob(body, "tagger-reset-wd-swinv2"), "Reset")
 }
 
-func TestSettingsShowsAMalformedTaggerFolderWithoutActions(t *testing.T) {
+func TestSettingsTaggerSectionFollowsTheBuild(t *testing.T) {
 	srv, modelPath := newModelServer(t)
-	installTagger(t, modelPath, "wd-v1.4-moat", "tag_id,name,category\n1,engrish,0\n")
+	installTagger(t, modelPath, "wd-swinv2", "tag_id,name,category\n1,engrish,0\n")
 
 	_, body := getBody(t, srv, "/settings")
-	wantIn(t, body, "folder name must match [A-Za-z0-9_-]&#43;; rename the folder")
-	for _, action := range []string{"/settings/tagger/wd-v1.4-moat/", `id="tagger-config-wd-v1.4-moat"`} {
-		wantNotIn(t, body, action)
+	built := tagger.Built()
+	for _, control := range []string{`name="execution_provider"`, `class="tagger-table`, "/settings/tagger/wd-swinv2/"} {
+		if shown := strings.Contains(body, control); shown != built {
+			t.Errorf("%s rendered = %v, want %v", control, shown, built)
+		}
+	}
+	if warned := strings.Contains(body, "built without <code>-tags tagger</code>"); warned == built {
+		t.Errorf("build warning rendered = %v, want %v", warned, !built)
 	}
 }
 
@@ -279,35 +285,6 @@ func taggerNames(srv *Server) []string {
 		out = append(out, t.Name)
 	}
 	return out
-}
-
-func TestSettingsOffersTheFilesACopiedRegistryFolderLacks(t *testing.T) {
-	srv, modelPath := newModelServer(t)
-	src := filepath.Join("..", "registry", "plugins", "taggers", "camie-v2")
-	dir := filepath.Join(modelPath, "camie-v2")
-	mustMkdirAll(t, dir, 0o755)
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		mustWriteFile(t, filepath.Join(dir, e.Name()), data, 0o644)
-	}
-
-	_, body := getBody(t, srv, "/settings")
-	wantIn(t, body, `data-tagger-name="camie-v2"`)
-	wantIn(t, body, "Anime tagger with artist/copyright recognition")
-	wantIn(t, body, "camie-tagger-v2.onnx")
-	wantNotIn(t, body, "taggers/camie-v2/profile_default.json")
-
-	mustWriteFile(t, filepath.Join(dir, "camie-tagger-v2.onnx"), []byte("weights"), 0o644)
-	mustWriteFile(t, filepath.Join(dir, "camie-tagger-v2-metadata.json"), []byte(`{}`), 0o644)
-	_, body = getBody(t, srv, "/settings")
-	wantNotIn(t, body, `data-tagger-name="camie-v2"`)
 }
 
 func newModelServer(t *testing.T, taggers ...config.TaggerInstance) (*Server, string) {

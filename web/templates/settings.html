@@ -522,8 +522,11 @@
     <div class="settings-section-header">
       <h3>Auto-Tagger</h3>
       <p class="field-hint">Settings for the local tagging models.</p>
-      {{template "partials/tagger_mode_badge.html" (dict "Provider" $cfg.Tagger.ExecutionProvider)}}
+      {{if .TaggerBuilt}}{{template "partials/tagger_mode_badge.html" (dict "Provider" $cfg.Tagger.ExecutionProvider)}}{{end}}
     </div>
+    {{if not .TaggerBuilt}}
+    <div class="flash flash-warn">This build has no auto-tagger: it was built without <code>-tags tagger</code>. Rebuild with <code>make build-tagger</code> to use it.</div>
+    {{else}}
     <div id="flash-tagger" data-action-flash></div>
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
@@ -824,6 +827,7 @@
     if (table) table.querySelectorAll('tbody tr').forEach(syncThreshRow);
   });
   </script>
+  {{end}}
   </section>
 
   <section id="relations" class="settings-section">

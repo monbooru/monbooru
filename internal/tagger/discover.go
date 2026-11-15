@@ -142,6 +142,8 @@ func EnabledTaggersForGallery(cfg *config.Config, gallery string) []TaggerStatus
 	return enabled
 }
 
+func Built() bool { return buildSupportsInference() }
+
 // present separates "no tagger set up", which hides the auto-tag
 // controls, from "set up but unusable", which only disables them;
 // reason is UnavailableReason's.
