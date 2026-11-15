@@ -1,0 +1,30 @@
+# The config the module starts from. It is copied to
+# /data/adb/monbooru/monbooru.toml on the first install and never overwritten
+# afterwards: delete that copy to start over from this one.
+#
+# Only what the phone needs is set here; everything else keeps the defaults
+# the binary ships with.
+
+default_gallery = "default"
+setup_done = true
+
+[[galleries]]
+  name = "default"
+  gallery_path = "/sdcard/Pictures/monbooru"
+
+[server]
+  # Loopback by default. Use 0.0.0.0:8455 to reach the library from another
+  # device on the network, and set base_url to match.
+  bind_address = "127.0.0.1:8455"
+  base_url = "http://localhost:8455"
+  name = "Monbooru"
+
+[paths]
+  data_path = "/data/adb/monbooru/data"
+  model_path = "/data/adb/monbooru/models"
+
+[gallery]
+  max_file_size_mb = 4096
+
+[log]
+  level = "info"

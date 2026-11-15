@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" data-app="monbooru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Monbooru</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="bar">
+    <div class="brand">
+      <h1>monbooru</h1>
+      <span class="ver" id="version">&mdash;</span>
+    </div>
+    <button class="icon" id="refresh" type="button" aria-label="Refresh status" title="Refresh">&#8635;</button>
+  </header>
+
+  <p class="banner" id="banner" hidden></p>
+
+  <section class="card" aria-labelledby="status-heading">
+    <h2 class="sr-only" id="status-heading">Status</h2>
+
+    <div class="chips">
+      <span class="chip" id="chip-run"><span class="pip"></span><span id="run-text">unknown</span></span>
+      <span class="chip">health <b id="health-text">&mdash;</b></span>
+      <span class="chip">pid <b id="pid-text">&mdash;</b></span>
+    </div>
+
+    <div class="addr">
+      <label for="url">address</label>
+      <input id="url" type="text" readonly spellcheck="false" autocomplete="off" value="">
+      <button class="ghost" id="copy" type="button">Copy</button>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="start" type="button">Start</button>
+      <button id="stop" type="button">Stop</button>
+      <button class="danger" id="restart" type="button">Restart</button>
+    </div>
+
+    <p class="notice" id="notice" role="status" aria-live="polite" hidden></p>
+  </section>
+
+  <section class="card" aria-labelledby="log-heading">
+    <div class="log-head">
+      <h2 id="log-heading">log</h2>
+      <label class="toggle"><input type="checkbox" id="follow" checked> follow</label>
+      <button class="ghost" id="clear" type="button">clear view</button>
+    </div>
+    <pre id="log" tabindex="0">(nothing yet)</pre>
+  </section>
+
+  <details class="card">
+    <summary>Open the gallery</summary>
+    <p>The library is a web app of its own, so it opens in your browser rather than in this page. Copy the address above; it works on this phone, and on other devices once <code>server.bind_address</code> is not a loopback one.</p>
+  </details>
+
+  <details class="card">
+    <summary>Configuration</summary>
+    <p><code>/data/adb/monbooru/monbooru.toml</code> holds the gallery path, the port and the data directory. Edit it, then Restart. Set <code>server.bind_address = "0.0.0.0:8455"</code> and <code>server.base_url</code> to reach the library from other devices.</p>
+  </details>
+
+  <details class="card">
+    <summary>Uninstalling</summary>
+    <p>Removing the module stops the server and leaves <code>/data/adb/monbooru</code> alone: the gallery database, the config and the log stay where they are.</p>
+  </details>
+
+</main>
+</body>
+</html>
