@@ -23,6 +23,12 @@ existing config is left alone.
 The server starts on boot. To start it now, open the module's page and press
 Start, or tap Action, which toggles it.
 
+The page does not hold the server itself: Android kills the manager's whole
+cgroup when the app goes away, and anything the page spawns goes with it. So
+the boot service starts a supervisor outside the manager, the page only writes
+`wanted`, and the supervisor starts, restarts and stops the server to match.
+Start from the page, close the manager, and the library keeps serving.
+
 ## Where things live
 
 | Path | What |
@@ -33,6 +39,8 @@ Start, or tap Action, which toggles it.
 | `/data/adb/monbooru/models/` | ONNX models, if you later switch to a tagger build |
 | `/data/adb/monbooru/bin/` | `ffmpeg` and `ffprobe`, optional; this directory is first on the server's `PATH` |
 | `/data/adb/monbooru/log/monbooru.log` | the server's output; rotated to `.log.1` past 1 MiB |
+| `/data/adb/monbooru/wanted` | `on` or `off`: what the page last asked for, so a reboot keeps it |
+| `/data/adb/monbooru/log/supervisor.log` | what the supervisor did while nobody was looking |
 | `/sdcard/Pictures/monbooru/` | the default gallery |
 
 ## Config

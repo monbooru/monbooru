@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# Late-start service: wait for the parts the library needs, then hand the
-# server to ctl.sh, which owns the process from there on.
+# Late-start service: wait for the parts the library needs, then hand over to
+# ctl.sh's supervisor. This runs from ksud at boot, so the supervisor it starts
+# is outside the manager and keeps the server alive after the app is closed.
 
 case "$0" in
 */*) MODDIR=${0%/*} ;;
@@ -29,4 +30,4 @@ storage_ready() { [ -d /sdcard/Pictures ]; }
 wait_for 300 booted || echo "service.sh: boot flag never set, starting anyway" >&2
 wait_for 120 storage_ready || echo "service.sh: /sdcard not mounted, starting anyway" >&2
 
-sh "$MODDIR/ctl.sh" start
+sh "$MODDIR/ctl.sh" boot

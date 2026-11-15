@@ -53,13 +53,14 @@ cp packaging/kernelsu/webroot/index.html packaging/kernelsu/webroot/style.css \
 # The manager's WebView runs as the app's own uid, so the page and its assets
 # have to be world-readable and the scripts executable whatever the checkout's
 # umask was.
-chmod 0644 "$dir"/*.toml "$dir"/*.prop "$dir"/webroot/*
+chmod 0644 "$dir"/*.toml "$dir"/webroot/*
 chmod 0755 "$dir/bin/monbooru" "$dir"/*.sh
 
 sed -e "s|@VERSION@|$VERSION|g" \
 	-e "s|@VERSIONCODE@|$code|g" \
 	-e "s|@UPDATEJSON@|$update_base/kernelsu-update.json|g" \
 	packaging/kernelsu/module.prop.in >"$dir/module.prop"
+chmod 0644 "$dir/module.prop"
 grep -qx "id=$APP" "$dir/module.prop" || {
 	echo "module.prop lost its id" >&2
 	exit 1

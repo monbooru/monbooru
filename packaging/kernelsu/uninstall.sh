@@ -9,5 +9,5 @@ esac
 
 DATA=${MONBOORU_MODULE_DATA:-/data/adb/monbooru}
 
-sh "$MODDIR/ctl.sh" stop >/dev/null 2>&1
+sh "$MODDIR/ctl.sh" halt >/dev/null 2>&1
 echo "monbooru stopped; $DATA is kept"
