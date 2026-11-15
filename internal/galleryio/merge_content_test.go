@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 func sha256OfBytes(t *testing.T, b []byte) string {
@@ -368,6 +370,28 @@ func TestMergeGallery_Zip_ACompatArchiveMergedTwiceLeavesOneCopy(t *testing.T) {
 	}
 	if len(pngs) != 1 {
 		t.Errorf("files = %v, want one copy", pngs)
+	}
+}
+
+func TestMergeGallery_LogsTheSummaryTheFlashShows(t *testing.T) {
+	stock := newGallery(t, t.TempDir(), "stock")
+	upload := zipOf(t, [][2]string{{"pic.png", string(makeUniquePNG(t, 94))}, {"pic.png.txt", "blue_sky\n"}})
+	if _, err := MergeGallery(context.Background(), libGallery(stock), "zip", bytes.NewReader(upload), testMaxFileSizeMB, nil); err != nil {
+		t.Fatalf("MergeGallery: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	prev := logx.Get()
+	logx.Set("info")
+	t.Cleanup(func() { logx.Set(prev) })
+	res, err := MergeGallery(context.Background(), libGallery(stock), "zip", bytes.NewReader(upload), testMaxFileSizeMB, nil)
+	if err != nil {
+		t.Fatalf("MergeGallery: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, res.Summary()) {
+		t.Errorf("log = %q, want the summary %q", got, res.Summary())
 	}
 }
 

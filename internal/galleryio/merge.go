@@ -499,8 +499,7 @@ func MergeGallery(ctx context.Context, cx *library.Gallery, format string, uploa
 		mergeErr = fmt.Errorf("unknown merge format %q", format)
 	}
 	if mergeErr == nil {
-		logx.Infof("gallery: merged into %q (format=%s): +%d %s, %d tagged, %d skipped",
-			cx.Name, format, res.Added, models.Plural(res.Added, "image", "images"), res.Tagged, res.Skipped)
+		logx.Infof("gallery: merged into %q (format=%s): %s", cx.Name, format, res.Summary())
 	}
 	return res, mergeErr
 }
