@@ -272,7 +272,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 		requests = append(requests, BackendImageRequest{
 			ID:            imageID,
 			FramePaths:    framePaths,
-			MangaProgress: fileType == "cbz" && len(framePaths) > 1,
+			MangaProgress: fileType == models.FileTypeCBZ && len(framePaths) > 1,
 			FileType:      fileType,
 		})
 		cleanups = append(cleanups, cleanup)
@@ -296,8 +296,8 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 }
 
 func framesForTagging(canonPath, fileType, mangaCacheDir string, imageID int64) ([]string, func()) {
-	switch fileType {
-	case "mp4", "webm":
+	switch {
+	case gallery.IsVideoType(fileType):
 		positions := []float64{0.10, 0.30, 0.50, 0.70, 0.90}
 		frames, _ := gallery.ExtractVideoFrames(canonPath, os.TempDir(), positions)
 		cleanup := func() {
@@ -306,13 +306,13 @@ func framesForTagging(canonPath, fileType, mangaCacheDir string, imageID int64) 
 			}
 		}
 		return frames, cleanup
-	case "avif", "jxl":
+	case gallery.IsFFmpegStill(fileType):
 		frame, err := gallery.RenderStillFrame(canonPath, os.TempDir(), gallery.ViewMaxDim)
 		if err != nil {
 			return nil, func() {}
 		}
 		return []string{frame}, func() { _ = os.Remove(frame) }
-	case "cbz":
+	case fileType == models.FileTypeCBZ:
 		archive, err := gallery.OpenManga(canonPath)
 		if err != nil {
 			logx.Warnf("tagger: open manga %q: %v", canonPath, err)
