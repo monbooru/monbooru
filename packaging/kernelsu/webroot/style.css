@@ -231,8 +231,10 @@ button.icon {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  /* A wrapped line is two lines of log that look like two entries, so the
+     panel keeps each line whole and scrolls sideways instead. */
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 #log:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
