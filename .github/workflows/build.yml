@@ -238,6 +238,32 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  kernelsu:
+    name: KernelSU module (arm64)
+    if: inputs.binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        run: |
+          ./packaging/install-go.sh "${GO_VERSION}" "${GO_SHA256_LINUX_AMD64}"
+
+      - name: Build
+        run: ./packaging/build-kernelsu.sh
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: binaries-kernelsu
+          path: dist/kernelsu/*
+          if-no-files-found: error
+
   bundled-linux:
     name: Bundled Linux (${{ matrix.arch }})
     if: inputs.binaries
