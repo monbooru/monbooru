@@ -619,6 +619,9 @@ func TestFolderCookieKeys_ReadsWhatMainJSWrites(t *testing.T) {
 		{"__tree__,a%20b,c%2Cd", []string{"__tree__", "a b", "c,d"}},
 		{"a%2520b%2Cc%252Cd", []string{"a b", "c,d"}},
 		{"%E6%97%A5%E6%9C%AC", []string{"日本"}},
+		{",", nil},
+		{",Vacation%2C%202019", []string{"Vacation, 2019"}},
+		{",100%25%20done", []string{"100% done"}},
 		{"bad%zz,a", nil},
 	} {
 		r := httptest.NewRequest("GET", "/", nil)

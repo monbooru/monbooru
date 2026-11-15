@@ -798,8 +798,9 @@ func sidebarCollapsed(r *http.Request) bool {
 	return session.FromCookie(r, sidebarCookieName) == "collapsed"
 }
 
-// main.js writes it: each key encoded once and comma-joined. A value with
-// no comma of its own was encoded twice and reads once more.
+// main.js writes it: each key encoded once and comma-joined behind a
+// leading comma. A value with no comma of its own was encoded twice and
+// reads once more.
 const folderCookieName = "monbooru_folders"
 
 func folderCookieKeys(r *http.Request) map[string]bool {

@@ -2299,8 +2299,9 @@ function revealSidebarFor(el) {
   if (el && el.closest && el.closest('#sidebar')) setSidebarCollapsed(false);
 }
 
-// Each path is encoded once and the list joined with commas; a value
-// written encoded twice has no comma of its own and is read once more.
+// Each path is encoded once and the list joined with commas behind a
+// leading one; a value written encoded twice has no comma of its own and
+// is read once more.
 function getFolderCookie() {
   var m = document.cookie.match(/monbooru_folders=([^;]*)/);
   if (!m) return new Set();
@@ -2312,7 +2313,7 @@ function getFolderCookie() {
 }
 
 function setFolderCookie(set) {
-  document.cookie = 'monbooru_folders=' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
+  document.cookie = 'monbooru_folders=,' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
 }
 
 function toggleFolderItem(btn, targetId, path) {
