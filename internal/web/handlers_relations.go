@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -225,8 +226,8 @@ func (s *Server) imageRelationsPage(w http.ResponseWriter, r *http.Request) {
 		nextOriginal = next
 	}
 	titleName := filepath.Base(img.CanonicalPath)
-	if parent := filepath.Base(filepath.Dir(img.CanonicalPath)); parent != "" && parent != "." && parent != "/" {
-		titleName = parent + "/" + titleName
+	if img.FolderPath != "" {
+		titleName = path.Base(img.FolderPath) + "/" + titleName
 	}
 	back := parseBackContext(r)
 	pageData := relationsImagePageData{
@@ -346,15 +347,15 @@ func collectionWithSelf(siblings []collectionSibling, self models.Image) []colle
 }
 
 // markCollectionCuts puts what the cap left out of each collection on its
-// last shown tile.
+// last shown tile, which is the image's own when it sorts past the cap.
 func markCollectionCuts(rows []collectionSibling) {
 	shown, total, last := map[string]int{}, map[string]int{}, map[string]int{}
 	for i, r := range rows {
 		if r.total > 0 {
 			shown[r.Series]++
 			total[r.Series] = r.total
-			last[r.Series] = i
 		}
+		last[r.Series] = i
 	}
 	for name, n := range total {
 		if more := n - shown[name]; more > 0 {

@@ -400,6 +400,37 @@ func TestImageRelationsPage_CapsEachCollectionOnItsOwn(t *testing.T) {
 	}
 }
 
+func TestImageRelationsPage_KeepsTheImageBeforeTheMoreLinkPastTheCap(t *testing.T) {
+	srv := newTestServer(t)
+	ids := insertRankRows(t, srv, "collwin", 2*collectionSiblingCap)
+	selfAt := collectionSiblingCap + 150
+	self := ids[selfAt]
+	for i, id := range ids {
+		if i == selfAt {
+			mustSetHome(t, srv.db(), id, "a", &selfAt)
+			continue
+		}
+		mustExec(t, srv.db().Write, `INSERT INTO image_collections (image_id, name, position) VALUES (?, 'a', ?)`, id, i)
+	}
+
+	w := do(srv, "GET", "/images/"+strconv.FormatInt(self, 10)+"/relations")
+	mustCode(t, w, http.StatusOK)
+	body := w.Body.String()
+	tile := strings.Index(body, fmt.Sprintf(`href="/images/%d" class="manga-page-link relations-tree-current"`, self))
+	more := strings.Index(body, fmt.Sprintf("+%d more in a", collectionSiblingCap-1))
+	if tile < 0 || more < 0 || more < tile {
+		t.Errorf("own tile at %d, +N more at %d: want the link after the tile", tile, more)
+	}
+}
+
+func TestImageRelationsPage_TitlesARootFileWithoutTheDiskFolder(t *testing.T) {
+	srv := newTestServer(t)
+	id := seedImage(t, srv, "root.png", 8, 8)
+
+	body := do(srv, "GET", "/images/"+strconv.FormatInt(id, 10)+"/relations").Body.String()
+	wantIn(t, body, "<title>Relations - root.png - ")
+}
+
 func TestImageRelationsPage_ListsEverySource(t *testing.T) {
 	srv := newTestServer(t)
 	rel := srv.active().RelationsSvc
