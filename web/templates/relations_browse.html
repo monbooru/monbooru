@@ -154,6 +154,7 @@
           {{template "partials/relations_card_thumb.html" (dict "ID" $source "ActiveGallery" $.ActiveGallery "ExtraClass" "relations-card-summary-thumb" "Title" (printf "Image %d - added %s" $source (index $card.MemberIngestedAt $source)))}}
           <span class="relations-card-summary-meta">tree, {{len .Members}} images</span>
         </summary>
+        {{$deep := gt (len .Members) 2}}
         {{with .Graph}}
         {{$g := .}}
         <div class="deriv-graph" style="--deriv-cols:{{$g.Cols}}">
@@ -163,8 +164,10 @@
             {{$node := .}}
             <div class="deriv-cell">
               {{template "partials/relations_card_thumb.html" (dict "ID" .ID "ActiveGallery" $.ActiveGallery "Title" (printf "Image %d - added %s" .ID (index $card.MemberIngestedAt .ID)) "Date" (index $card.MemberIngestedAt .ID))}}
+              {{if $deep}}
               {{range $node.Sources}}
               {{template "relation_remove_form" dict "Confirm" "Unlink this derivative edge and queue the pair for the session?" "OK" "Review again" "Label" (printf "review again #%d" .) "ExtraClass" "relations-inline-action" "Edge" (printf "%d-%d" . $node.ID) "Fields" (dict "type" "review-again" "kind" "derivative" "a" . "b" $node.ID)}}
+              {{end}}
               {{end}}
             </div>
             {{end}}
