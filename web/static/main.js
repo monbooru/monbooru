@@ -1949,7 +1949,7 @@ document.body.addEventListener('htmx:oobAfterSwap', function(e) {
     var prefix = dlg.id.replace(/-dialog$/, '');
     var scopeEl = document.getElementById(prefix + '-scope');
     if (scopeEl && scopeEl.value === 'search') {
-      scopeCount('search', document.getElementById(prefix + '-count'), document.getElementById(prefix + '-noun'));
+      scopeCount('search', document.getElementById(dlg.dataset.countId || prefix + '-count'), document.getElementById(prefix + '-noun'));
     }
   });
 });
@@ -2837,7 +2837,9 @@ function openBatchDialog(prefix, scope, opts) {
   // flipping here lets each post the search.
   if (scope === 'selection' && selectAllMatching) scope = 'search';
   if (scope === 'selection' && pickedIDs.length === 0) return;
-  var n = scopeCount(scope, document.getElementById(opts.countId || prefix + '-count'),
+  var dlg = document.getElementById(prefix + '-dialog');
+  dlg.dataset.countId = opts.countId || prefix + '-count';
+  var n = scopeCount(scope, document.getElementById(dlg.dataset.countId),
                      document.getElementById(prefix + '-noun'));
   if (opts.requireMatches && scope === 'search' && n === 0) return;
   document.getElementById(prefix + '-scope').value = scope;
@@ -2851,7 +2853,6 @@ function openBatchDialog(prefix, scope, opts) {
     if (el.tagName === 'INPUT') el.value = ''; else el.innerHTML = '';
   });
   clearSlots(prefix + '-flash');
-  var dlg = document.getElementById(prefix + '-dialog');
   if (opts.beforeShow) opts.beforeShow();
   dlg.showModal();
   var focusEl = opts.focusId ? document.getElementById(opts.focusId) : null;

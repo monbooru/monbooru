@@ -388,8 +388,9 @@ function openBatchPlaceDialog(scope) {
     beforeShow: function() {
       document.getElementById('batch-place-folder').value = '{folder}';
       delete document.getElementById('batch-place-preview').dataset.rows;
-      var n = +document.getElementById('batch-place-count').textContent;
-      document.getElementById('batch-place-check').textContent = n === 1
+      var n = scopeCount(document.getElementById('batch-place-scope').value);
+      document.getElementById('batch-place-check').textContent = n === null
+        ? 'check every image for name clashes' : n === 1
         ? 'check the image for a name clash' : 'check all ' + n + ' images for name clashes';
     },
     focusId: 'batch-place-name'
