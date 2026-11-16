@@ -333,6 +333,32 @@ func TestAddSourceMembership_EmptyURLKeepsStoredOne(t *testing.T) {
 	}
 }
 
+func TestSetPrimarySource_RelabelCarriesThePulledAnnotations(t *testing.T) {
+	database := newCollectionsTestDB(t)
+	id := insertImage(t, database, false)
+	_ = AddSourceMembership(database, id, "danbooru", "111", "https://d/111")
+	box := []models.Annotation{{X: 1, Y: 2, W: 3, H: 4, Body: "box"}}
+	if err := ReplaceSourceAnnotations(database, id, "danbooru", "111", box); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetPrimarySource(database, id, "gelbooru", "https://g/111"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceSourceAnnotations(database, id, "gelbooru", "111", box); err != nil {
+		t.Fatal(err)
+	}
+	if anns, _ := AnnotationsForImage(database, id); len(anns) != 1 || anns[0].Site != "gelbooru" {
+		t.Fatalf("annotations after relabel and re-pull = %+v, want one keyed to gelbooru", anns)
+	}
+	if err := RemoveSourceMembership(database, id, "gelbooru", "111"); err != nil {
+		t.Fatal(err)
+	}
+	if anns, _ := AnnotationsForImage(database, id); len(anns) != 0 {
+		t.Errorf("annotations after removing the only origin = %+v, want none", anns)
+	}
+}
+
 func TestSetPrimarySource_RefusesCollidingIdentity(t *testing.T) {
 	database := newCollectionsTestDB(t)
 	id := insertImage(t, database, false)

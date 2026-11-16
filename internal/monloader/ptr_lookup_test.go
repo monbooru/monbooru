@@ -22,6 +22,7 @@ func TestPTRSpellingStems(t *testing.T) {
 
 		{"1girl", []string{"1girl"}},
 		{"copyright:ao", nil},
+		{"character:初音_ミク", []string{"character:初音_ミク"}},
 	} {
 		got := ptrSpellingStems(tc.in)
 		if len(got) != len(tc.want) {

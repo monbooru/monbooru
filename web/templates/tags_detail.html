@@ -57,7 +57,7 @@
     {{if .Tag.Rejected}}· dropped on arrival <strong>{{.Tag.RejectedDrops}}</strong>{{end}}
   </p>
 
-  <div id="tag-flash" data-action-flash></div>
+  <div id="tag-flash" data-action-flash role="status"></div>
 
   {{with .SameName}}
   <section class="tag-detail-section" id="tag-same-name">

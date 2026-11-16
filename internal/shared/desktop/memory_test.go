@@ -1,9 +1,9 @@
-package web
+package desktop
 
 import "testing"
 
-func TestMemStatsRowsNestTruthfully(t *testing.T) {
-	m := gatherMemStats()
+func TestMemoryRowsNestTruthfully(t *testing.T) {
+	m := ReadMemory()
 	if m.GoInuse < m.HeapAlloc {
 		t.Errorf("Go heap (live objects) %d is not inside Go runtime (in use) %d", m.HeapAlloc, m.GoInuse)
 	}

@@ -115,8 +115,25 @@ func TestWriteCollectionCBZ_AVIFAndJPEGXLMembers(t *testing.T) {
 	}
 }
 
+func TestWriteCollectionCBZ_GIFMembers(t *testing.T) {
+	src, dstDir := t.TempDir(), t.TempDir()
+	members := []CBZMember{
+		writeMember(t, src, "a.gif", models.FileTypeGIF, "one"),
+		writeMember(t, src, "b.gif", models.FileTypeGIF, "two"),
+	}
+	dst := filepath.Join(dstDir, "out.cbz")
+	if _, _, err := WriteCollectionCBZ(context.Background(), dst, members, "Set", nil); err != nil {
+		t.Fatal(err)
+	}
+	m := mustOpenManga(t, dst)
+	defer func() { _ = m.Close() }()
+	if len(m.Pages) != 2 || m.Pages[0].OriginalName != "0001.gif" || m.Pages[1].OriginalName != "0002.gif" {
+		t.Errorf("pages = %+v, want 0001.gif and 0002.gif", m.Pages)
+	}
+}
+
 func TestWriteCollectionCBZVetoesNonImages(t *testing.T) {
-	for _, ft := range []string{models.FileTypeGIF, models.FileTypeMP4, models.FileTypeWEBM, models.FileTypeCBZ} {
+	for _, ft := range []string{models.FileTypeMP4, models.FileTypeWEBM, models.FileTypeCBZ} {
 		t.Run(ft, func(t *testing.T) {
 			src, dstDir := t.TempDir(), t.TempDir()
 			members := []CBZMember{

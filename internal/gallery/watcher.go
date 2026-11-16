@@ -592,7 +592,7 @@ func (w *Watcher) promoteSurvivingCopy(id int64, gonePath string) bool {
 	}
 	for _, c := range copies[id] {
 		p := c.Path
-		if w.boundary().Check(p) != nil {
+		if leftOut(w.boundary(), p) {
 			continue
 		}
 		if _, err := os.Stat(p); err != nil {

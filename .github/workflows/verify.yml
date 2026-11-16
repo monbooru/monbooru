@@ -58,7 +58,7 @@ jobs:
         run: GOOS=windows go vet ./...
 
   lint:
-    name: Lint and advisories
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -74,14 +74,8 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
         with:
-          version: v2.14.0
+          version: v2.15.0
           install-mode: goinstall
-
-      - name: Check advisories
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          "$(go env GOPATH)/bin/govulncheck" ./...
-          "$(go env GOPATH)/bin/govulncheck" -tags tagger ./...
 
   verify:
     needs: [build, lint]

@@ -987,6 +987,45 @@ func TestSync_DetectsSameSizeInPlaceEdit(t *testing.T) {
 	}
 }
 
+func TestInPlaceEdit_DropsTheCopiesOfTheOldBytes(t *testing.T) {
+	edit := map[string]func(*testing.T, *db.DB, *syncEnv, string){
+		"sync": func(t *testing.T, database *db.DB, env *syncEnv, _ string) { env.sync(t, database) },
+		"ingest": func(t *testing.T, database *db.DB, env *syncEnv, path string) {
+			mustIngest(t, database, env.galleryPath, env.thumbnailsPath, path, "")
+		},
+	}
+	for name, apply := range edit {
+		t.Run(name, func(t *testing.T) {
+			database, env, galleryDir := setupSyncTest(t)
+			path := createTestPNGFile(t, galleryDir, "edit.png")
+			copyPath := filepath.Join(galleryDir, "z-copy.png")
+			mustWriteFile(t, copyPath, mustReadFile(t, path), 0o644)
+			env.sync(t, database)
+			if n := countRows(t, database, "image_paths WHERE path = ? AND is_canonical = 0", copyPath); n != 1 {
+				t.Fatalf("%s is not listed as a copy before the edit", copyPath)
+			}
+
+			info := mustStat(t, path)
+			overwrite := mustReadFile(t, path)
+			for i := 8; i < len(overwrite); i++ {
+				overwrite[i] = byte((i * 7) ^ 0x5a)
+			}
+			mustWriteFile(t, path, overwrite, 0o644)
+			future := info.ModTime().Add(2 * time.Second)
+			mustChtimes(t, path, future, future)
+			apply(t, database, env, path)
+
+			if n := countRows(t, database, "image_paths WHERE is_canonical = 0"); n != 0 {
+				t.Errorf("copies after the edit = %d, want 0: the copy still holds the old bytes", n)
+			}
+			env.sync(t, database)
+			if n := countRows(t, database, "images WHERE canonical_path = ?", copyPath); n != 1 {
+				t.Errorf("the old copy is the canonical file of %d images after a sync, want 1", n)
+			}
+		})
+	}
+}
+
 func TestInPlaceEdit_AFailedThumbnailClearsThePhash(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	path := createTestPNGFileSize(t, galleryDir, "rehash.png", 10, 10)
@@ -1583,6 +1622,62 @@ func TestSync_ARepointWithTheOldCopyLeftMovesTheRowOnce(t *testing.T) {
 	}
 	if n := countRows(t, database, "images WHERE is_missing = 0 AND canonical_path = ?", filepath.Join(moved, "kept.png")); n != 1 {
 		t.Error("the image is not shown at the new root")
+	}
+}
+
+func TestSync_ARepointDropsTheCopiesLeftInTheOldFolder(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	a := createTestPNGFile(t, galleryDir, "a.png")
+	mustWriteFile(t, filepath.Join(galleryDir, "b.png"), mustReadFile(t, a), 0o644)
+	env.sync(t, database)
+	moved := filepath.Join(filepath.Dir(galleryDir), "new-disk")
+	mustMkdirAll(t, moved, 0o755)
+	for _, name := range []string{"a.png", "b.png"} {
+		mustWriteFile(t, filepath.Join(moved, name), mustReadFile(t, a), 0o644)
+	}
+	env.galleryPath = moved
+
+	env.sync(t, database)
+	env.sync(t, database)
+
+	if n := countRows(t, database, "image_paths WHERE path LIKE ?", galleryDir+string(filepath.Separator)+"%"); n != 0 {
+		t.Errorf("paths left in the old folder = %d, want 0", n)
+	}
+}
+
+func TestSync_AFileFinishedAfterTheWalkStoresItsFinalHash(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	full := mustReadFile(t, createTestPNGFile(t, t.TempDir(), "full.png"))
+	path := filepath.Join(galleryDir, "landing.png")
+	mustWriteFile(t, path, full[:len(full)/2], 0o644)
+	finished := false
+
+	progress := func(_, _ int, msg string) {
+		if !finished && strings.HasPrefix(msg, "Phase 2") {
+			finished = true
+			mustWriteFile(t, path, full, 0o644)
+		}
+	}
+
+	if _, err := Sync(context.Background(), boundHandle(database, env.boundary(), env.thumbnailsPath), env.maxFileSizeMB, env.naming, progress, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want, err := HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMD5, err := Md5File(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sha, md5 string
+	var size int64
+	if err := database.Read.QueryRow(`SELECT sha256, md5, file_size FROM images WHERE canonical_path = ?`, path).Scan(&sha, &md5, &size); err != nil {
+		t.Fatal(err)
+	}
+	if sha != want || md5 != wantMD5 || size != int64(len(full)) {
+		t.Errorf("row = (%s, %s, %d), want the finished file's (%s, %s, %d)", sha[:12], md5, size, want[:12], wantMD5, len(full))
 	}
 }
 

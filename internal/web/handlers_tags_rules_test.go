@@ -14,6 +14,8 @@ import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/galleryio"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/monloader"
+	"github.com/monbooru/monbooru/internal/peer"
 )
 
 func rulesStub(t *testing.T, body string) *httptest.Server {
@@ -179,6 +181,33 @@ func TestTagRulesPanel_NamesAMonloaderTooOldForRules(t *testing.T) {
 	wantIn(t, body, "monloader too old")
 	wantIn(t, body, "monloader v1.14.0 or newer shows site lanes")
 	wantNotIn(t, body, "unreachable")
+}
+
+func TestTagRulesPanel_NamesWhyAPairedMonloaderDrawsNoSiteLanes(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		paused      bool
+		conn        string
+		badge, lane string
+	}{
+		{"paused", true, "", "monloader paused", "paused, no site lanes"},
+		{"down", false, peer.ConnDown, "monloader unreachable", "unreachable, no site lanes"},
+		{"rejected", false, peer.ConnRejected, "monloader unreachable", "unreachable, no site lanes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			pairPeer(srv, "monloader")
+			srv.cfg.Monloader.Paused = tc.paused
+			srv.ml.Cache.Store(monloader.Status{Conn: tc.conn})
+			tag := mustTag(t, srv.active().TagSvc, "solo", srv.active().GeneralCategoryID)
+
+			body := do(srv, "GET", fmt.Sprintf("/tags/%d/rules", tag.ID), hxRules).Body.String()
+			wantIn(t, body, tc.badge)
+			wantIn(t, body, tc.lane)
+			wantNotIn(t, body, "not paired")
+			wantNotIn(t, body, "[pair…]")
+		})
+	}
 }
 
 func TestTagRulesPanel_DrawsTheAliasBand(t *testing.T) {

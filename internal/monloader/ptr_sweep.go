@@ -228,6 +228,7 @@ func (l *Link) PTRTagSweep(svc *tags.Service, ids []int64, as string) {
 				break
 			}
 			if err != nil {
+				ptrFanOut(ctx, svc, fanOutParents)
 				l.jobs.Fail("PTR lookup failed: " + err.Error())
 				return
 			}
@@ -262,22 +263,17 @@ func (l *Link) PTRTagSweep(svc *tags.Service, ids []int64, as string) {
 			}
 		}
 		if cands, err = ptrLookupCands(svc, next); err != nil {
+			ptrFanOut(ctx, svc, fanOutParents)
 			l.jobs.Fail(err.Error())
 			return
 		}
 		total += len(cands)
 	}
 
-	// Inline, since the propagation job cannot start while this sweep holds
-	// the runner; one pass per parent applies its full implied closure.
-	for parentID := range fanOutParents {
-		if ctx.Err() != nil {
-			cancelled = true
-			break
-		}
-		if _, err := svc.PropagateImplication(ctx, parentID, nil); err != nil {
-			logx.Warnf("ptr lookup fan-out for tag %d: %v", parentID, err)
-		}
+	// A cancel stops quickly: the next sweep finds the edges unapplied.
+	if !cancelled {
+		ptrFanOut(ctx, svc, fanOutParents)
+		cancelled = len(fanOutParents) > 0 && ctx.Err() != nil
 	}
 
 	msg := fmt.Sprintf("PTR: added %d %s and %d %s across %d %s", aliases, models.Plural(aliases, "alias", "aliases"),
@@ -302,7 +298,49 @@ func (l *Link) PTRTagSweep(svc *tags.Service, ids []int64, as string) {
 		l.jobs.Complete(fmt.Sprintf("PTR lookup stopped at %d/%d: the PTR became unavailable on monloader. %s", processed, total, msg))
 		return
 	}
-	l.jobs.Finish(nil, cancelled, fmt.Sprintf("PTR lookup cancelled (%d/%d processed)", processed, total), msg)
+	cancelMsg := fmt.Sprintf("PTR lookup cancelled (%d/%d processed)", processed, total)
+	if len(fanOutParents) > 0 {
+		cancelMsg += "; run it again to apply its implications"
+	}
+	l.jobs.Finish(nil, cancelled, cancelMsg, msg)
+}
+
+// Inline, since the propagation job cannot start while the sweep holds the
+// runner; one pass per parent applies its full implied closure. A parent
+// stays in the set until its pass completes.
+func ptrFanOut(ctx context.Context, svc *tags.Service, parents map[int64]struct{}) {
+	for parentID := range parents {
+		if ctx.Err() != nil {
+			return
+		}
+		p, err := svc.PropagateImplication(ctx, parentID, nil)
+		if err != nil {
+			logx.Warnf("ptr lookup fan-out for tag %d: %v", parentID, err)
+			continue
+		}
+		if !p.Cancelled {
+			delete(parents, parentID)
+		}
+	}
+}
+
+// An edge that already existed still fans out while some carrier of the
+// parent lacks the child, which a failed or cancelled sweep leaves behind.
+func markFanOut(svc *tags.Service, fanOutParents map[int64]struct{}, parentID, impliedID int64, isNew bool) {
+	if _, ok := fanOutParents[parentID]; ok {
+		return
+	}
+	if !isNew {
+		unapplied, err := svc.ImplicationUnapplied(parentID, impliedID)
+		if err != nil {
+			logx.Warnf("ptr lookup fan-out probe for tag %d: %v", parentID, err)
+			return
+		}
+		if !unapplied {
+			return
+		}
+	}
+	fanOutParents[parentID] = struct{}{}
 }
 
 func ptrResolve(svc *tags.Service, name string) (catID int64, normalized string, ok bool, err error) {
@@ -382,8 +420,8 @@ func applyPTRTagInfo(svc *tags.Service, tagID int64, info contract.PTRTagInfo, s
 		}
 		if isNew {
 			implications++
-			fanOutParents[tagID] = struct{}{}
 		}
+		markFanOut(svc, fanOutParents, tagID, implied.ID, isNew)
 	}
 	if pullImpliedBy {
 		for _, name := range info.ImpliedBy {
@@ -414,8 +452,8 @@ func applyPTRTagInfo(svc *tags.Service, tagID int64, info contract.PTRTagInfo, s
 			}
 			if isNew {
 				implications++
-				fanOutParents[parent.ID] = struct{}{}
 			}
+			markFanOut(svc, fanOutParents, parent.ID, tagID, isNew)
 		}
 	}
 	retired = syncPTRStaleness(svc, tagID, freshAliases, freshImplied)

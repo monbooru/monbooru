@@ -17,11 +17,6 @@ func (s *Service) AddTagToImage(imageID, tagID int64, isAuto bool, confidence *f
 	return err
 }
 
-func (s *Service) AddTagsToImageFromTagger(imageID int64, tagIDs []int64, isAuto bool, taggerName string) error {
-	_, err := s.AddTagsToImageFromTaggerConf(imageID, tagIDs, nil, isAuto, taggerName)
-	return err
-}
-
 // AddTagsToImageFromTaggerConf pairs confs[i] with tagIDs[i]; a nil or
 // missing entry stores NULL. added counts the rows that were new.
 func (s *Service) AddTagsToImageFromTaggerConf(imageID int64, tagIDs []int64, confs []*float64, isAuto bool, taggerName string) (added int, err error) {

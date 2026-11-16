@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"net/url"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"github.com/monbooru/monbooru/internal/registry"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
+	webFS "github.com/monbooru/monbooru/web"
 )
 
 const builtinLightDir = registry.LightThemeDir
@@ -43,6 +45,13 @@ var builtinThemes = []webui.Theme{
 }
 
 var builtinArt = map[string]string{"dark": "/static/", "light": "/static/light/"}
+
+var ownScheme = func() string {
+	sheet, _ := fs.ReadFile(webFS.FS, "static/main.css")
+	return webui.SheetScheme(sheet, "")
+}()
+
+func themeScheme(e webui.Theme) string { return webui.ThemeScheme(e, registry.FS, ownScheme) }
 
 var mascotFaces = []string{"hello", "lost", "sleep", "panic", "sparkle-head"}
 

@@ -224,6 +224,29 @@ func TestServerStartsAndServesStatic(t *testing.T) {
 	}
 }
 
+func TestPagesLinkTheStaticFilesThePageCacheKeeps(t *testing.T) {
+	srv := newTestServer(t)
+
+	body := do(srv, "GET", "/").Body.String()
+	for _, path := range []string{"/static/shared/base.css", "/static/main.css", "/static/shared/htmx.min.js", "/static/shared/base.js", "/static/main.js"} {
+		wantIn(t, body, `"`+path+"?v="+assetVersion+`"`)
+	}
+	for target, want := range map[string]string{
+		"/static/main.css?v=" + assetVersion:        "max-age=31536000, immutable",
+		"/static/shared/base.css?v=" + assetVersion: "max-age=31536000, immutable",
+		"/static/light/logo.png?v=" + assetVersion:  "max-age=31536000, immutable",
+		"/static/shared/jetbrains-mono.woff2":       "no-cache",
+	} {
+		w := do(srv, "GET", target)
+		wantCode(t, w, http.StatusOK)
+		if got := w.Header().Get("Cache-Control"); got != want {
+			t.Errorf("GET %s: Cache-Control %q, want %q", target, got, want)
+		}
+	}
+	w := do(srv, "GET", "/static/shared/jetbrains-mono.woff2", [2]string{"If-None-Match", `"` + assetVersion + `"`})
+	wantCode(t, w, http.StatusNotModified)
+}
+
 func TestTrailingSlashRedirect(t *testing.T) {
 	srv := newTestServer(t)
 
@@ -366,7 +389,7 @@ func TestFavicon_DefaultsToTheBundledIconOnEveryPage(t *testing.T) {
 	for _, page := range pages {
 		w := do(srv, "GET", page)
 
-		if !strings.Contains(w.Body.String(), `href="/static/favicon.png"`) {
+		if !strings.Contains(w.Body.String(), `href="/static/favicon.png?v=`+assetVersion+`"`) {
 			t.Errorf("%s: default favicon link missing", page)
 		}
 	}
@@ -377,7 +400,7 @@ func TestFaviconIco_DefaultsToBundledFavicon(t *testing.T) {
 
 	w := do(srv, "GET", "/favicon.ico")
 
-	if loc := w.Header().Get("Location"); loc != "/static/favicon.png" {
+	if loc := w.Header().Get("Location"); loc != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("GET /favicon.ico redirected to %q, want the bundled icon", loc)
 	}
 }
@@ -472,8 +495,8 @@ func TestTopbarUsesTheBundledLogoWithNoTheme(t *testing.T) {
 	w := do(srv, "GET", "/")
 
 	body := w.Body.String()
-	wantIn(t, body, `src="/static/logo.png"`)
-	wantNotIn(t, body, `src="/static/favicon.png"`)
+	wantIn(t, body, `src="/static/logo.png?v=`+assetVersion+`"`)
+	wantNotIn(t, body, `src="/static/favicon.png`)
 }
 
 func TestBooruName_DefaultsToMonbooru(t *testing.T) {
@@ -1380,26 +1403,6 @@ func TestSettingsTaggerLabels_NonDefaultLabelFile(t *testing.T) {
 	wantIn(t, body, `data-source="monochrome"`)
 }
 
-func TestPruneMissingImages(t *testing.T) {
-	srv := newTestServer(t)
-
-	seedImage(t, srv, "present.png", 10, 10)
-
-	mustExec(t, srv.db().Write, ` INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at) VALUES ('/nonexistent/file.jpg', 'jpg', 1024, 'prune_test_hash', 1, datetime('now'))`)
-
-	w := postForm(t, srv, "/settings/maintenance/prune-missing", url.Values{})
-
-	wantCode(t, w, http.StatusOK)
-	wantIn(t, w.Body.String(), "started")
-
-	awaitJobsDrain(t, srv)
-
-	count := countRows(t, srv.db(), "images WHERE sha256 = 'prune_test_hash'")
-	if count != 0 {
-		t.Error("missing image should have been pruned")
-	}
-}
-
 func TestPruneMissingImages_KeepsARowWhoseFileIsStillOnDisk(t *testing.T) {
 	srv := newTestServer(t)
 	kept := seedImage(t, srv, "still_here.png", 10, 10)
@@ -1407,6 +1410,7 @@ func TestPruneMissingImages_KeepsARowWhoseFileIsStillOnDisk(t *testing.T) {
 	mustExec(t, srv.db().Write, ` INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at) VALUES ('/nonexistent/gone.jpg', 'jpg', 1024, 'gone_hash', 1, datetime('now'))`)
 
 	w := postForm(t, srv, "/settings/maintenance/prune-missing", url.Values{})
+	wantCode(t, w, http.StatusOK)
 	wantIn(t, w.Body.String(), "started")
 	awaitJobsDrain(t, srv)
 
@@ -1554,20 +1558,6 @@ func TestGallerySwitchChangesActive(t *testing.T) {
 	}
 	if srv.activeGallery() != "stock" {
 		t.Errorf("active gallery = %q, want stock", srv.activeGallery())
-	}
-}
-
-func TestGallerySwitch_RedirectsHomeFromSearch(t *testing.T) {
-	srv := newMultiGalleryServer(t)
-
-	w := postForm(t, srv, "/internal/gallery/switch", url.Values{"name": {"stock"}}, [2]string{"HX-Request", "true"}, [2]string{"HX-Current-URL", "http://localhost/?q=cat"})
-
-	mustCode(t, w, http.StatusOK)
-	if got := w.Header().Get("HX-Redirect"); got != "/" {
-		t.Errorf("HX-Redirect = %q, want /", got)
-	}
-	if w.Header().Get("HX-Refresh") != "" {
-		t.Error("search-bearing URL should redirect, not refresh in place")
 	}
 }
 

@@ -42,7 +42,7 @@ func TestSyncSourceTags_ClonesSliceKeepingOtherTags(t *testing.T) {
 	alpha, beta, gamma, manual := mk("alpha"), mk("beta"), mk("gamma"), mk("manual_keep")
 
 	mustAddTag(t, svc, imgID, manual, false, nil)
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{gamma}, false, "gelbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{gamma}, nil, false, "gelbooru"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.SyncSourceTags(imgID, []int64{alpha, beta}, "danbooru", true); err != nil {

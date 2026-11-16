@@ -294,6 +294,9 @@ func TestSearchWarning(t *testing.T) {
 		{"category count that does not parse", "tagcount:character=many", "Could not read: tagcount:character=many"},
 		{"good comparisons", "width:>=100 date:2026-01-01..2026-02-01 size:<2mb tagcount:character=1", ""},
 		{"both kinds", `width:>abc type:video "x`, "Could not read: unterminated quote, width:>abc. Unknown filter value: type:video"},
+		{"group", "( cat OR dog ) -( type:image )", ""},
+		{"group not closed", "( cat OR dog)", "Could not read: unclosed ("},
+		{"dangling operators", "OR cat AND", "Could not read: nothing before OR, nothing after AND"},
 	}
 	for _, c := range cases {
 		expr := search.Parse(c.query)
@@ -552,9 +555,47 @@ func TestGalleryCount_AFullCursorPageWithRowsPastItKeepsNext(t *testing.T) {
 	}
 	srv.active().InvalidateCaches()
 
-	body := mustGetBody(t, srv, fmt.Sprintf("/internal/search/count?count=1&page=2&first=%d&last=%d&full_cursor=1", ids[7], ids[3]))
+	body := mustGetBody(t, srv, fmt.Sprintf("/internal/search/count?count=1&page=2&first=%d&last=%d&next=probe", ids[7], ids[3]))
 	wantIn(t, body, "Page 2 / 2")
 	wantIn(t, body, fmt.Sprintf(`page=3&amp;after=%d"`, ids[3]))
+}
+
+func TestGallery_ACursorTailOffersNoNextWhenMatchesArriveAbove(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows int
+	}{{"full", 10}, {"short", 8}} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			srv.cfg.UI.PageSize = 5
+			ids := insertRankRows(t, srv, "tail"+tc.name, tc.rows)
+			insertRankRows(t, srv, "landed"+tc.name, 3)
+			srv.active().InvalidateCaches()
+
+			body := mustGetBody(t, srv, fmt.Sprintf("/?page=2&after=%d", ids[tc.rows-6]))
+			wantIn(t, body, fmt.Sprintf(`data-id="%d"`, ids[0]))
+			wantIn(t, body, "Page 2 / 2")
+			if strings.Contains(body, "Next →") || strings.Contains(body, "Last »") {
+				t.Error("the tail offers Next or Last past its last row")
+			}
+		})
+	}
+}
+
+func TestGalleryCount_ACursorTailKeepsItsPageCount(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.UI.PageSize = 5
+	ids := insertRankRows(t, srv, "counttail", 13)
+
+	none := mustGetBody(t, srv, fmt.Sprintf("/internal/search/count?count=1&page=2&first=%d&last=%d&next=none", ids[4], ids[0]))
+	wantIn(t, none, "Page 2 / 2")
+	if strings.Contains(none, "Next →") {
+		t.Error("next=none still offers Next")
+	}
+
+	more := mustGetBody(t, srv, fmt.Sprintf("/internal/search/count?count=1&page=3&first=%d&last=%d&next=more", ids[4], ids[0]))
+	wantIn(t, more, "Page 3 / 3")
+	wantIn(t, more, fmt.Sprintf(`page=4&amp;after=%d"`, ids[0]))
 }
 
 func TestGallery_AnAbandonedRequestStopsItsSearch(t *testing.T) {

@@ -110,14 +110,14 @@ func seedRichImage(t *testing.T, cx *library.Gallery) *models.Image {
 	if err != nil {
 		t.Fatalf("create tag: %v", err)
 	}
-	if err := cx.TagSvc.AddTagsToImageFromTagger(img.ID, []int64{tg.ID, ratingTagIDWeb(t, cx.DB, "explicit")}, false, ""); err != nil {
+	if _, err := cx.TagSvc.AddTagsToImageFromTaggerConf(img.ID, []int64{tg.ID, ratingTagIDWeb(t, cx.DB, "explicit")}, nil, false, ""); err != nil {
 		t.Fatalf("add tags: %v", err)
 	}
 	srcTag, err := cx.TagSvc.GetOrCreateTag("fromdanbooru", galleryio.LookupCategoryID(cx.DB, "general"))
 	if err != nil {
 		t.Fatalf("create source tag: %v", err)
 	}
-	if err := cx.TagSvc.AddTagsToImageFromTagger(img.ID, []int64{srcTag.ID}, false, "danbooru"); err != nil {
+	if _, err := cx.TagSvc.AddTagsToImageFromTaggerConf(img.ID, []int64{srcTag.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatalf("add source tag: %v", err)
 	}
 	if err := gallery.AddSourceMembership(cx.DB, img.ID, "danbooru", "123", "https://example.test/posts/123"); err != nil {

@@ -92,7 +92,7 @@ func TestInstalledThemeOverridesABuiltin(t *testing.T) {
 	if e.Builtin {
 		t.Errorf("active = %+v, want the installed copy", e)
 	}
-	if got := themeLogoURL(e); got != "/static/light/logo.png" {
+	if got := themeLogoURL(e); got != "/static/light/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the light art", got)
 	}
 	if got := themeMascots(e)["lost"]; got != "/static/light/mascot-lost.png" {
@@ -103,8 +103,8 @@ func TestInstalledThemeOverridesABuiltin(t *testing.T) {
 func TestBuiltinThemesDrawTheMascotAndTheLegacyOnesDoNot(t *testing.T) {
 	srv := newTestServer(t)
 	for _, tc := range []struct{ theme, logo, lost string }{
-		{"dark", "/static/logo.png", "/static/mascot-lost.png"},
-		{"light", "/static/light/logo.png", "/static/light/mascot-lost.png"},
+		{"dark", "/static/logo.png?v=" + assetVersion, "/static/mascot-lost.png"},
+		{"light", "/static/light/logo.png?v=" + assetVersion, "/static/light/mascot-lost.png"},
 		{"legacy-dark", "/theme.logo", ""},
 		{"legacy-light", "/theme.logo", ""},
 	} {
@@ -210,7 +210,7 @@ func TestSeedThemesDirMovesAnUntouchedCopyToTheAppsLightArt(t *testing.T) {
 			t.Errorf("the untouched copy kept the previous %s", file)
 		}
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the light art", got)
 	}
 
@@ -274,7 +274,7 @@ func TestThemeRoutesFollowTheActiveTheme(t *testing.T) {
 	if code, _ := get("/theme.logo"); code != http.StatusNotFound {
 		t.Errorf("/theme.logo for a logo-less theme = %d", code)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the bundled one", got)
 	}
 }
@@ -296,6 +296,22 @@ func TestThemeFileRevalidatesAgainstItsMtime(t *testing.T) {
 	rr = do(srv, "GET", "/theme.css", [2]string{"If-None-Match", etag})
 	if rr.Code != http.StatusNotModified {
 		t.Errorf("conditional GET = %d, want 304", rr.Code)
+	}
+}
+
+func TestBuiltinThemeFileRevalidatesAgainstItsBytes(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.Server.Theme = "legacy-dark"
+	for _, path := range []string{"/theme.css", "/theme.logo", "/theme.favicon"} {
+		rr := do(srv, "GET", path)
+		etag := rr.Header().Get("ETag")
+		if rr.Code != http.StatusOK || rr.Header().Get("Cache-Control") != "no-cache" || etag == "" {
+			t.Errorf("%s = %d, headers %v", path, rr.Code, rr.Header())
+			continue
+		}
+		if rr = do(srv, "GET", path, [2]string{"If-None-Match", etag}); rr.Code != http.StatusNotModified {
+			t.Errorf("%s conditional GET = %d, want 304", path, rr.Code)
+		}
 	}
 }
 
@@ -355,10 +371,10 @@ func TestBuiltinLightServesItsSheetAndTheAppsLightArt(t *testing.T) {
 	if code, body := get("/theme.css"); code != http.StatusOK || !strings.Contains(body, "color-scheme: light") {
 		t.Errorf("/theme.css = %d %q", code, body)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/light/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/light/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the light art", got)
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/light/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the light art", got)
 	}
 
@@ -372,7 +388,7 @@ func TestBuiltinLightServesItsSheetAndTheAppsLightArt(t *testing.T) {
 	if code, _ := get("/theme.favicon"); code != http.StatusNotFound {
 		t.Errorf("/theme.favicon under dark = %d", code)
 	}
-	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png" {
+	if got := themeLogoURL(srv.activeTheme()); got != "/static/logo.png?v="+assetVersion {
 		t.Errorf("logo url = %q, want the bundled one", got)
 	}
 }
@@ -388,17 +404,17 @@ func TestThemeLogoLeavesTheFaviconAlone(t *testing.T) {
 	if got := themeLogoURL(srv.activeTheme()); got != "/theme.logo" {
 		t.Fatalf("logo url = %q, want the theme's", got)
 	}
-	if got := themeFaviconURL(srv.activeTheme()); got != "/static/favicon.png" {
+	if got := themeFaviconURL(srv.activeTheme()); got != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("favicon url = %q, want the bundled icon", got)
 	}
 
 	rr := do(srv, "GET", "/")
 	body := rr.Body.String()
-	wantIn(t, body, `href="/static/favicon.png"`)
+	wantIn(t, body, `href="/static/favicon.png?v=`+assetVersion+`"`)
 	wantIn(t, body, `src="/theme.logo"`)
 
 	rr = do(srv, "GET", "/favicon.ico")
-	if loc := rr.Header().Get("Location"); loc != "/static/favicon.png" {
+	if loc := rr.Header().Get("Location"); loc != "/static/favicon.png?v="+assetVersion {
 		t.Errorf("/favicon.ico redirected to %q, want the bundled icon", loc)
 	}
 
@@ -627,4 +643,13 @@ func TestFavoriteToggleCarriesTheBurstOnlyWhenTurningOn(t *testing.T) {
 		t.Errorf("turning a favorite off plays the burst: %q", off)
 	}
 	wantIn(t, off, `title="Favorite (f)"`)
+}
+
+func TestTheHeadDeclaresTheActiveThemesColorScheme(t *testing.T) {
+	srv := newTestServer(t)
+	installThemes(t, srv, map[string]string{"plain.css": ":root{--bg:#222}"})
+	for theme, want := range map[string]string{"": "dark", "light": "light", "legacy-light": "light", "legacy-dark": "dark", "plain": "dark"} {
+		srv.cfg.Server.Theme = theme
+		wantIn(t, do(srv, "GET", "/").Body.String(), `<meta name="color-scheme" content="`+want+`">`)
+	}
 }

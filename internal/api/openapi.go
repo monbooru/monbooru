@@ -773,7 +773,7 @@ func buildSpec(baseURL string) map[string]any {
 					})),
 					map[string]any{
 						"200": resp("Updated tag", "#/components/schemas/TagRow"),
-						"400": resp("No fields supplied, a rating-tag edit, or a name left empty by its category prefix", "#/components/schemas/Error"),
+						"400": resp("No fields supplied, an edit of one of the four canonical rating rows, or a name left empty by its category prefix", "#/components/schemas/Error"),
 						"404": resp("Tag not found", "#/components/schemas/Error"),
 						"409": resp("A tag with the new name already exists in the target category", "#/components/schemas/Error"),
 					}),
@@ -796,7 +796,7 @@ func buildSpec(baseURL string) map[string]any {
 						"201": resp("The alias row", "#/components/schemas/TagRow"),
 						"400": resp("Missing fields or an invalid alias target", "#/components/schemas/Error"),
 						"404": resp("Canonical tag not found", "#/components/schemas/Error"),
-						"409": resp("The name already names a tag with image_tags rows; merge it instead, or rejected for a rejected tag", "#/components/schemas/Error"),
+						"409": resp("The name already names a tag with image_tags rows, merge it instead; or an alias of another tag, repoint it instead; or rejected for a rejected tag", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/resolve": map[string]any{
@@ -827,7 +827,7 @@ func buildSpec(baseURL string) map[string]any {
 					})),
 					map[string]any{
 						"200": resp("The canonical tag", "#/components/schemas/TagRow"),
-						"400": resp("Self-merge, missing ids, or a merge into an alias", "#/components/schemas/Error"),
+						"400": resp("Self-merge, missing ids, a merge into an alias, or one of the four canonical rating rows as alias_id", "#/components/schemas/Error"),
 						"404": resp("alias_id or canonical_id names no tag", "#/components/schemas/Error"),
 						"409": resp("The merge would close an implication cycle, or rejected for a rejected tag", "#/components/schemas/Error"),
 					}),

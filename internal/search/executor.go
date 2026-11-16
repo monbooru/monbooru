@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -934,6 +935,7 @@ type Scope struct {
 	order           string
 	randomSeed      int64
 	orderCollection string
+	among           string
 }
 
 // NewScope takes the ceiling level as the rating cookie holds it; "" means
@@ -952,9 +954,17 @@ func (sc Scope) InViewOrder(sort, order string, seed int64) Scope {
 	return sc
 }
 
+// Among narrows the scope to ids, read as one json_each parameter: a pick
+// can pass SQLite's 32766-parameter cap.
+func (sc Scope) Among(ids []int64) Scope {
+	b, _ := json.Marshal(ids)
+	sc.among = string(b)
+	return sc
+}
+
 func (sc Scope) Stream(src Source, visit func(id int64) error) error {
 	expr, order, orderArgs := sc.ordered(src)
-	return streamScope(src, expr, order, orderArgs, visit)
+	return streamScope(src, expr, sc.among, order, orderArgs, visit)
 }
 
 // FirstIDs reads the scope's head under a LIMIT, so a sort without a
@@ -962,7 +972,7 @@ func (sc Scope) Stream(src Source, visit func(id int64) error) error {
 func (sc Scope) FirstIDs(src Source, n int) ([]int64, error) {
 	expr, order, orderArgs := sc.ordered(src)
 	var ids []int64
-	return ids, streamScope(src, expr, order+" LIMIT ?", append(orderArgs, n), func(id int64) error {
+	return ids, streamScope(src, expr, sc.among, order+" LIMIT ?", append(orderArgs, n), func(id int64) error {
 		ids = append(ids, id)
 		return nil
 	})
@@ -985,10 +995,14 @@ func (sc Scope) IDs(src Source) ([]int64, error) {
 	})
 }
 
-func streamScope(src Source, expr Expr, orderBy string, orderArgs []any, visit func(id int64) error) error {
+func streamScope(src Source, expr Expr, among, orderBy string, orderArgs []any, visit func(id int64) error) error {
 	database := src.DB
 	driverLegs, _ := pickAndDriverTag(database, expr, false)
 	where, args, _, _ := visibleWhere(src, expr, driverLegs)
+	if among != "" {
+		where = "(" + where + ") AND i.id IN (SELECT value FROM json_each(?))"
+		args = append(args, among)
+	}
 
 	rows, err := database.Read.Query(
 		"SELECT i.id FROM images i WHERE "+where+" "+orderBy,

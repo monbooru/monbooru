@@ -1,6 +1,6 @@
 {{define "partials/category_row.html"}}
 <tr id="cat-row-{{.ID}}" data-id="{{.ID}}" hx-target="this" hx-swap="outerHTML">
-  <td class="cat-grip"><button type="button" class="cat-grip-btn" aria-label="Move {{.Name}}" title="Drag to reorder, or press &uarr; / &darr;">&equiv;</button></td>
+  <td class="cat-grip"><button type="button" class="reorder-grip" aria-label="Move {{.Name}}" title="Drag to reorder, or press &uarr; / &darr;">&equiv;</button></td>
   <td><span style="color:{{catColor .Color}}">{{.Name}}</span>{{if .IsBuiltin}} <span class="field-hint">(built-in)</span>{{end}}</td>
   <td>
     <span class="cat-color-pair">

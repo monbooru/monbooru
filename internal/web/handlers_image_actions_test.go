@@ -168,6 +168,9 @@ func TestLabelLimitsCountCharactersNotBytes(t *testing.T) {
 		{"source url", contract.MaxURL, func(n int) *httptest.ResponseRecorder {
 			return postHTMXForm(t, srv, img+"/sources/set", url.Values{"url": {prefix + kanji(n-len(prefix))}})
 		}},
+		{"source post id", contract.MaxPostID, func(n int) *httptest.ResponseRecorder {
+			return postHTMXForm(t, srv, img+"/sources/set", url.Values{"site": {"danbooru"}, "post_id": {kanji(n)}})
+		}},
 		{"collection", contract.MaxCollection, func(n int) *httptest.ResponseRecorder {
 			return postHTMXForm(t, srv, img+"/collections/set", url.Values{"collection": {kanji(n)}})
 		}},

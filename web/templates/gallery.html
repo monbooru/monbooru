@@ -15,10 +15,10 @@
       {{if .RandomSeed}}<input type="hidden" name="seed" value="{{.RandomSeed}}">{{end}}
       <button type="submit">Search</button>
       <button type="button" id="fav-filter-btn" class="{{if hasFavFilter .Query}}active{{end}}"
-              onclick="toggleFavFilter()" title="Show favorites (F)">♥&#xFE0E;</button>
+              onclick="toggleFavFilter()" title="Show favorites (F)" aria-label="Show favorites">♥&#xFE0E;</button>
       <button type="button" id="random-sort-btn" class="{{if eq .Sort "random"}}active{{end}}"
-              onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)">⇄</button>
-      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)">▶&#xFE0E;</button>
+              onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)" aria-label="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}}">⇄</button>
+      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)" aria-label="Slideshow">▶&#xFE0E;</button>
     </span>
   </form>
   <div class="gallery-header-end">
@@ -26,7 +26,7 @@
   </div>
 </div>
 
-<div id="gallery-flash" data-action-flash></div>
+<div id="gallery-flash" data-action-flash role="status"></div>
 <div id="search-warning">{{if .SearchWarning}}<span class="field-hint">{{.SearchWarning}}</span>{{end}}</div>
 
 <div class="gallery-status-row">
@@ -106,8 +106,7 @@
 
 <dialog id="batch-tag-dialog">
   <p class="dlg-title">
-    Add tags to <strong id="batch-tag-count-display"></strong>
-    <span id="batch-tag-noun"></span>:{{template "webui/dialog_x"}}
+    Add tags to {{template "batch_count" "batch-tag"}}:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-tag-form" onsubmit="event.preventDefault(); confirmBatchTag();">
     <input type="hidden" name="scope" id="batch-tag-scope">
@@ -139,8 +138,7 @@
 
 <dialog id="batch-strip-dialog">
   <p class="dlg-title">
-    Remove tags from <strong id="batch-strip-count-display"></strong>
-    <span id="batch-strip-noun"></span>:{{template "webui/dialog_x"}}
+    Remove tags from {{template "batch_count" "batch-strip"}}:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-strip-form" onsubmit="event.preventDefault(); confirmBatchStrip();">
     <input type="hidden" name="scope" id="batch-strip-scope">
@@ -388,8 +386,9 @@ function openBatchPlaceDialog(scope) {
     beforeShow: function() {
       document.getElementById('batch-place-folder').value = '{folder}';
       delete document.getElementById('batch-place-preview').dataset.rows;
-      var n = +document.getElementById('batch-place-count').textContent;
-      document.getElementById('batch-place-check').textContent = n === 1
+      var n = scopeCount(document.getElementById('batch-place-scope').value);
+      document.getElementById('batch-place-check').textContent = n === null
+        ? 'check every image for name clashes' : n === 1
         ? 'check the image for a name clash' : 'check all ' + n + ' images for name clashes';
     },
     focusId: 'batch-place-name'
@@ -527,7 +526,6 @@ function confirmBatchDownload() {
 // follow the last open's mode.
 function openStripDialog(scope) {
   openBatchDialog('batch-strip', scope, {
-    countId: 'batch-strip-count-display',
     radio: '#batch-strip-form input[name="mode"][value="specific"]',
     clearIds: ['batch-strip-input', 'batch-strip-suggest'],
     beforeShow: updateBatchStripRow
@@ -612,7 +610,6 @@ function confirmBatchAutotag() {
 
 function openTagDialog(scope) {
   openBatchDialog('batch-tag', scope, {
-    countId: 'batch-tag-count-display',
     clearIds: ['batch-tag-input', 'batch-tag-suggest'],
     focusId: 'batch-tag-input'
   });
@@ -628,12 +625,18 @@ function confirmBatchTag() {
     'Tag operation failed.');
 }
 
+// fav:true in front of a top-level OR would only join its first side, so
+// the query goes in a group, as the sidebar + button does.
 function toggleFavFilter() {
   var si = document.getElementById('search-input');
   if (!si) return;
   var tokens = si.value.split(/\s+/).filter(function(t) { return t && t.toLowerCase() !== 'fav:true'; });
   var hadFav = tokens.length !== si.value.split(/\s+/).filter(Boolean).length;
-  if (!hadFav) tokens.unshift('fav:true');
+  if (hadFav) {
+    tokens = tidyQueryTerms(tokens);
+  } else {
+    tokens = ['fav:true'].concat(hasTopLevelOr(tokens) ? ['('].concat(tokens, ')') : tokens);
+  }
   si.value = tokens.join(' ');
   submitSearch();
 }

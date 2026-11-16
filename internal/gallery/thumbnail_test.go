@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"image"
+	"image/color"
 	"image/color/palette"
 	"image/gif"
 	"image/jpeg"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -446,5 +448,140 @@ func TestIngest_CBZWithANoPixelCoverGetsNoSize(t *testing.T) {
 	img, _ := mustIngest(t, database, env.galleryPath, env.thumbnailsPath, cbz, models.OriginIngest)
 	if img.Width != nil || img.Height != nil {
 		t.Error("a cover with no pixels gave the row a size")
+	}
+}
+
+func orientedJPEG(t *testing.T, o int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := range 20 {
+		for x := range 40 {
+			img.Set(x, y, color.RGBA{0, 0, 255, 255})
+			if x < 20 && y < 10 {
+				img.Set(x, y, color.RGBA{255, 0, 0, 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00")
+	exif[25] = byte(o)
+	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
+	return slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:])
+}
+
+var orientedCorner = map[int]string{1: "tl", 2: "tr", 3: "br", 4: "bl", 5: "tl", 6: "tr", 7: "br", 8: "bl"}
+
+func redCorner(t *testing.T, path string) (string, int, int) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	img, err := jpeg.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	corners := map[string]image.Point{"tl": {2, 2}, "tr": {w - 3, 2}, "bl": {2, h - 3}, "br": {w - 3, h - 3}}
+	for name, p := range corners {
+		if r, _, bl, _ := img.At(p.X, p.Y).RGBA(); r > bl {
+			return name, w, h
+		}
+	}
+	return "", w, h
+}
+
+func TestGenerate_TurnsTheThumbnailByEXIFOrientation(t *testing.T) {
+	for o := 1; o <= 8; o++ {
+		t.Run(strconv.Itoa(o), func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "turned.jpg")
+			mustWriteFile(t, src, orientedJPEG(t, o), 0o644)
+			if err := generate(src, dir, 1, "jpeg"); err != nil {
+				t.Fatal(err)
+			}
+			wantW, wantH := 40, 20
+			if o >= 5 {
+				wantW, wantH = 20, 40
+			}
+			if corner, w, h := redCorner(t, ThumbnailPath(dir, 1)); corner != orientedCorner[o] || w != wantW || h != wantH {
+				t.Errorf("thumbnail %dx%d red at %q, want %dx%d red at %q", w, h, corner, wantW, wantH, orientedCorner[o])
+			}
+		})
+	}
+}
+
+func TestIngest_StoresATurnedStillsSizeAsShown(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	size := func(img *models.Image) string {
+		if img.Width == nil || img.Height == nil {
+			return "none"
+		}
+		return strconv.Itoa(*img.Width) + "x" + strconv.Itoa(*img.Height)
+	}
+	for o := 1; o <= 8; o++ {
+		src := filepath.Join(galleryDir, "turned"+strconv.Itoa(o)+".jpg")
+		mustWriteFile(t, src, orientedJPEG(t, o), 0o644)
+		img, _ := mustIngest(t, database, env.galleryPath, env.thumbnailsPath, src, models.OriginIngest)
+		want := "40x20"
+		if o >= 5 {
+			want = "20x40"
+		}
+		if got := size(img); got != want {
+			t.Errorf("orientation %d: size %s, want %s", o, got, want)
+		}
+	}
+
+	cbz := writeTestZip(t, galleryDir, "turned.cbz", map[string][]byte{"01.jpg": orientedJPEG(t, 6), "02.jpg": orientedJPEG(t, 1)})
+	img, _ := mustIngest(t, database, env.galleryPath, env.thumbnailsPath, cbz, models.OriginIngest)
+	if got := size(img); got != "20x40" {
+		t.Errorf("cbz with a turned cover: size %s, want 20x40", got)
+	}
+}
+
+func TestEnsureViewRendition_TurnsByEXIFOrientation(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "turned.jpg")
+	mustWriteFile(t, src, orientedJPEG(t, 6), 0o644)
+	dst, err := EnsureViewRendition(src, dir, 1, "jpeg", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corner, w, h := redCorner(t, dst); corner != "tr" || w != 15 || h != 30 {
+		t.Errorf("rendition %dx%d red at %q, want 15x30 red at \"tr\"", w, h, corner)
+	}
+}
+
+func TestGenerate_TurnsCBZPageThumbnailsByTheirEXIF(t *testing.T) {
+	dir := t.TempDir()
+	cbz := writeTestZip(t, dir, "m.cbz", map[string][]byte{"01.jpg": orientedJPEG(t, 6), "02.jpg": orientedJPEG(t, 8)})
+	if err := generateMangaThumbnails(cbz, dir, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	imgDir := mangaImageDir(dir, 1)
+	for _, c := range []struct{ path, corner string }{
+		{ThumbnailPath(dir, 1), "tr"},
+		{mangaPageThumbPath(imgDir, 1), "tr"},
+		{mangaPageThumbPath(imgDir, 2), "bl"},
+	} {
+		if corner, w, h := redCorner(t, c.path); corner != c.corner || w != 20 || h != 40 {
+			t.Errorf("%s: %dx%d red at %q, want 20x40 red at %q", filepath.Base(c.path), w, h, corner, c.corner)
+		}
+	}
+
+	if err := os.Remove(mangaPageThumbPath(imgDir, 2)); err != nil {
+		t.Fatal(err)
+	}
+	lazy, err := EnsureMangaPageThumb(dir, cbz, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corner, w, h := redCorner(t, lazy); corner != "bl" || w != 20 || h != 40 {
+		t.Errorf("lazy page thumb %dx%d red at %q, want 20x40 red at \"bl\"", w, h, corner)
 	}
 }

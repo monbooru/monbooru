@@ -200,8 +200,8 @@ func TestWatcher_WaitIngestsReturnsOnceTheRunningIngestEnds(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- w.WaitIngests(context.Background()) }()
 	select {
-	case <-done:
-		t.Fatal("WaitIngests returned while an ingest was running")
+	case err := <-done:
+		t.Fatalf("WaitIngests returned while an ingest was running: %v", err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	w.mu.Lock()
@@ -770,6 +770,23 @@ func TestWatcher_DoesNotPromoteACopyInAFencedFolder(t *testing.T) {
 
 	if w.promoteSurvivingCopy(rec.ID, first) {
 		t.Fatal("promoted a copy that lies in another gallery's folder")
+	}
+}
+
+func TestWatcher_DoesNotPromoteACopyOutsideTheRoot(t *testing.T) {
+	t.Parallel()
+	w, database, galleryDir, _ := newTestWatcher(t)
+	img := solidPNG(t, 8, 8, [3]uint8{63, 93, 153})
+	first := filepath.Join(galleryDir, "one.png")
+	mustWriteFile(t, first, img, 0o644)
+	rec, _ := mustIngest(t, database, galleryDir, w.handle.ThumbnailsPath, first, "")
+	outside := filepath.Join(t.TempDir(), "two.png")
+	mustWriteFile(t, outside, img, 0o644)
+	mustExec(t, database.Write, `INSERT INTO image_paths (image_id, path, is_canonical) VALUES (?, ?, 0)`, rec.ID, outside)
+	mustRemove(t, first)
+
+	if w.promoteSurvivingCopy(rec.ID, first) {
+		t.Fatal("promoted a copy outside the gallery root")
 	}
 }
 

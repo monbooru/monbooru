@@ -1,14 +1,20 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"html"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"log"
 	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -75,6 +81,78 @@ func detailBody(t *testing.T, srv *Server, id int64) string {
 	t.Helper()
 	w := do(srv, "GET", fmt.Sprintf("/images/%d", id))
 	return w.Body.String()
+}
+
+func TestDetailPage_HoldsTheImageBoxBeforeItLoads(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	wantIn(t, detailBody(t, srv, seedImage(t, srv, "wide.png", 40, 10)), `<div class="detail-media-frame detail-media-sized" style="--w:40;--h:10">`)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 40, 10)), nil); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00")
+	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
+	turned := filepath.Join(cx.GalleryPath, "turned.jpg")
+	mustWriteFile(t, turned, slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:]), 0o644)
+	rec, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, turned, "")
+	wantIn(t, detailBody(t, srv, rec.ID), `style="--w:10;--h:40"`)
+
+	wantIn(t, detailBody(t, srv, rec.ID), "background-image")
+
+	unsized := seedImage(t, srv, "unsized.png", 10, 10)
+	mustExec(t, cx.DB.Write, `UPDATE images SET width = NULL, height = NULL WHERE id = ?`, unsized)
+	wantIn(t, detailBody(t, srv, unsized), `<div class="detail-media-frame">`)
+}
+
+func TestDetailPage_DrawsTheThumbnailWhileTheImageLoads(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	id := seedImage(t, srv, "wide.png", 40, 10)
+	wantIn(t, detailBody(t, srv, id), fmt.Sprintf(`style="background-image:url('/thumbnails/default/%d.jpg');color:transparent" onload="this.style.backgroundImage='none'"`, id))
+
+	if err := os.Remove(gallery.ThumbnailPath(cx.ThumbnailsPath, id)); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, id), "background-image")
+}
+
+func TestDetailPage_HoldsTheVideoBoxAndPostersItsThumbnail(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	src := filepath.Join(cx.GalleryPath, "clip.mp4")
+	mustWriteFile(t, src, append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"), make([]byte, 64)...), 0o644)
+	video, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, src, "")
+	mustExec(t, cx.DB.Write, `UPDATE images SET width = 1920, height = 1080 WHERE id = ?`, video.ID)
+	thumb := gallery.ThumbnailPath(cx.ThumbnailsPath, video.ID)
+	if err := os.MkdirAll(filepath.Dir(thumb), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, thumb, []byte("jpeg"), 0o644)
+
+	body := detailBody(t, srv, video.ID)
+	wantIn(t, body, `<div class="detail-media-frame detail-media-video detail-media-sized" style="--w:1920;--h:1080">`)
+	wantIn(t, body, fmt.Sprintf(`poster="/thumbnails/default/%d.jpg"`, video.ID))
+
+	if err := os.Remove(thumb); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, video.ID), "poster=")
+}
+
+func TestDetailPage_HoldsTheMangaCoverBoxAndDrawsItsThumbnail(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	id := seedManga(t, srv, "m.cbz", [][]byte{tinyPNG(t, 30, 40, color.RGBA{0, 0, 0, 255}), tinyPNG(t, 8, 8, color.RGBA{0, 0, 0, 255})})
+	body := detailBody(t, srv, id)
+	wantIn(t, body, `<div class="detail-media-frame detail-media-sized" style="--w:30;--h:40">`)
+	wantIn(t, body, fmt.Sprintf(`alt="Cover of manga %d" class="detail-img"`+"\n"+`               style="background-image:url('/thumbnails/default/%d.jpg');color:transparent"`, id, id))
+
+	if err := os.Remove(gallery.ThumbnailPath(cx.ThumbnailsPath, id)); err != nil {
+		t.Fatal(err)
+	}
+	wantNotIn(t, detailBody(t, srv, id), "background-image")
 }
 
 func TestBuildAnnotationViews_ClampsToImageBounds(t *testing.T) {
@@ -241,4 +319,19 @@ func TestRelatedEntries_CollectionStepsWalkTheCollection(t *testing.T) {
 
 	w = do(srv, "GET", fmt.Sprintf("/internal/images/%d/related-entries", lone))
 	wantNotIn(t, w.Body.String(), "Same collection")
+}
+
+func TestDetail_AFailedReadIsNotANotFound(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	srv := newTestServer(t)
+	id := seedImage(t, srv, "read_fail.png", 10, 10)
+	if err := srv.active().DB.Read.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(srv, "GET", "/images/"+strconv.FormatInt(id, 10))
+	mustCode(t, w, http.StatusInternalServerError)
+	wantIn(t, buf.String(), "ERROR detail of image")
 }

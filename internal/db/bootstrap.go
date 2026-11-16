@@ -42,6 +42,13 @@ func Bootstrap(db *DB) error {
 		b.exec("null infinite comfyui cfg_scale", `UPDATE comfyui_metadata SET cfg_scale = NULL WHERE cfg_scale IN (9e999, -9e999)`)
 		b.exec("null infinite community_rating", `UPDATE manga_metadata SET community_rating = NULL WHERE community_rating IN (9e999, -9e999)`)
 	}
+	if existing && marker < 17 {
+		db.UnturnedThumbs = true
+	}
+	if marker < 18 {
+		// The UNIQUE column's own index already serves every sha256 lookup.
+		b.exec("drop idx_images_sha256", `DROP INDEX IF EXISTS idx_images_sha256`)
+	}
 	b.ensureColumn("image_sources", "commentary_translated", `ALTER TABLE image_sources ADD COLUMN commentary_translated TEXT NOT NULL DEFAULT ''`)
 	b.exec("create idx_image_sources_parent_url", `CREATE INDEX IF NOT EXISTS idx_image_sources_parent_url ON image_sources(parent_url) WHERE parent_url != ''`)
 	// Must match upgrade.CandidateWhere, or the planner stops using it.
@@ -86,6 +93,35 @@ func Bootstrap(db *DB) error {
 				WHEN lower(md5) = NEW.md5 THEN 'match' ELSE 'differ' END
 			 WHERE image_id = NEW.id AND md5 != '';
 		END`)
+	// One row per http(s) URL an image's sources carry, so sourceurl:
+	// seeks a prefix instead of scanning the newline-joined originals.
+	b.backfillIfFreshTable("image_source_urls",
+		`CREATE TABLE IF NOT EXISTS image_source_urls (
+			key      TEXT    NOT NULL COLLATE NOCASE,
+			image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+			PRIMARY KEY (key, image_id)
+		) WITHOUT ROWID`,
+		`INSERT OR IGNORE INTO image_source_urls (image_id, key) `+sourceURLKeys("image_sources"),
+		"backfill image_source_urls")
+	b.exec("create idx_image_source_urls_image", `CREATE INDEX IF NOT EXISTS idx_image_source_urls_image ON image_source_urls(image_id)`)
+	// Triggers, not the write sites: url and original are written by many
+	// paths. A new row only adds its keys; a change or a removal rebuilds
+	// the image's, as another of its sources may share a key. One copy of
+	// sourceURLKeys each, as every write to image_sources compiles them. An
+	// upsert that rewrites the same url fires the update, hence its WHEN.
+	addRow := `INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT NEW.image_id AS image_id, NEW.url AS url, NEW.original AS original)")
+	rebuildImage := `DELETE FROM image_source_urls WHERE image_id = OLD.image_id;
+		INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT image_id, url, original FROM image_sources WHERE image_id = OLD.image_id)")
+	for _, t := range []struct{ name, event, body string }{
+		{"trg_image_sources_urls_ai", "AFTER INSERT ON image_sources", addRow},
+		{"trg_image_sources_urls_au", "AFTER UPDATE OF url, original ON image_sources WHEN NEW.url IS NOT OLD.url OR NEW.original IS NOT OLD.original", rebuildImage},
+		{"trg_image_sources_urls_ad", "AFTER DELETE ON image_sources", rebuildImage},
+	} {
+		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
+		BEGIN
+			`+t.body+`;
+		END`)
+	}
 	// VIRTUAL: ALTER TABLE cannot add a STORED column, and the index stores it.
 	b.ensureColumn("images", "basename_lower",
 		`ALTER TABLE images ADD COLUMN basename_lower TEXT GENERATED ALWAYS AS (lower(basename(canonical_path))) VIRTUAL`)
@@ -465,6 +501,22 @@ func ratingRankExpr(imageIDCol string) string {
 				JOIN tag_categories tc ON tc.id = t.category_id
 				WHERE it.image_id = ` + imageIDCol + ` AND tc.name = 'rating'
 			), -1)`
+}
+
+// sourceURLKeys selects (image_id, key) for the url and each original line
+// of rows, a table or subquery with image_id, url and original; search's
+// sourceURLKey is its Go twin. The url is split as the first line. Newlines
+// become U+E000 before json_quote, which leaves that character alone, so
+// the split never meets an escape.
+func sourceURLKeys(rows string) string {
+	return `SELECT image_id, CASE
+			WHEN u LIKE 'https://www.%' THEN substr(u, 13)
+			WHEN u LIKE 'http://www.%' THEN substr(u, 12)
+			WHEN u LIKE 'https://%' THEN substr(u, 9)
+			ELSE substr(u, 8) END AS key
+		FROM (SELECT s.image_id, trim(j.value, ' ' || char(9, 13)) AS u FROM ` + rows + ` s,
+			json_each('[' || replace(json_quote(replace(s.url || char(10) || s.original, char(10), char(57344))), char(57344), '","') || ']') j)
+		WHERE (u LIKE 'http://%' OR u LIKE 'https://%') AND key != ''`
 }
 
 func pairsResweepBody(predA, predB string) string {

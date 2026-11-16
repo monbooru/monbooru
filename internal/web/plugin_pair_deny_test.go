@@ -72,8 +72,8 @@ func TestTeardownPluginPairing_DropsBothHalves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := srv.teardownPluginPairing("monedit"); err != nil {
-		t.Fatalf("teardown: %v", err)
+	if saveErr, notifyErr := srv.teardownPluginPairing("monedit"); saveErr != nil || notifyErr != nil {
+		t.Fatalf("teardown: save %v, notify %v", saveErr, notifyErr)
 	}
 
 	if notified != "Bearer edit-secret" {

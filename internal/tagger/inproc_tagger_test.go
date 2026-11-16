@@ -3,13 +3,16 @@
 package tagger
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -76,11 +79,27 @@ func TestProviderProbeReusesALiveEnvironment(t *testing.T) {
 	if err == nil {
 		t.Skip("this onnxruntime library supports CUDA; the probe needs a CPU-only one")
 	}
-	if strings.Contains(err.Error(), "already been initialized") || !strings.Contains(err.Error(), "does not support cuda") {
-		t.Errorf("probe with a live environment: %v, want the library's missing-provider error", err)
+	if strings.Contains(err.Error(), "already been initialized") || !strings.Contains(err.Error(), "could not load the cuda provider") {
+		t.Errorf("probe with a live environment: %v, want the provider's load error", err)
 	}
 	if !defaultBackend.Status().Loaded {
 		t.Error("the probe tore down the live environment")
+	}
+}
+
+func TestProbeErrorKeepsTheRuntimeMessageAndExplainsError126(t *testing.T) {
+	missing := errors.New(`LoadLibrary failed with error 126 "" when trying to load "C:\monbooru\onnxruntime_providers_tensorrt.dll"`)
+	got := probeError("tensorrt", missing).Error()
+	if strings.Contains(got, "does not support") {
+		t.Errorf("a provider that is there with a DLL missing reads as unsupported: %s", got)
+	}
+	if !strings.Contains(got, missing.Error()) || !strings.HasSuffix(got, "(a DLL the provider needs was not found)") {
+		t.Errorf("probeError = %s, want the runtime's message and the missing-DLL hint", got)
+	}
+
+	named := errors.New("Failed to load library libonnxruntime_providers_cuda.so with error: libcublasLt.so.12: cannot open shared object file")
+	if got, want := probeError("cuda", named).Error(), "ONNX Runtime could not load the cuda provider: "+named.Error(); got != want {
+		t.Errorf("probeError = %s, want %s", got, want)
 	}
 }
 
@@ -136,9 +155,58 @@ func TestPrepareInputsRefusesAnEmptyImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := prepareInputs(path, []loadedTagger{{loadedSession: &loadedSession{inputSize: 448, profile: Profile{Pad: "white_square"}}}}); err == nil {
+	if _, err := prepareInputs(path, "jpeg", []loadedTagger{{loadedSession: &loadedSession{inputSize: 448, profile: Profile{Pad: "white_square"}}}}); err == nil {
 		t.Error("prepareInputs took an image with no pixels")
 	}
+}
+
+func TestPrepareInputsTurnsByEXIFOrientation(t *testing.T) {
+	cases := []struct{ name, fileType string }{
+		{"turned.jpg", "jpeg"},
+		{"turned.png", "jpeg"},
+		{"page.jpg", "cbz"},
+	}
+	for _, c := range cases {
+		path := writeOrientation6JPEG(t, c.name)
+		inputs, err := prepareInputs(path, c.fileType, []loadedTagger{{loadedSession: &loadedSession{inputSize: 40, profile: Profile{Pad: "white_square"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, p := range []struct {
+			x, y int
+			red  bool
+		}{{25, 5, true}, {15, 5, false}, {25, 35, false}, {15, 35, false}} {
+			px := inputs[0].RGBAAt(p.x, p.y)
+			if red := px.R > 200 && px.B < 60; red != p.red {
+				t.Errorf("%s as %s: pixel (%d,%d) = %v, red %v, want %v", c.name, c.fileType, p.x, p.y, px, red, p.red)
+			}
+		}
+	}
+}
+
+func writeOrientation6JPEG(t *testing.T, name string) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := range 20 {
+		for x := range 40 {
+			img.Set(x, y, color.RGBA{0, 0, 255, 255})
+			if x < 20 && y < 10 {
+				img.Set(x, y, color.RGBA{255, 0, 0, 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00\x00\x00\x00\x00")
+	app1 := append([]byte{0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...)
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, slices.Concat(buf.Bytes()[:2], app1, buf.Bytes()[2:]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestEveryConfigProviderHasACase(t *testing.T) {

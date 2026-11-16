@@ -149,6 +149,30 @@ func TestMergeGroupsPost(t *testing.T) {
 	})
 }
 
+func TestBrowseGroupsPost_RedirectKeepsSortAndPage(t *testing.T) {
+	srv := newTestServer(t)
+	for _, salt := range []string{"keep-a-", "keep-b-", "keep-c-"} {
+		seedDupGroup(t, srv, salt)
+	}
+	gids, err := db.QueryStrings(srv.db().Read, `SELECT id FROM dup_groups ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "/relations/browse?kind=duplicate&page=3&sort=size"
+
+	w := postMerge(t, srv, "dup", url.Values{"group_id": gids[:2], "sort": {"size"}, "page": {"3"}})
+	mustCode(t, w, http.StatusSeeOther)
+	if loc := w.Header().Get("Location"); loc != want {
+		t.Errorf("merge: Location = %q, want %q", loc, want)
+	}
+
+	w = postForm(t, srv, "/relations/browse-groups/dissolve?kind=duplicate", url.Values{"group_id": {gids[2]}, "sort": {"size"}, "page": {"3"}})
+	mustCode(t, w, http.StatusSeeOther)
+	if loc := w.Header().Get("Location"); loc != want {
+		t.Errorf("dissolve: Location = %q, want %q", loc, want)
+	}
+}
+
 func TestDissolveGroupsPost(t *testing.T) {
 	t.Run("duplicate", func(t *testing.T) {
 		srv := newTestServer(t)
@@ -374,6 +398,37 @@ func TestImageRelationsPage_CapsEachCollectionOnItsOwn(t *testing.T) {
 	if strings.Contains(body, "more in b") {
 		t.Error("the uncut collection says it left members out")
 	}
+}
+
+func TestImageRelationsPage_KeepsTheImageBeforeTheMoreLinkPastTheCap(t *testing.T) {
+	srv := newTestServer(t)
+	ids := insertRankRows(t, srv, "collwin", 2*collectionSiblingCap)
+	selfAt := collectionSiblingCap + 150
+	self := ids[selfAt]
+	for i, id := range ids {
+		if i == selfAt {
+			mustSetHome(t, srv.db(), id, "a", &selfAt)
+			continue
+		}
+		mustExec(t, srv.db().Write, `INSERT INTO image_collections (image_id, name, position) VALUES (?, 'a', ?)`, id, i)
+	}
+
+	w := do(srv, "GET", "/images/"+strconv.FormatInt(self, 10)+"/relations")
+	mustCode(t, w, http.StatusOK)
+	body := w.Body.String()
+	tile := strings.Index(body, fmt.Sprintf(`href="/images/%d" class="manga-page-link relations-tree-current"`, self))
+	more := strings.Index(body, fmt.Sprintf("+%d more in a", collectionSiblingCap-1))
+	if tile < 0 || more < 0 || more < tile {
+		t.Errorf("own tile at %d, +N more at %d: want the link after the tile", tile, more)
+	}
+}
+
+func TestImageRelationsPage_TitlesARootFileWithoutTheDiskFolder(t *testing.T) {
+	srv := newTestServer(t)
+	id := seedImage(t, srv, "root.png", 8, 8)
+
+	body := do(srv, "GET", "/images/"+strconv.FormatInt(id, 10)+"/relations").Body.String()
+	wantIn(t, body, "<title>Relations - root.png - ")
 }
 
 func TestImageRelationsPage_ListsEverySource(t *testing.T) {

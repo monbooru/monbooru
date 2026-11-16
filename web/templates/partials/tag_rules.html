@@ -3,6 +3,7 @@
   <h3>Where this tag comes from
     {{if eq .Monloader "live"}}<span class="status-badge status-ok peer-badge">monloader live</span>
     {{else if eq .Monloader "unreachable"}}<span class="status-badge status-warn">monloader unreachable</span>
+    {{else if eq .Monloader "paused"}}<span class="status-badge status-off">monloader paused</span>
     {{else if eq .Monloader "old"}}<span class="status-badge status-off">monloader too old</span>
     {{else}}<span class="status-badge status-off">monloader not paired</span>{{end}}
     {{if .Taggers}}<span class="status-badge status-ok tagger-badge">{{.Taggers}} {{plural .Taggers "tagger" "taggers"}}</span>{{end}}

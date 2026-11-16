@@ -174,11 +174,7 @@ func (s *Server) removeImplicationDelete(w http.ResponseWriter, r *http.Request)
 		flashHeaderErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.startReserved(res, models.JobTypeTag) {
-		s.goJobWork(models.JobTypeTag, func(context.Context) {
-			s.runImplicationEdges([]models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
-		})
-	}
+	s.propagateDeclared(res, []models.Implication{{ParentID: parentID, ImpliedID: impliedID}}, "remove")
 	setFlashHeader(w, "Implication removed.", "ok",
 		map[string]any{"tag-relations-changed": ""})
 	w.WriteHeader(http.StatusNoContent)

@@ -2438,6 +2438,59 @@ func TestCreateImage_Multipart_FoldsANameAFilesystemRefuses(t *testing.T) {
 	}
 }
 
+func TestCreateImage_Multipart_BoundsALongName(t *testing.T) {
+	env := newTestEnv(t)
+	name := strings.Repeat("a", 300) + ".png"
+	bounded := strings.Repeat("a", 180)
+
+	mustCode(t, env.postUpload(t, name, pngFileBytes(t, 12, 12), nil), http.StatusCreated)
+	mustCode(t, env.postUpload(t, name, pngFileBytes(t, 13, 13), nil), http.StatusCreated)
+
+	for _, want := range []string{bounded + ".png", bounded + "_1.png"} {
+		if _, err := os.Stat(filepath.Join(env.galleryDir, want)); err != nil {
+			t.Errorf("%d-byte landing missing: %v", len(want), err)
+		}
+	}
+}
+
+func TestCreateImage_Multipart_NamesWhyTheWriteFailed(t *testing.T) {
+	env := newTestEnv(t)
+	if err := os.Chmod(env.galleryDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(env.galleryDir, 0o755) })
+	if f, err := os.Create(filepath.Join(env.galleryDir, "probe")); err == nil {
+		_ = f.Close()
+		t.Skip("the gallery folder stays writable (root)")
+	}
+
+	w := env.postUpload(t, "upload.png", pngFileBytes(t, 12, 12), nil)
+
+	mustCode(t, w, http.StatusInternalServerError)
+	if body := w.Body.String(); !strings.Contains(body, "failed to save upload: permission denied") || strings.Contains(body, env.galleryDir) {
+		t.Errorf("body = %s, want the errno without the path", body)
+	}
+}
+
+func TestCreateImage_Multipart_NonMediaBytesAreATypeRefusal(t *testing.T) {
+	for _, name := range []string{"clip.mp4", "clip.webm", "book.cbz"} {
+		env := newTestEnv(t)
+		w := env.postUpload(t, name, []byte("plain text, no media signature"), nil)
+		wantCode(t, w, http.StatusBadRequest)
+		wantIn(t, w.Body.String(), `"code":"unsupported_type"`)
+		wantNotIn(t, w.Body.String(), env.galleryDir)
+	}
+}
+
+func TestCreateImage_AFailedIngestNamesNoPath(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.postUpload(t, "book.cbz", []byte("PK\x03\x04 and no archive after the signature"), nil)
+
+	wantCode(t, w, http.StatusInternalServerError)
+	wantNotIn(t, w.Body.String(), env.galleryDir)
+}
+
 func TestCreateImage_Multipart_RejectsMalformedTags(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -3560,6 +3613,24 @@ func TestReplaceImageFile_RefusesANewTypeWhoseNameTheGalleryIgnores(t *testing.T
 	if _, err := os.Stat(strings.TrimSuffix(oldPath, ".png") + ".jpg"); !os.IsNotExist(err) {
 		t.Errorf("a file landed on the ignored name (%v)", err)
 	}
+}
+
+func TestReplaceImageFile_AFailureNamesNoPath(t *testing.T) {
+	env := newTestEnv(t)
+	id := env.createTestImage(t, "pic.png", 10, 10)
+	if err := os.Chmod(env.galleryDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(env.galleryDir, 0o755) })
+	if f, err := os.Create(filepath.Join(env.galleryDir, "probe")); err == nil {
+		_ = f.Close()
+		t.Skip("the gallery folder stays writable (root)")
+	}
+
+	w := env.postReplace(t, id, "new.png", pngFileBytes(t, 12, 12), nil)
+
+	wantCode(t, w, http.StatusInternalServerError)
+	wantNotIn(t, w.Body.String(), env.galleryDir)
 }
 
 func TestReplaceImageFile_RejectsVideoUpload(t *testing.T) {

@@ -5,17 +5,11 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/monbooru/monbooru/internal/db"
 )
-
-// Appending the top code point, not incrementing the last byte: under
-// NOCASE, `Z`+1 is `[`, which sorts below every `z...` term.
-const comfyTermCeil = "\U0010FFFF"
 
 // ComfyTermRange is the [lo, hi) bound of a prefix scan over comfyui_terms.
 func ComfyTermRange(prefix string) (string, string) {
-	return prefix, prefix + comfyTermCeil
+	return prefix, prefix + prefixCeil
 }
 
 func (b *whereBuilder) buildComfyUIFilter(e FilterExpr) string {
@@ -37,7 +31,7 @@ func (b *whereBuilder) buildComfyUIFilter(e FilterExpr) string {
 	}
 	// No prefix to seek: the whole index is scanned.
 	if strings.ContainsRune(name, '*') {
-		b.args = append(b.args, comfyPattern(name)+"="+comfyPattern(cmp.Or(value, "*")))
+		b.args = append(b.args, globPattern(name)+"="+globPattern(cmp.Or(value, "*")))
 		return comfyTermsIn(`term LIKE ? ESCAPE '\'`)
 	}
 	prefix := name + "="
@@ -51,7 +45,7 @@ func (b *whereBuilder) buildComfyUIFilter(e FilterExpr) string {
 	if stem, ok := strings.CutSuffix(value, "*"); ok && !strings.ContainsRune(stem, '*') {
 		return b.comfyPrefixSeek(prefix+stem, "")
 	}
-	return b.comfyPrefixSeek(prefix, comfyPattern(prefix+value))
+	return b.comfyPrefixSeek(prefix, globPattern(prefix+value))
 }
 
 // Uncorrelated, so the term index is sought once instead of probed per
@@ -61,7 +55,7 @@ func comfyTermsIn(pred string) string {
 }
 
 func (b *whereBuilder) comfyPrefixSeek(prefix, like string) string {
-	b.args = append(b.args, prefix, prefix+comfyTermCeil)
+	b.args = append(b.args, prefix, prefix+prefixCeil)
 	pred := "term >= ? COLLATE NOCASE AND term < ? COLLATE NOCASE"
 	if like != "" {
 		b.args = append(b.args, like)
@@ -86,7 +80,7 @@ func (b *whereBuilder) comfyNumericTerm(name, op, value string) string {
 		return "1=0"
 	}
 	prefix := name + "="
-	b.args = append(b.args, prefix, prefix+comfyTermCeil)
+	b.args = append(b.args, prefix, prefix+prefixCeil)
 	b.args = append(b.args, sub.args...)
 	// CAST reads a non-numeric value as 0.0, so without the GLOB every
 	// word in the slice would answer `<=`.
@@ -126,10 +120,4 @@ func comfyFloatHalf(s string) bool {
 	}
 	_, err := strconv.ParseFloat(s, 64)
 	return err == nil
-}
-
-// Everything but `*` is literal: workflow values are filenames full of
-// underscores.
-func comfyPattern(s string) string {
-	return strings.ReplaceAll(db.EscapeLike(s), "*", "%")
 }

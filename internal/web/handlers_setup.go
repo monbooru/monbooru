@@ -20,6 +20,7 @@ type setupData struct {
 	Title        string
 	BooruFavicon string
 	Theme        bool
+	ColorScheme  string
 	Mascot       string
 	Err          string
 	GalleryPath  string
@@ -108,6 +109,7 @@ func (s *Server) renderSetup(w http.ResponseWriter, r *http.Request, d setupData
 	theme := s.activeTheme()
 	d.BooruFavicon = themeFaviconURL(theme)
 	d.Theme = theme.Path != ""
+	d.ColorScheme = themeScheme(theme)
 	d.Mascot = themeMascots(theme)["hello"]
 	d.Port = port
 	d.BindPinned = s.envPinned("server.bind_address")

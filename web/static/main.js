@@ -359,6 +359,7 @@ function handlePagesGridKey(e) {
       e.preventDefault(); jumpGridCursor('last', cells); return true;
     case 'Enter':
     case 'o':
+      if (e.target.closest('a, button')) return false;
       var link = page.querySelector('.manga-page-cell.focused a');
       if (link && link.href) { window.location.href = link.href; return true; }
       return false;
@@ -1537,6 +1538,7 @@ document.body.addEventListener('htmx:historyRestore', function() {
     readSelection();
     syncSelectionBoxes();
     updateBatchBar();
+    pruneSelection();
     initInboxUpload();
   }
   ['tags-q-input', 'collections-q-input'].forEach(function(id) {
@@ -1566,6 +1568,38 @@ document.addEventListener('input', function(e) {
   });
 });
 
+const isQueryOp = t => /^(or|and)$/i.test(t);
+const isGroupOpen = t => t === '(' || t === '-(';
+
+// AND binds tighter than OR, so a term added after a top-level OR would
+// only join its last side.
+function hasTopLevelOr(terms) {
+  let depth = 0;
+  return terms.some(t => {
+    if (isGroupOpen(t)) depth++;
+    else if (t === ')') depth = Math.max(depth - 1, 0);
+    return depth === 0 && /^or$/i.test(t);
+  });
+}
+
+// Drops the empty groups and dangling operators a removed term leaves.
+function tidyQueryTerms(terms) {
+  for (let i = 0; i < terms.length;) {
+    const prev = terms[i - 1], t = terms[i], next = terms[i + 1];
+    if (isGroupOpen(t) && next === ')') {
+      const negated = t === '(' && (prev === '-' || /^not$/i.test(prev || ''));
+      terms.splice(negated ? i - 1 : i, negated ? 3 : 2);
+    } else if (isQueryOp(t) && (!prev || !next || isQueryOp(next) || next === ')' || isGroupOpen(prev))) {
+      terms.splice(i, 1);
+    } else {
+      i++;
+      continue;
+    }
+    i = 0;
+  }
+  return terms;
+}
+
 // The button's term is category:name, but the query may hold the bare
 // name, so both forms are removed.
 document.addEventListener('click', function(e) {
@@ -1579,9 +1613,13 @@ document.addEventListener('click', function(e) {
   const colon = tagName.indexOf(':');
   const bare = colon >= 0 ? tagName.slice(colon + 1) : tagName;
   const terms = si.value.trim().split(/\s+/).filter(Boolean);
-  const filtered = terms.filter(t => t !== tagName && t !== bare);
-  if (filtered.length === terms.length) filtered.push(tagName);
-  si.value = filtered.join(' ');
+  if (btn.classList.contains('active')) {
+    si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
+  } else {
+    // A query that ends on an operator is waiting for this term.
+    const wrap = hasTopLevelOr(terms) && !isQueryOp(terms[terms.length - 1]);
+    si.value = (wrap ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
+  }
   submitSearch();
 });
 
@@ -2010,6 +2048,42 @@ function readSelection() {
   selectAllMatching = !!stash.all;
 }
 
+// A batch edit or another client can take a pick out of the listing while
+// the URL that keys the stash stays the same. The rows on screen match, so
+// only the others are asked about.
+function pruneSelection() {
+  if (selectAllMatching || !document.getElementById('gallery-grid')) return;
+  var onScreen = {};
+  document.querySelectorAll('.thumb-checkbox').forEach(function(cb) { onScreen[cb.value] = true; });
+  var away = pickedIDs.filter(function(id) { return !onScreen[id]; });
+  if (away.length === 0) return;
+  var key = selectionKey();
+  var q = new URLSearchParams(location.search).get('q') || '';
+  var csrf = getCSRFToken();
+  var headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'HX-Request': 'true',
+    'X-CSRF-Token': csrf,
+  };
+  if (activeGallery()) headers['X-Monbooru-Gallery'] = activeGallery();
+  fetch('/internal/search/ids', {
+    method: 'POST',
+    headers: headers,
+    body: new URLSearchParams({q: q, ids: away.join(','), _csrf: csrf}).toString(),
+  }).then(function(res) {
+    return res.ok ? res.json() : null;
+  }).then(function(data) {
+    if (!data || selectAllMatching || key !== selectionKey()) return;
+    var gone = {};
+    away.forEach(function(id) { gone[id] = true; });
+    data.ids.forEach(function(id) { delete gone[id]; });
+    pickedIDs = pickedIDs.filter(function(id) { return !gone[id]; });
+    writeSelection();
+    updateBatchBar();
+  }).catch(function() {});
+}
+
 // For the /tags rows only; the gallery persists its own selection on
 // every change.
 function stashSelection(ids) {
@@ -2038,6 +2112,7 @@ document.addEventListener('DOMContentLoaded', function() {
     cb.checked = tagIDs.indexOf(cb.value) !== -1;
   });
   updateBatchBar();
+  pruneSelection();
   if (typeof updateTagBatchBar === 'function') updateTagBatchBar();
 });
 
@@ -2261,8 +2336,9 @@ function revealSidebarFor(el) {
   if (el && el.closest && el.closest('#sidebar')) setSidebarCollapsed(false);
 }
 
-// Each path is encoded once and the list joined with commas; a value
-// written encoded twice has no comma of its own and is read once more.
+// Each path is encoded once and the list joined with commas behind a
+// leading one; a value written encoded twice has no comma of its own and
+// is read once more.
 function getFolderCookie() {
   var m = document.cookie.match(/monbooru_folders=([^;]*)/);
   if (!m) return new Set();
@@ -2274,7 +2350,12 @@ function getFolderCookie() {
 }
 
 function setFolderCookie(set) {
-  document.cookie = 'monbooru_folders=' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
+  document.cookie = 'monbooru_folders=,' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
+}
+
+function setToggle(btn, open) {
+  btn.textContent = open ? '▼' : '▶';
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 function toggleFolderItem(btn, targetId, path) {
@@ -2286,7 +2367,7 @@ function toggleFolderItem(btn, targetId, path) {
 function flipSection(toggle, list, key, defaultOpen) {
   var opening = list.style.display === 'none';
   list.style.display = opening ? '' : 'none';
-  toggle.textContent = opening ? '▼' : '▶';
+  setToggle(toggle, opening);
   var state = getFolderCookie();
   if (opening !== !!defaultOpen) state.add(key);
   else state.delete(key);
@@ -2299,10 +2380,10 @@ function initSectionToggle(toggleId, listId, cookieKey, forceOpen, defaultOpen) 
   if (!toggle || !list) return;
   var offDefault = getFolderCookie().has(cookieKey);
   if (defaultOpen) {
-    if (offDefault) { list.style.display = 'none'; toggle.textContent = '▶'; }
+    if (offDefault) { list.style.display = 'none'; setToggle(toggle, false); }
   } else if (forceOpen || offDefault) {
     list.style.display = '';
-    toggle.textContent = '▼';
+    setToggle(toggle, true);
   }
   var clickToggle = function() { flipSection(toggle, list, cookieKey, defaultOpen); };
   // onclick, not addEventListener: this runs again on each settle that
@@ -2311,6 +2392,11 @@ function initSectionToggle(toggleId, listId, cookieKey, forceOpen, defaultOpen) 
   var header = toggle.closest('.sidebar-section-header');
   var title = header && header.querySelector('.sidebar-section-title');
   if (title) title.onclick = clickToggle;
+}
+
+// folder: matches as SQLite's NOCASE does, A-Z only.
+function asciiLower(s) {
+  return s.replace(/[A-Z]/g, function(c) { return c.toLowerCase(); });
 }
 
 // Kept in JS, not the DOM: OOB swaps replace #sidebar-inner on every
@@ -2333,7 +2419,7 @@ function initFolderTree() {
   var q = urlParams.get('q') || '';
   var folderMatch = q.match(/(?:^|\s)folder(?:only)?:(?:"([^"]+)"|([^\s]*))/);
   if (folderMatch) {
-    currentFolder = folderMatch[1] || folderMatch[2];
+    currentFolder = asciiLower(folderMatch[1] || folderMatch[2]);
   }
 
   initSectionToggle('tags-toggle', 'tag-groups', '__tags__', false, true);
@@ -2352,15 +2438,16 @@ function initFolderTree() {
     var list = document.getElementById(targetId);
     if (!list) return;
 
-    var urlDriven = currentFolder && (currentFolder === path || currentFolder.startsWith(path + '/'));
+    var low = asciiLower(path);
+    var urlDriven = currentFolder && (currentFolder === low || currentFolder.startsWith(low + '/'));
     var shouldExpand = expanded.has(path) || (urlChanged && urlDriven);
 
     if (shouldExpand) {
       list.style.display = '';
-      btn.textContent = '▼';
+      setToggle(btn, true);
       if (urlChanged && urlDriven && treeList) {
         treeList.style.display = '';
-        if (treeToggle) treeToggle.textContent = '▼';
+        if (treeToggle) setToggle(treeToggle, true);
       }
     }
 
@@ -2580,6 +2667,7 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     readSelection();
     syncSelectionBoxes();
     updateBatchBar();
+    pruneSelection();
     restoreGalleryFocusFromHash();
     initInboxUpload();
     return;
@@ -2783,7 +2871,7 @@ function closePluginPage() {
   if (dlg && dlg.open) dlg.close();
 }
 
-// opts: countId, requireMatches (refuse a search scope matching nothing),
+// opts: requireMatches (refuse a search scope matching nothing),
 // radio (re-checked as the default), clearIds (emptied on open),
 // beforeShow, focusId.
 function openBatchDialog(prefix, scope, opts) {
@@ -2792,7 +2880,7 @@ function openBatchDialog(prefix, scope, opts) {
   // flipping here lets each post the search.
   if (scope === 'selection' && selectAllMatching) scope = 'search';
   if (scope === 'selection' && pickedIDs.length === 0) return;
-  var n = scopeCount(scope, document.getElementById(opts.countId || prefix + '-count'),
+  var n = scopeCount(scope, document.getElementById(prefix + '-count'),
                      document.getElementById(prefix + '-noun'));
   if (opts.requireMatches && scope === 'search' && n === 0) return;
   document.getElementById(prefix + '-scope').value = scope;

@@ -1,36 +1,13 @@
 package web
 
 import (
-	"runtime"
 	"slices"
 	"strconv"
 	"time"
 
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/tagger"
 )
-
-type rssBreakdown struct {
-	total uint64
-	anon  uint64
-	file  uint64
-	db    uint64
-}
-
-type memStats struct {
-	HeapAlloc  int64
-	Sys        int64
-	Goroutines int
-	Total      int64
-	Anon       int64
-	// Not Sys: that counts mapped address space, larger than the resident Anon.
-	GoInuse   int64
-	GoIdle    int64
-	Native    int64
-	File      int64
-	DB        int64
-	OtherFile int64
-	Available bool
-}
 
 type galleryDBStats struct {
 	Name   string
@@ -60,7 +37,7 @@ type taggerCacheStats struct {
 }
 
 type statsData struct {
-	Mem        memStats
+	Mem        desktop.Memory
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
@@ -69,7 +46,7 @@ type statsData struct {
 
 // Cheap by design: no directory walks.
 func (s *Server) gatherStats() statsData {
-	out := statsData{Mem: gatherMemStats(), Tagger: gatherTaggerStats(s)}
+	out := statsData{Mem: desktop.ReadMemory(), Tagger: gatherTaggerStats(s)}
 
 	galleries := s.galleryList()
 	out.Galleries = make([]galleryDBStats, 0, len(galleries))
@@ -165,10 +142,10 @@ func gatherTaggerStats(s *Server) taggerCacheStats {
 	}
 	if pid, ok := tagger.WorkerPID(); ok {
 		out.WorkerPID = pid
-		if r, rok := procRSSAt(pid); rok {
-			out.WorkerRSS = int64(r.total)
-			out.WorkerAnon = int64(r.anon)
-			out.WorkerFile = int64(r.file)
+		if r, rok := desktop.ProcRSS(pid); rok {
+			out.WorkerRSS = int64(r.Total)
+			out.WorkerAnon = int64(r.Anon)
+			out.WorkerFile = int64(r.File)
 		}
 	}
 	return out
@@ -181,31 +158,4 @@ func usageStats(total, free uint64) mountStats {
 		pct = int((used * 100) / total)
 	}
 	return mountStats{TotalSize: int64(total), FreeSize: int64(free), UsedSize: int64(used), UsedPct: pct}
-}
-
-func gatherMemStats() memStats {
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	// GCSys, OtherSys and BuckHashSys are left out: mapped far larger than
-	// they are faulted in, they would push the Go share past RssAnon.
-	goResident := int64(ms.HeapSys-ms.HeapReleased) + int64(ms.StackSys+ms.MSpanSys+ms.MCacheSys)
-	out := memStats{
-		HeapAlloc:  int64(ms.HeapAlloc),
-		Sys:        int64(ms.Sys),
-		GoInuse:    int64(ms.HeapInuse + ms.StackInuse + ms.MSpanInuse + ms.MCacheInuse),
-		Goroutines: runtime.NumGoroutine(),
-	}
-	out.GoIdle = goResident - out.GoInuse
-	if r, ok := procRSS(); ok {
-		out.Total = int64(r.total)
-		out.Anon = int64(r.anon)
-		out.File = int64(r.file)
-		out.DB = int64(r.db)
-		out.OtherFile = max(out.File-out.DB, 0)
-		// Clamped: the two readings are taken apart, and a swapped-out
-		// page leaves one but not the other.
-		out.Native = max(out.Anon-goResident, 0)
-		out.Available = true
-	}
-	return out
 }

@@ -37,22 +37,3 @@ func TestAutotagPeakIsTheJobs(t *testing.T) {
 		t.Errorf("an idle job logged %q: the peak predates it", strings.TrimSpace(out))
 	}
 }
-
-func TestProcRSSAtSplitsAnonAndFile(t *testing.T) {
-	r, ok := procRSSAt(os.Getpid())
-	if !ok {
-		t.Fatal("procRSSAt(self) = not ok")
-	}
-	if r.total == 0 || r.anon == 0 || r.file == 0 {
-		t.Fatalf("procRSSAt(self) = %+v, want a nonzero total, anon and file", r)
-	}
-	if r.anon+r.file > r.total {
-		t.Errorf("anon %d + file %d exceeds total %d", r.anon, r.file, r.total)
-	}
-}
-
-func TestProcRSSAtGonePid(t *testing.T) {
-	if _, ok := procRSSAt(1 << 30); ok {
-		t.Error("procRSSAt on a pid that cannot exist = ok")
-	}
-}

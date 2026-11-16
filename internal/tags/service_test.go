@@ -141,8 +141,8 @@ func TestAddTagsToImageFromTagger_ManualSource(t *testing.T) {
 	imgID := insertTestImage(t, database, "abc130")
 
 	tag, _ := svc.GetOrCreateTag("sourced", catID)
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{tag.ID}, false, "my_app"); err != nil {
-		t.Fatalf("AddTagsToImageFromTagger: %v", err)
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{tag.ID}, nil, false, "my_app"); err != nil {
+		t.Fatalf("AddTagsToImageFromTaggerConf: %v", err)
 	}
 
 	var isAuto int
@@ -1169,10 +1169,10 @@ func TestRemoveSourceTagsFromImage(t *testing.T) {
 	danb, _ := svc.GetOrCreateTag("dan", catID)
 	gelb, _ := svc.GetOrCreateTag("gel", catID)
 	mustAddTag(t, svc, imgID, manual.ID, false, nil)
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{danb.ID}, false, "danbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{danb.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{gelb.ID}, false, "gelbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{gelb.ID}, nil, false, "gelbooru"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1283,6 +1283,32 @@ func TestCreateAlias_FlattensDependentAliases(t *testing.T) {
 	resolved, _ := svc.GetOrCreateTag("zzz", catID)
 	if resolved.ID != y.ID {
 		t.Fatalf("GetOrCreateTag(z) = %d, want %d", resolved.ID, y.ID)
+	}
+}
+
+func TestCreateAlias_RefusesRepointingAnExistingAlias(t *testing.T) {
+	database, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	a := mustTag(t, svc, "aaa", catID)
+	b := mustTag(t, svc, "bbb", catID)
+	mustCreateAlias(t, svc, "ccc", catID, a.ID)
+
+	_, err := svc.CreateAlias("ccc", catID, b.ID)
+	var taken *ErrAliasExists
+	if !errors.As(err, &taken) || taken.CanonicalID != a.ID || taken.Canonical != "general:aaa" {
+		t.Fatalf("CreateAlias(ccc -> bbb) err = %v, want ErrAliasExists naming general:aaa", err)
+	}
+	if _, err := svc.CreateAliasToNewTag("ccc", catID, "fresh_canon", catID); !errors.As(err, &taken) {
+		t.Fatalf("CreateAliasToNewTag(ccc -> fresh_canon) err = %v, want ErrAliasExists", err)
+	}
+	if n := countRows(t, database, "tags WHERE name = ?", "fresh_canon"); n != 0 {
+		t.Errorf("refused alias left %d fresh_canon rows, want 0", n)
+	}
+	if resolved, _ := svc.GetOrCreateTag("ccc", catID); resolved.ID != a.ID {
+		t.Errorf("ccc resolves to %d, want %d", resolved.ID, a.ID)
+	}
+	if again := mustCreateAlias(t, svc, "ccc", catID, a.ID); again.CanonicalTagID == nil || *again.CanonicalTagID != a.ID {
+		t.Errorf("re-creating ccc -> aaa = %+v, want the same alias", again)
 	}
 }
 
@@ -3569,7 +3595,7 @@ func TestUsageBreakdown_LeavesOutImagesMarkedMissing(t *testing.T) {
 	live := insertTestImage(t, database, "live")
 	gone := insertTestImage(t, database, "gone")
 	for _, id := range []int64{live, gone} {
-		if err := svc.AddTagsToImageFromTagger(id, []int64{tag.ID}, false, "danbooru"); err != nil {
+		if _, err := svc.AddTagsToImageFromTaggerConf(id, []int64{tag.ID}, nil, false, "danbooru"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3595,7 +3621,7 @@ func TestUsageBreakdown_CountsImpliedRowsOnTheirOwnLine(t *testing.T) {
 	child := mustTag(t, svc, "child_tag", gen)
 	mustAddImply(t, svc, parent.ID, child.ID)
 	fanned := insertTestImage(t, database, "fanned")
-	if err := svc.AddTagsToImageFromTagger(fanned, []int64{parent.ID}, false, "danbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(fanned, []int64{parent.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatal(err)
 	}
 	mustAddTag(t, svc, insertTestImage(t, database, "typed"), child.ID, false, nil)

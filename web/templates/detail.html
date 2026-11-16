@@ -49,7 +49,7 @@
   </div>
   {{end}}
 
-  <div id="detail-flash" data-action-flash></div>
+  <div id="detail-flash" data-action-flash role="status"></div>
   {{if .MonloaderPaired}}<div id="fetch-status" class="fetch-status"></div>{{end}}
 
   <div class="detail-topbar">
@@ -508,19 +508,25 @@
     <div class="detail-main">
       <div class="detail-media">
         {{if or (eq .Image.FileType "mp4") (eq .Image.FileType "webm")}}
-        <video src="/images/{{.Image.ID}}/file" controls loop autoplay muted playsinline preload="auto" class="detail-video"
-               onloadedmetadata="this.play().catch(function(){})">
+        <div class="detail-media-frame detail-media-video{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
+        <video src="/images/{{.Image.ID}}/file" controls loop autoplay muted playsinline preload="auto" class="detail-video"{{if .Placeholder}} poster="/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg"{{end}}
+               onloadedmetadata="this.parentNode.style.setProperty('--w',this.videoWidth);this.parentNode.style.setProperty('--h',this.videoHeight);this.play().catch(function(){})">
           Your browser does not support video.
         </video>
+        </div>
         {{else if .IsManga}}
+        <div class="detail-media-frame{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
         <a href="/images/{{.Image.ID}}/read?page={{if .ResumePage}}{{.ResumePage}}{{else}}1{{end}}" title="Open in reader">
-          <img src="/images/{{.Image.ID}}/page/1" alt="Cover of manga {{.Image.ID}}" class="detail-img"
+          <img src="/images/{{.Image.ID}}/page/1" alt="Cover of manga {{.Image.ID}}" class="detail-img"{{if .Placeholder}}
+               style="background-image:url('/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg');color:transparent" onload="this.style.backgroundImage='none'"{{end}}
                onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg';}else{this.onerror=null;}">
         </a>
+        </div>
         {{else}}
-        <div class="detail-media-frame">
+        <div class="detail-media-frame{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
           <a href="/images/{{.Image.ID}}/view" target="_blank"{{if not .Image.IsMissing}} class="detail-img-link" onclick="return lightbox.open(event, this.href)"{{end}}>
-            <img src="/images/{{.Image.ID}}/view" alt="image {{.Image.ID}}" class="detail-img"
+            <img src="/images/{{.Image.ID}}/view" alt="image {{.Image.ID}}" class="detail-img"{{if .Placeholder}}
+                 style="background-image:url('/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg');color:transparent" onload="this.style.backgroundImage='none'"{{end}}
                  onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg';}else{this.onerror=null;}">
           </a>
           {{if .Annotations}}

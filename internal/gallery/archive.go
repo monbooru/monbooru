@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/fsx"
 )
@@ -24,6 +25,7 @@ type MangaPage struct {
 type Manga struct {
 	Pages []MangaPage
 	zr    *zip.ReadCloser
+	size  int64
 }
 
 var errEmptyManga = errors.New("archive contains no recognised image entries")
@@ -47,6 +49,10 @@ var pageSkipBasenames = map[string]struct{}{
 }
 
 func OpenManga(path string) (*Manga, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("open archive %q: %w", path, err)
+	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open archive %q: %w", path, err)
@@ -80,7 +86,7 @@ func OpenManga(path string) (*Manga, error) {
 		_ = zr.Close()
 		return nil, errEmptyManga
 	}
-	return &Manga{Pages: pages, zr: zr}, nil
+	return &Manga{Pages: pages, zr: zr, size: info.Size()}, nil
 }
 
 func (m *Manga) Close() error {
@@ -104,12 +110,38 @@ func (m *Manga) pageReader(n int) (io.ReadCloser, error) {
 	return m.Pages[n].file.Open()
 }
 
+func (m *Manga) pageOrientation(n int) int {
+	rc, err := m.pageReader(n)
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = rc.Close() }()
+	o, _ := metadata.EXIFOrientationFrom(rc, models.ExtFileType(m.Pages[n].OriginalName))
+	return o
+}
+
+// CoverOrientation is the EXIF orientation of a cbz's first page, 0 for none.
+func CoverOrientation(path string) int {
+	m, err := OpenManga(path)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = m.Close() }()
+	return m.pageOrientation(0)
+}
+
+// A page is an already compressed image, so it never inflates far past the
+// archive holding it; one that does is a zip bomb, refused before the disk
+// fills. The zip reader holds an entry to its declared size.
 func (m *Manga) extractPage(n int, dst string) error {
 	rc, err := m.pageReader(n)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rc.Close() }()
+	if m.Pages[n].file.UncompressedSize64 > uint64(2*m.size) {
+		return fmt.Errorf("page %d inflates past twice the archive's size", n+1)
+	}
 	return fsx.WriteAtomic(dst, ".page.*", func(f *os.File) error {
 		if _, err := io.Copy(f, rc); err != nil {
 			return fmt.Errorf("write page %d: %w", n+1, err)
@@ -141,6 +173,9 @@ func (m *Manga) coverDimensions() (int, int, error) {
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return 0, 0, fmt.Errorf("the cover is %dx%d, it has no pixels", cfg.Width, cfg.Height)
+	}
+	if quarterTurn(m.pageOrientation(0)) {
+		return cfg.Height, cfg.Width, nil
 	}
 	return cfg.Width, cfg.Height, nil
 }

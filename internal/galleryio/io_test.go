@@ -950,6 +950,29 @@ func TestRebaseImagePaths_SlashesAWindowsFolderAndKeepsAPosixBackslash(t *testin
 	}
 }
 
+func TestRebaseImagePaths_FlagsAFolderOutsideTheRootMissing(t *testing.T) {
+	database := openIOTestDB(t)
+	dir := t.TempDir()
+	root := filepath.Join(dir, "gallery")
+	mustMkdirAll(t, root, 0o755)
+	mustMkdirAll(t, filepath.Join(dir, "outside"), 0o755)
+	mustWriteFile(t, filepath.Join(dir, "outside", "secret.png"), nil, 0o644)
+	if _, err := database.Write.Exec(`
+		INSERT INTO images (id, sha256, canonical_path, folder_path, file_type, file_size, is_missing) VALUES
+			(1, 'a', '/old/outside/secret.png', '../outside', 'png', 1, 0);
+		INSERT INTO image_paths (image_id, path, is_canonical) VALUES (1, '/old/outside/secret.png', 1)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rebaseImagePaths(database, gallery.NewBoundary(root, nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, database, "images WHERE id = 1 AND is_missing = 1"); n != 1 {
+		t.Error("a row whose folder climbs out of the root is shown")
+	}
+}
+
 func TestLoadExportKeepsTheCategoryOrderAndOrdersAnOlderDocument(t *testing.T) {
 	cats := []tagCategoryRow{
 		{ID: 1, Name: "general", Color: "#888888", IsBuiltin: 1, Position: 0},

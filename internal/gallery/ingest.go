@@ -73,15 +73,43 @@ func decodeImageDimensions(path string) (w, h *int) {
 	return &cfg.Width, &cfg.Height
 }
 
+// The size is the display size, as a video's: a browser draws a JPEG or
+// WebP turned by its EXIF orientation.
 func stillDimensions(path, fileType string) (w, h *int) {
 	if !IsFFmpegStill(fileType) {
-		return decodeImageDimensions(path)
+		w, h = decodeImageDimensions(path)
+		if o, _ := metadata.EXIFOrientation(path, fileType); w != nil && quarterTurn(o) {
+			w, h = h, w
+		}
+		return w, h
 	}
 	pw, ph, ok := ProbeVideoDimensions(path)
 	if !ok {
 		return nil, nil
 	}
 	return &pw, &ph
+}
+
+// EXIF orientations 5 to 8 turn the image a quarter, swapping its sides.
+func quarterTurn(o int) bool { return o >= 5 && o <= 8 }
+
+// DisplayDimensions reads a still's or a cbz cover's size as a browser
+// draws it, for the rows ingested before sizes were stored that way.
+func DisplayDimensions(path, fileType string) (int, int, bool) {
+	if fileType == models.FileTypeCBZ {
+		archive, err := OpenManga(path)
+		if err != nil {
+			return 0, 0, false
+		}
+		defer func() { _ = archive.Close() }()
+		w, h, err := archive.coverDimensions()
+		return w, h, err == nil
+	}
+	w, h := stillDimensions(path, fileType)
+	if w == nil {
+		return 0, 0, false
+	}
+	return *w, *h, true
 }
 
 // The caller supplies path's digests and claims its ownership.

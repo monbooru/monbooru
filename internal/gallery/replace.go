@@ -89,25 +89,14 @@ func ApplyReplacedFile(h Handle, imageID int64, stagedPath, newSHA, newMD5, newT
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}
-		if _, err := setMissingTx(tx, []int64{imageID}, false); err != nil {
-			return fmt.Errorf("mark row present: %w", err)
-		}
-		// The alias paths still hold the old bytes.
-		if _, err := tx.Exec(`DELETE FROM image_paths WHERE image_id = ? AND is_canonical = 0`, imageID); err != nil {
-			return fmt.Errorf("drop stale aliases: %w", err)
-		}
-		// The recorded lookup misses are about the old bytes.
-		if err := lookup.DeleteForImage(tx, imageID); err != nil {
-			return fmt.Errorf("drop lookup history: %w", err)
+		if err := rewroteBytesTx(tx, imageID, true, sdMeta, comfyMeta); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(
 			`UPDATE image_paths SET path = ?, mtime_unix = ?, mtime_nsec = ? WHERE image_id = ? AND is_canonical = 1`,
 			newPath, fi.ModTime().Unix(), fi.ModTime().UnixNano(), imageID,
 		); err != nil {
 			return fmt.Errorf("update canonical path: %w", err)
-		}
-		if err := replaceGenerationMetadata(context.Background(), tx, imageID, sdMeta, comfyMeta); err != nil {
-			return err
 		}
 		if oldW != nil && oldH != nil && newW != nil && newH != nil &&
 			*oldW > 0 && *oldH > 0 && (*oldW != *newW || *oldH != *newH) {
@@ -217,4 +206,19 @@ func CopyFileContents(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func rewroteBytesTx(tx *sql.Tx, imageID int64, dropCopies bool, sd *models.SDMetadata, comfy *models.ComfyUIMetadata) error {
+	if _, err := setMissingTx(tx, []int64{imageID}, false); err != nil {
+		return fmt.Errorf("mark row present: %w", err)
+	}
+	if dropCopies {
+		if _, err := tx.Exec(`DELETE FROM image_paths WHERE image_id = ? AND is_canonical = 0`, imageID); err != nil {
+			return fmt.Errorf("drop stale aliases: %w", err)
+		}
+	}
+	if err := lookup.DeleteForImage(tx, imageID); err != nil {
+		return fmt.Errorf("drop lookup history: %w", err)
+	}
+	return replaceGenerationMetadata(context.Background(), tx, imageID, sd, comfy)
 }

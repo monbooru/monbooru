@@ -52,6 +52,18 @@ func (s *Service) PropagateImplication(ctx context.Context, parentID int64, prog
 	})
 }
 
+// ImplicationUnapplied reports whether some image carries parentID without
+// impliedID.
+func (s *Service) ImplicationUnapplied(parentID, impliedID int64) (bool, error) {
+	var unapplied bool
+	err := s.db.Read.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM image_tags p WHERE p.tag_id = ?
+		   AND NOT EXISTS (SELECT 1 FROM image_tags c WHERE c.image_id = p.image_id AND c.tag_id = ?))`,
+		parentID, impliedID,
+	).Scan(&unapplied)
+	return unapplied, err
+}
+
 // SweepImplicationRemoval drops, on every image carrying parentID, the rows
 // of closure (the ImplicationClosure of the tag the removed edge implied)
 // that nothing left on the image justifies.

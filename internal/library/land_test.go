@@ -91,13 +91,15 @@ func TestLand_KeepsAFileTheIngestFailedOnOnlyWhenAsked(t *testing.T) {
 }
 
 func TestLand_RemovesAFileOfNoSupportedType(t *testing.T) {
-	cx := openTestGallery(t)
-	_, err := land(t, cx, "notes.txt", []byte("not an image"), LandSpec{Origin: "upload", KeepOnFailure: true})
-	if LandStageOf(err) != LandType {
-		t.Fatalf("err %v, want a type failure", err)
-	}
-	if exists(filepath.Join(cx.GalleryPath, "notes.txt")) {
-		t.Error("an unsupported file stayed")
+	for _, name := range []string{"notes.txt", "clip.mp4", "book.cbz"} {
+		cx := openTestGallery(t)
+		_, err := land(t, cx, name, []byte("not an image"), LandSpec{Origin: "upload", KeepOnFailure: true})
+		if LandStageOf(err) != LandType {
+			t.Errorf("%s: err %v, want a type failure", name, err)
+		}
+		if exists(filepath.Join(cx.GalleryPath, name)) {
+			t.Errorf("%s: an unsupported file stayed", name)
+		}
 	}
 }
 
@@ -233,6 +235,21 @@ func TestLand_AGalleryNamedByARelativePath(t *testing.T) {
 	mustWriteFile(t, inPlace, pngBytes(t, 200), 0o644)
 	if _, err := cx.LandInPlace(context.Background(), inPlace, LandSpec{Origin: "api"}); err != nil {
 		t.Errorf("landing a file in place by its absolute path: %v", err)
+	}
+}
+
+func TestLandStageString(t *testing.T) {
+	for _, tc := range []struct {
+		stage LandStage
+		want  string
+	}{
+		{LandWrite, "write"},
+		{LandIngest, "ingest"},
+		{LandStageOf(errors.New("not a landing")), "LandStage(-1)"},
+	} {
+		if got := tc.stage.String(); got != tc.want {
+			t.Errorf("LandStage(%d).String() = %q, want %q", int(tc.stage), got, tc.want)
+		}
 	}
 }
 

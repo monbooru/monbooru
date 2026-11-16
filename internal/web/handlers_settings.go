@@ -47,7 +47,7 @@ type settingsData struct {
 	DesktopProfile     bool
 	DesktopFolders     []string
 	Desktop            desktop.Integration
-	DesktopJobWarning  string
+	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
 }
 
@@ -111,7 +111,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		DesktopProfile:     s.desktopLocal(r),
 		DesktopFolders:     s.availableFolders(),
 		Desktop:            s.desktopIntegration(),
-		DesktopJobWarning:  s.desktopJobWarning(),
+		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
 	})
 }
@@ -484,17 +484,31 @@ func (s *Server) settingsTokenCreate(w http.ResponseWriter, r *http.Request) {
 	s.renderAuthTokensOOB(w, r)
 }
 
-func (s *Server) tokenPaired(id string) bool {
+func (s *Server) tokenPeer(id string) string {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
-	i := slices.IndexFunc(s.cfg.Auth.Tokens, func(t apitoken.Token) bool { return t.ID == id })
-	return i >= 0 && s.cfg.Auth.Tokens[i].Paired != ""
+	if i := slices.IndexFunc(s.cfg.Auth.Tokens, func(t apitoken.Token) bool { return t.ID == id }); i >= 0 {
+		return s.cfg.Auth.Tokens[i].Paired
+	}
+	return ""
 }
 
 func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if s.tokenPaired(id) {
-		writeInlineFlash(w, "err", "This token is managed by a pairing; remove the pairing instead.")
+	if app := s.tokenPeer(id); app != "" {
+		saveErr, notifyErr := s.removePeerPairing(r, app)
+		if saveErr != nil {
+			writeInlineFlash(w, "err", "Could not save: "+saveErr.Error())
+			return
+		}
+		logx.Infof("settings: API token %s revoked from %s", id, session.ClientIP(r))
+		if notifyErr != nil {
+			writeInlineFlash(w, "warn", "Revoked here, but could not reach "+app+" - remove the pairing there too.")
+		} else {
+			writeInlineFlash(w, "ok", "Token revoked, "+app+" pairing removed.")
+		}
+		s.renderAuthTokensOOB(w, r)
+		s.renderPluginRows(w, r, true)
 		return
 	}
 	var removed bool
@@ -556,7 +570,7 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	id := r.PathValue("id")
-	if s.tokenPaired(id) {
+	if s.tokenPeer(id) != "" {
 		writeInlineFlash(w, "err", "This token is managed by a pairing; its privileges can't be changed.")
 		return
 	}

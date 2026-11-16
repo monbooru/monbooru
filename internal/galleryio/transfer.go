@@ -34,7 +34,7 @@ func TransferOneImage(srcCx, dstCx *library.Gallery, id int64, removeAfter bool)
 	}
 	sha := indexed.SHA256
 	srcInfo, statErr := os.Stat(canonPath)
-	if isMissing == 1 || statErr != nil {
+	if isMissing == 1 || statErr != nil || !gallery.NamedInside(srcCx.GalleryPath, canonPath) {
 		return 0, fmt.Errorf("file missing from disk")
 	}
 

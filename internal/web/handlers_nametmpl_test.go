@@ -226,6 +226,16 @@ func TestNamePreview_ASearchScopeStartsAtItsFirstMatch(t *testing.T) {
 	}
 }
 
+func TestNamePreview_ASearchScopeWithoutATotalCountsItForTheWidth(t *testing.T) {
+	srv := newTestServer(t)
+	for i := 0; i < 120; i++ {
+		seedImage(t, srv, fmt.Sprintf("w%03d.png", i), 10+i, 10+i)
+	}
+	w := do(srv, "GET", "/internal/name/preview?scope=place-batch&folder=&name=holiday&kind=search&q=&sort=newest&order=desc&total=")
+	body := w.Body.String()
+	wantIn(t, body, "holiday001.png")
+}
+
 func TestElideMiddle_CutsOnRunes(t *testing.T) {
 	for _, in := range []string{
 		strings.Repeat("é", 80) + ".png",

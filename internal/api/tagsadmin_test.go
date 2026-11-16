@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/tags"
@@ -225,6 +226,22 @@ func TestCreateAlias_ACategoryPrefixFilesTheAliasThere(t *testing.T) {
 	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "artist:", "canonical_id": canonID}, http.StatusBadRequest)
 }
 
+func TestCreateAlias_AnAliasOfAnotherTagIsAConflict(t *testing.T) {
+	env := newTestEnv(t)
+	first := int64(apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "first"}, http.StatusCreated)["id"].(float64))
+	second := int64(apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "second"}, http.StatusCreated)["id"].(float64))
+	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": first}, http.StatusCreated)
+
+	resp := apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": second}, http.StatusConflict)
+	if msg, _ := resp["error"].(string); !strings.Contains(msg, "general:first") {
+		t.Errorf("error = %q, want it to name general:first", msg)
+	}
+	if msg, _ := resp["error"].(string); !strings.Contains(msg, "/api/v1/tags/merge") || strings.Contains(msg, "page") {
+		t.Errorf("error = %q, want it to point at the merge route, not a page", msg)
+	}
+	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym", "canonical_id": first}, http.StatusCreated)
+}
+
 func TestCreateAlias_MissingCanonical(t *testing.T) {
 	env := newTestEnv(t)
 	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "synonym"}, http.StatusBadRequest)
@@ -390,6 +407,22 @@ func TestResolveTags_ImpliesTheWholeClosure(t *testing.T) {
 	}
 	if imps := results[1].(map[string]any)["implies"].([]any); len(imps) != 0 {
 		t.Errorf("ccc implies = %v, want none", imps)
+	}
+}
+
+func TestResolveTags_NamesAnAliasTargetWithItsCategory(t *testing.T) {
+	env := newTestEnv(t)
+	general, _, _ := tags.CategoryIDByName(env.database, "general")
+	character, _, _ := tags.CategoryIDByName(env.database, "character")
+	svc := env.gallery.TagSvc
+	miku := mustTag(t, svc, "hatsune_miku", character)
+	if _, err := svc.CreateAlias("miku", general, miku.ID); err != nil {
+		t.Fatal(err)
+	}
+	resp := apiJSON(t, env, "POST", "/api/v1/tags/resolve", map[string]any{"names": []string{"miku"}}, http.StatusOK)
+	row := resp["results"].([]any)[0].(map[string]any)
+	if row["status"] != "alias" || row["resolves_to"] != "character:hatsune_miku" {
+		t.Errorf("miku = %v, want an alias resolving to character:hatsune_miku", row)
 	}
 }
 

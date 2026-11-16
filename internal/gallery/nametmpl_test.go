@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func testFacts() NameFacts {
@@ -289,6 +290,27 @@ func TestSanitizeReceivedName_DecodesTheFormEncodedQuote(t *testing.T) {
 	} {
 		if got := SanitizeReceivedName(in); got != want {
 			t.Errorf("SanitizeReceivedName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSanitizeReceivedName_BoundsALongName(t *testing.T) {
+	long := strings.Repeat("a", 300)
+	atLimit := strings.Repeat("b", maxNameBytes) + ".png"
+	for _, tc := range []struct{ in, want string }{
+		{long + ".png", strings.Repeat("a", maxNameBytes) + ".png"},
+		{strings.Repeat("é", 130) + ".cbz", strings.Repeat("é", maxNameBytes/2) + ".cbz"},
+		{"x" + strings.Repeat("é", 130) + ".cbz", "x" + strings.Repeat("é", (maxNameBytes-1)/2) + ".cbz"},
+		{"a." + long, "a." + strings.Repeat("a", maxNameBytes-2)},
+		{"." + long + ".png", "." + strings.Repeat("a", maxNameBytes-1) + ".png"},
+		{atLimit, atLimit},
+	} {
+		got := SanitizeReceivedName(tc.in)
+		if got != tc.want {
+			t.Errorf("SanitizeReceivedName(%d bytes) = %q (%d bytes), want %q", len(tc.in), got, len(got), tc.want)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("SanitizeReceivedName(%d bytes) is not valid UTF-8", len(tc.in))
 		}
 	}
 }

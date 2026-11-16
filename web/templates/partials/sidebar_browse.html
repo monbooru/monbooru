@@ -3,7 +3,7 @@
   <div id="source-labels-section">
     <div class="sidebar-section-header">
       <span class="sidebar-section-title">Sources</span>
-      <button id="source-labels-toggle" class="folder-toggle-btn" data-target="source-labels-list">▶</button>
+      <button id="source-labels-toggle" class="folder-toggle-btn" data-target="source-labels-list" aria-label="Sources" aria-expanded="false">▶</button>
     </div>
     <ul id="source-labels-list" class="folder-tree" style="display:none">
       {{range .SourceLabelCounts}}
@@ -23,7 +23,7 @@
   <div id="folder-tree-section">
     <div class="sidebar-section-header">
       <span class="sidebar-section-title">Folders</span>
-      <button id="folder-tree-toggle" class="folder-toggle-btn" data-target="folder-tree-list">▶</button>
+      <button id="folder-tree-toggle" class="folder-toggle-btn" data-target="folder-tree-list" aria-label="Folders" aria-expanded="false">▶</button>
     </div>
     {{template "folder_list" (dict "Level" . "ID" "folder-tree-list" "Class" "folder-tree")}}
   </div>
@@ -91,7 +91,7 @@
 <li class="folder-node-wrap">
   <div class="folder-node-row">
     {{if $node.Sub}}
-    <button class="folder-toggle-btn folder-expand-btn" data-path="{{$node.Path}}" data-target="fc-{{$node.Path}}" title="Toggle folder">▶</button>
+    <button class="folder-toggle-btn folder-expand-btn" data-path="{{$node.Path}}" data-target="fc-{{$node.Path}}" title="Toggle folder" aria-label="Folders in {{$node.Name}}/" aria-expanded="false">▶</button>
     {{else}}
     <span class="folder-spacer"></span>
     {{end}}

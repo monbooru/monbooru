@@ -3,6 +3,7 @@ package api
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 // ResolverFunc resolves an empty name to the active gallery.
@@ -336,6 +338,9 @@ func scopeForMethod(method string) string {
 func serverError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
+	}
+	if !errors.Is(err, context.Canceled) {
+		logx.Warnf("api: %v", err)
 	}
 	contract.WriteError(w, http.StatusInternalServerError, "internal_error", err.Error())
 	return true

@@ -1,5 +1,44 @@
 # Changelog
 
+## [v1.24.1] - 2026-11-16
+### Added
+- Every token under API Tokens now has a Revoke button; revoking a paired one removes its pairing.
+
+### Changed
+- The image page shows the thumbnail while the full image loads, and the rows under it no longer move.
+- Deleting images is faster on large libraries. ([#207](https://github.com/monbooru/monbooru/pull/207))
+- Icon buttons, sidebar toggles and action messages are named for screen readers.
+- A GPU provider that fails to load is reported as such instead of unsupported, with a hint on Windows when a DLL is missing.
+
+### Fixed
+- Thumbnails, previews and cbz pages follow the EXIF orientation of a photo, and the auto-tagger reads it upright. The first start after the upgrade turns the existing thumbnails. ([#182](https://github.com/monbooru/monbooru/issues/182))
+- `width`, `height` and `ratio:` give the size as shown for a JPEG or WebP turned by EXIF, in search and in the API; the first start corrects existing images. ([#182](https://github.com/monbooru/monbooru/issues/182))
+- Pages no longer flash white before a dark theme loads, and their styles are correctly cached between pages. ([#186](https://github.com/monbooru/monbooru/issues/186))
+- Create alias refuses a name that is already an alias of another tag instead of moving it; `POST /api/v1/tags/aliases` answers 409. ([#183](https://github.com/monbooru/monbooru/issues/183))
+- A file pushed with a very long name is saved instead of failing. ([#176](https://github.com/monbooru/monbooru/issues/176))
+- An upload that cannot be saved says why, in the API answer and in the logs. ([#175](https://github.com/monbooru/monbooru/issues/175))
+- A collection with GIF images can be generated as a cbz. ([#174](https://github.com/monbooru/monbooru/issues/174))
+- Images that leave the listing are dropped from the selection. ([#201](https://github.com/monbooru/monbooru/issues/201))
+- Switching gallery no longer stalls every page while a video is streaming.
+- Next is no longer offered past the last page of a search.
+- A PTR lookup that fails or is cancelled keeps the implications it found; running it again applies them.
+- The tag page says when monloader is paused, instead of not paired.
+- After a gallery is pointed at a new folder, the copies left in the old one are no longer kept as duplicates.
+- A file still being written during a sync no longer keeps the hash of its partial content.
+- Relations keeps the sort and page after a bulk merge or dissolve.
+- A dialog's `[x]` stays in its title bar when the title wraps on a phone.
+- A cbz page that inflates far past the size of its archive is refused.
+- API: an upload that is not a media file answers 400 `unsupported_type` instead of 500.
+
+### Internal
+- Building from source needs Go 1.27.4 or newer.
+
+Thanks to @IkariDevGIT for the fix (https://github.com/monbooru/monbooru/pull/207) and the reports (https://github.com/monbooru/monbooru/issues/182, https://github.com/monbooru/monbooru/issues/186).
+Thanks to @spry-key for the reports (https://github.com/monbooru/monbooru/issues/174, https://github.com/monbooru/monbooru/issues/175, https://github.com/monbooru/monbooru/issues/176).
+Thanks to @classymonkey for the report (https://github.com/monbooru/monbooru/issues/183).
+
+Co-authored-by: IkariDevGIT <90197782+IkariDevGIT@users.noreply.github.com>
+
 ## [v1.24.0] - 2026-11-08
 <a href="https://discord.gg/t4TmGtKRzK"><img src="https://raw.githubusercontent.com/monbooru/monbooru/main/.github/assets/discord.webp" width="640" alt="MonBooru Central, the community-run Discord. Join"/></a>
 
