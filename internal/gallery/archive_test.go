@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -174,6 +175,29 @@ func TestExtractPage_AtomicRename(t *testing.T) {
 	got := mustReadFile(t, dst)
 	if !bytes.Equal(got, pic) {
 		t.Errorf("extracted bytes differ from source")
+	}
+}
+
+func TestExtractPage_RefusesAPageThatInflatesPastTheArchive(t *testing.T) {
+	dir := t.TempDir()
+	pic := solidPNG(t, 4, 4, [3]uint8{42, 0, 0})
+	path := writeTestZip(t, dir, "m.cbz", map[string][]byte{
+		"01.avif": make([]byte, 4<<20),
+		"02.png":  pic,
+	})
+	m := mustOpenManga(t, path)
+	defer func() { _ = m.Close() }()
+
+	cacheDir := t.TempDir()
+	bomb := filepath.Join(cacheDir, "page_0001.avif")
+	if err := m.extractPage(0, bomb); err == nil {
+		t.Error("a page of 4 MiB of zeros in a small archive was extracted")
+	}
+	if _, err := os.Stat(bomb); !os.IsNotExist(err) {
+		t.Errorf("the refused page left a file: %v", err)
+	}
+	if err := m.extractPage(1, filepath.Join(cacheDir, "page_0002.png")); err != nil {
+		t.Errorf("a real page beside it was refused: %v", err)
 	}
 }
 

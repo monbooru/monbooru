@@ -25,6 +25,7 @@ type MangaPage struct {
 type Manga struct {
 	Pages []MangaPage
 	zr    *zip.ReadCloser
+	size  int64
 }
 
 var errEmptyManga = errors.New("archive contains no recognised image entries")
@@ -48,6 +49,10 @@ var pageSkipBasenames = map[string]struct{}{
 }
 
 func OpenManga(path string) (*Manga, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("open archive %q: %w", path, err)
+	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open archive %q: %w", path, err)
@@ -81,7 +86,7 @@ func OpenManga(path string) (*Manga, error) {
 		_ = zr.Close()
 		return nil, errEmptyManga
 	}
-	return &Manga{Pages: pages, zr: zr}, nil
+	return &Manga{Pages: pages, zr: zr, size: info.Size()}, nil
 }
 
 func (m *Manga) Close() error {
@@ -125,12 +130,18 @@ func CoverOrientation(path string) int {
 	return m.pageOrientation(0)
 }
 
+// A page is an already compressed image, so it never inflates far past the
+// archive holding it; one that does is a zip bomb, refused before the disk
+// fills. The zip reader holds an entry to its declared size.
 func (m *Manga) extractPage(n int, dst string) error {
 	rc, err := m.pageReader(n)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rc.Close() }()
+	if m.Pages[n].file.UncompressedSize64 > uint64(2*m.size) {
+		return fmt.Errorf("page %d inflates past twice the archive's size", n+1)
+	}
 	return fsx.WriteAtomic(dst, ".page.*", func(f *os.File) error {
 		if _, err := io.Copy(f, rc); err != nil {
 			return fmt.Errorf("write page %d: %w", n+1, err)
