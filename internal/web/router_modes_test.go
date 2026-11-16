@@ -1,6 +1,7 @@
 package web
 
 import (
+	"image/color"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +40,10 @@ var wantFreeRoutes = []string{
 	"GET /theme.logo",
 	"GET /theme.mascot/{face}",
 	"GET /thumbnails/{gallery}/{file}",
+	"GET /images/{id}/file",
+	"GET /images/{id}/view",
+	"GET /images/{id}/page/{n}",
+	"GET /images/{id}/page/{n}/thumb",
 
 	"DELETE /settings/auth/tokens/{id}",
 	"GET /favicon.ico",
@@ -272,6 +278,37 @@ func TestUploadsReadTheirBodyOutsideTheGalleryLock(t *testing.T) {
 		}
 		_ = mw.Close()
 		_ = pw.Close()
+		<-done
+	}
+}
+
+func TestImageBytesStreamWithoutTheGalleryLock(t *testing.T) {
+	srv := newTestServer(t)
+	img := strconv.FormatInt(seedImage(t, srv, "a.png", 10, 10), 10)
+	manga := strconv.FormatInt(seedManga(t, srv, "m.cbz", [][]byte{tinyPNG(t, 8, 8, color.RGBA{1, 2, 3, 255})}), 10)
+	for _, path := range []string{
+		"/images/" + img + "/file",
+		"/images/" + img + "/view",
+		"/images/" + manga + "/page/1",
+		"/images/" + manga + "/page/1/thumb",
+	} {
+		sw := &stalledWriter{header: http.Header{}, started: make(chan struct{}), release: make(chan struct{})}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			srv.Handler().ServeHTTP(sw, httptest.NewRequest("GET", path, nil))
+		}()
+		select {
+		case <-sw.started:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s never started streaming", path)
+		}
+		if srv.set.TryLock() {
+			srv.set.Unlock()
+		} else {
+			t.Errorf("%s holds the gallery lock while it streams", path)
+		}
+		close(sw.release)
 		<-done
 	}
 }
