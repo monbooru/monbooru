@@ -207,7 +207,7 @@ func TestSessionPage_DecisionFormSwapsIntoTheFlashSlot(t *testing.T) {
 	queueRow(t, srv.db(), a, b, 3)
 
 	body := mustGetBody(t, srv, "/relations/session")
-	wantIn(t, body, `<div id="flash-relations" data-action-flash></div>`)
+	wantIn(t, body, `<div id="flash-relations" data-action-flash role="status"></div>`)
 	wantIn(t, body, `hx-post="/relations/session/decide" hx-target="#flash-relations" hx-swap="innerHTML"`)
 }
 

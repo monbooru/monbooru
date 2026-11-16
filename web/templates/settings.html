@@ -524,7 +524,7 @@
       <p class="field-hint">Settings for the local tagging models.</p>
       {{template "partials/tagger_mode_badge.html" (dict "Provider" $cfg.Tagger.ExecutionProvider)}}
     </div>
-    <div id="flash-tagger" data-action-flash></div>
+    <div id="flash-tagger" data-action-flash role="status"></div>
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
     <form hx-post="/settings/tagger" hx-target="#flash-tagger" hx-swap="innerHTML">
