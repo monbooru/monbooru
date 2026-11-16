@@ -194,6 +194,26 @@ func TestBootstrap_DropsTheSourceMirrorIndexes(t *testing.T) {
 		t.Errorf("%d index(es) on the source mirror left", n)
 	}
 }
+func TestBootstrap_DropsTheDuplicateSHA256Index(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `CREATE INDEX idx_images_sha256 ON images(sha256);
+		PRAGMA user_version = 17`)
+
+	mustBootstrap(t, db)
+	if n := countRows(t, db, "sqlite_master WHERE type = 'index' AND name = 'idx_images_sha256'"); n != 0 {
+		t.Error("idx_images_sha256 left")
+	}
+	var id, parent, notused int
+	var plan string
+	if err := db.Read.QueryRow(`EXPLAIN QUERY PLAN SELECT id FROM images WHERE sha256 = 'x'`).Scan(&id, &parent, &notused, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "sqlite_autoindex_images_1") {
+		t.Errorf("a sha256 lookup plans as %q, want the UNIQUE index", plan)
+	}
+}
+
 func TestBootstrap_NullsInfiniteStoredFloats(t *testing.T) {
 	db := openTestDB(t)
 	mustBootstrap(t, db)

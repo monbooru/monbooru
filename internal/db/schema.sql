@@ -374,7 +374,6 @@ CREATE INDEX IF NOT EXISTS idx_tag_implications_implied ON tag_implications(impl
 CREATE INDEX IF NOT EXISTS idx_image_tags_user_tag ON image_tags(tag_id) WHERE is_auto = 0;
 CREATE INDEX IF NOT EXISTS idx_image_tags_auto_tagger ON image_tags(tagger_name)
     WHERE is_auto = 1 AND tagger_name IS NOT NULL AND tagger_name != '';
-CREATE INDEX IF NOT EXISTS idx_images_sha256     ON images(sha256);
 CREATE INDEX IF NOT EXISTS idx_images_ingested   ON images(ingested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_favorited  ON images(is_favorited);
 CREATE INDEX IF NOT EXISTS idx_images_source_type ON images(source_type);

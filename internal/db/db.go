@@ -77,7 +77,7 @@ const NormalizeWindowsFolderPathSQL = `UPDATE images SET folder_path = ltrim(rep
 
 // Bump bootstrapSchemaVersion for a new one-shot or an index the planner
 // needs stats for: ANALYZE runs once per bump.
-const bootstrapSchemaVersion = 17
+const bootstrapSchemaVersion = 18
 
 // A library below MinUpgradeUserVersion was last opened outside the
 // two-minor upgrade window; UpgradeVia is a release that still upgrades

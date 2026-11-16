@@ -45,6 +45,10 @@ func Bootstrap(db *DB) error {
 	if existing && marker < 17 {
 		db.UnturnedThumbs = true
 	}
+	if marker < 18 {
+		// The UNIQUE column's own index already serves every sha256 lookup.
+		b.exec("drop idx_images_sha256", `DROP INDEX IF EXISTS idx_images_sha256`)
+	}
 	b.ensureColumn("image_sources", "commentary_translated", `ALTER TABLE image_sources ADD COLUMN commentary_translated TEXT NOT NULL DEFAULT ''`)
 	b.exec("create idx_image_sources_parent_url", `CREATE INDEX IF NOT EXISTS idx_image_sources_parent_url ON image_sources(parent_url) WHERE parent_url != ''`)
 	// Must match upgrade.CandidateWhere, or the planner stops using it.
