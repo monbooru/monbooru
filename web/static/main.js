@@ -1617,8 +1617,14 @@ document.addEventListener('click', function(e) {
     si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
   } else {
     // A query that ends on an operator is waiting for this term.
-    const wrap = hasTopLevelOr(terms) && !isQueryOp(terms[terms.length - 1]);
-    si.value = (wrap ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
+    const last = terms[terms.length - 1] || '';
+    if (last === '-') {
+      // A lone - only negates the term it touches.
+      si.value = terms.slice(0, -1).concat('-' + tagName).join(' ');
+    } else {
+      const wrap = hasTopLevelOr(terms) && !(isQueryOp(last) || /^not$/i.test(last) || isGroupOpen(last));
+      si.value = (wrap ? ['('].concat(terms, ')') : terms).concat(tagName).join(' ');
+    }
   }
   submitSearch();
 });
