@@ -16,6 +16,7 @@ Each version links to its release notes. Thank you all!
 | [@GenCreamer](https://github.com/GenCreamer) | [v1.21.1](https://github.com/monbooru/monbooru/releases/tag/v1.21.1) |  |  |
 | [@Hamuko](https://github.com/Hamuko) | [v1.24.0](https://github.com/monbooru/monbooru/releases/tag/v1.24.0) |  |  |
 | [@hypentilation](https://github.com/hypentilation) |  | [v1.14.0](https://github.com/monbooru/monloader/releases/tag/v1.14.0) |  |
+| [@IkariDevGIT](https://github.com/IkariDevGIT) |  | [v1.14.1](https://github.com/monbooru/monloader/releases/tag/v1.14.1) |  |
 | [@ivabus](https://github.com/ivabus) |  | [v1.13.0](https://github.com/monbooru/monloader/releases/tag/v1.13.0) |  |
 | [@IZA09](https://github.com/IZA09) | [v1.23.0](https://github.com/monbooru/monbooru/releases/tag/v1.23.0) |  |  |
 | [@JakubGrobelny](https://github.com/JakubGrobelny) | [v1.21.1](https://github.com/monbooru/monbooru/releases/tag/v1.21.1) |  |  |
