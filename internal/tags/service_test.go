@@ -141,7 +141,7 @@ func TestAddTagsToImageFromTagger_ManualSource(t *testing.T) {
 	imgID := insertTestImage(t, database, "abc130")
 
 	tag, _ := svc.GetOrCreateTag("sourced", catID)
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{tag.ID}, false, "my_app"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{tag.ID}, nil, false, "my_app"); err != nil {
 		t.Fatalf("AddTagsToImageFromTagger: %v", err)
 	}
 
@@ -1169,10 +1169,10 @@ func TestRemoveSourceTagsFromImage(t *testing.T) {
 	danb, _ := svc.GetOrCreateTag("dan", catID)
 	gelb, _ := svc.GetOrCreateTag("gel", catID)
 	mustAddTag(t, svc, imgID, manual.ID, false, nil)
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{danb.ID}, false, "danbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{danb.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{gelb.ID}, false, "gelbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{gelb.ID}, nil, false, "gelbooru"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3595,7 +3595,7 @@ func TestUsageBreakdown_LeavesOutImagesMarkedMissing(t *testing.T) {
 	live := insertTestImage(t, database, "live")
 	gone := insertTestImage(t, database, "gone")
 	for _, id := range []int64{live, gone} {
-		if err := svc.AddTagsToImageFromTagger(id, []int64{tag.ID}, false, "danbooru"); err != nil {
+		if _, err := svc.AddTagsToImageFromTaggerConf(id, []int64{tag.ID}, nil, false, "danbooru"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3621,7 +3621,7 @@ func TestUsageBreakdown_CountsImpliedRowsOnTheirOwnLine(t *testing.T) {
 	child := mustTag(t, svc, "child_tag", gen)
 	mustAddImply(t, svc, parent.ID, child.ID)
 	fanned := insertTestImage(t, database, "fanned")
-	if err := svc.AddTagsToImageFromTagger(fanned, []int64{parent.ID}, false, "danbooru"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(fanned, []int64{parent.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatal(err)
 	}
 	mustAddTag(t, svc, insertTestImage(t, database, "typed"), child.ID, false, nil)

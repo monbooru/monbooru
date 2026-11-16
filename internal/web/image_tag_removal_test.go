@@ -62,7 +62,7 @@ func TestRemoveTagsDialog_OffersUserTagsOnlyForOwnedRows(t *testing.T) {
 	child := mustTag(t, srv.tagSvc(), "implied_child", gen)
 	mustAddImply(t, srv.tagSvc(), parent.ID, child.ID)
 
-	if err := srv.tagSvc().AddTagsToImageFromTagger(id, []int64{parent.ID}, false, "danbooru"); err != nil {
+	if _, err := srv.tagSvc().AddTagsToImageFromTaggerConf(id, []int64{parent.ID}, nil, false, "danbooru"); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, srv.db(), "image_tags WHERE image_id = ? AND tag_id = ? AND is_implied = 1", id, child.ID); n != 1 {

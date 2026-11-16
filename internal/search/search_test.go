@@ -2937,7 +2937,7 @@ func TestExecute_TaggedSource(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := svc.AddTagsToImageFromTagger(auto, []int64{child}, true, "wd14"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(auto, []int64{child}, nil, true, "wd14"); err != nil {
 		t.Fatal(err)
 	}
 

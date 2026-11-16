@@ -20,7 +20,7 @@ func TestStripTags_KeepsUsageInStepAcrossChunks(t *testing.T) {
 	for i := range 600 {
 		id := insertTestImage(t, database, fmt.Sprintf("strip_%d", i))
 		mustAddTag(t, svc, id, user, false, nil)
-		if err := svc.AddTagsToImageFromTagger(id, []int64{kept}, true, "wd"); err != nil {
+		if _, err := svc.AddTagsToImageFromTaggerConf(id, []int64{kept}, nil, true, "wd"); err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, id)
@@ -100,7 +100,7 @@ func TestStripTags_NarrowsBySourceAndTagger(t *testing.T) {
 	mustSyncSourceTags(t, svc, id, []int64{danb}, "danbooru", false)
 	mustSyncSourceTags(t, svc, id, []int64{gelb}, "gelbooru", false)
 	for tagger, tag := range map[string]int64{"wd": wd, "joy": joy} {
-		if err := svc.AddTagsToImageFromTagger(id, []int64{tag}, true, tagger); err != nil {
+		if _, err := svc.AddTagsToImageFromTaggerConf(id, []int64{tag}, nil, true, tagger); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -138,7 +138,7 @@ func autoAndManualParents(t *testing.T, svc *Service, imageID int64) (child int6
 	child = mkTagID(t, svc, "animal_ears", general)
 	mustAddImply(t, svc, autoParent, child)
 	mustAddImply(t, svc, manualParent, child)
-	if err := svc.AddTagsToImageFromTagger(imageID, []int64{autoParent}, true, "wd"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imageID, []int64{autoParent}, nil, true, "wd"); err != nil {
 		t.Fatal(err)
 	}
 	mustAddTag(t, svc, imageID, manualParent, false, nil)

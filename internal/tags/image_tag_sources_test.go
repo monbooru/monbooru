@@ -103,7 +103,7 @@ func TestTagSources_ImportLabelRecorded(t *testing.T) {
 	database, svc := setupTestDB(t)
 	imgID := insertTestImage(t, database, "src-import")
 	tag := mustTag(t, svc, "cute", generalCategoryID(t, svc))
-	if err := svc.AddTagsToImageFromTagger(imgID, []int64{tag.ID}, false, "import"); err != nil {
+	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{tag.ID}, nil, false, "import"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ledgerSources(t, database, imgID, tag.ID); !reflect.DeepEqual(got, []string{"import"}) {

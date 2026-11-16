@@ -43,7 +43,6 @@ func TestService_SignalsAfterEveryCommit(t *testing.T) {
 			_, err := svc.AddTagToImageReportingDup(img, b.ID, false, nil, "")
 			return err
 		}},
-		{name: "AddTagsToImageFromTagger", run: func() error { return svc.AddTagsToImageFromTagger(img, []int64{c.ID}, true, "wd") }},
 		{name: "AddTagsToImageFromTaggerConf", run: func() error {
 			_, err := svc.AddTagsToImageFromTaggerConf(img2, []int64{c.ID}, []*float64{&conf}, true, "wd")
 			return err
