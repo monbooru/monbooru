@@ -773,8 +773,7 @@ func TestRecordedMismatchSurvivesADisagreeingClaim(t *testing.T) {
 
 func sourceURLKeysOf(t *testing.T, db *DB, imageID int64) []string {
 	t.Helper()
-	// Keys equal under NOCASE are one key; which spelling stays is up to
-	// write order.
+
 	keys, err := QueryStrings(db.Read, `SELECT lower(key) FROM image_source_urls WHERE image_id = ? ORDER BY key`, imageID)
 	if err != nil {
 		t.Fatal(err)
