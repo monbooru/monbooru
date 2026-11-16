@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log"
 	"maps"
 	"net/http"
 	"net/url"
@@ -318,4 +319,19 @@ func TestRelatedEntries_CollectionStepsWalkTheCollection(t *testing.T) {
 
 	w = do(srv, "GET", fmt.Sprintf("/internal/images/%d/related-entries", lone))
 	wantNotIn(t, w.Body.String(), "Same collection")
+}
+
+func TestDetail_AFailedReadIsNotANotFound(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	srv := newTestServer(t)
+	id := seedImage(t, srv, "read_fail.png", 10, 10)
+	if err := srv.active().DB.Read.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(srv, "GET", "/images/"+strconv.FormatInt(id, 10))
+	mustCode(t, w, http.StatusInternalServerError)
+	wantIn(t, buf.String(), "ERROR detail of image")
 }

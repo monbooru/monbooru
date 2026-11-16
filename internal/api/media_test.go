@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -161,6 +162,9 @@ func TestServeMangaPage_NotManga(t *testing.T) {
 }
 
 func TestImageRoutesAnswer500WhenTheDatabaseFails(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	env := newTestEnv(t)
 	id := env.createTestImage(t, "held.png", 8, 8)
 	if err := env.database.Read.Close(); err != nil {
@@ -189,6 +193,7 @@ func TestImageRoutesAnswer500WhenTheDatabaseFails(t *testing.T) {
 			t.Errorf("%s %s = %d %s, want 500 internal_error", route.method, path, w.Code, w.Body.String())
 		}
 	}
+	wantIn(t, logged.String(), "WARN api: ")
 }
 
 func TestServeImageFileAnswersJSONWhenTheFileIsGone(t *testing.T) {

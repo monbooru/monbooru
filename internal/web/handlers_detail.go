@@ -3,6 +3,8 @@ package web
 import (
 	"cmp"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -200,8 +202,16 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	img, err := loadImage(ctx, s.db(), id)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		s.notFoundHandler(w, r)
+		return
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		logx.Errorf("detail of image %d: %v", id, err)
+		http.Error(w, "Could not load this image.", http.StatusInternalServerError)
 		return
 	}
 
