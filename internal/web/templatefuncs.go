@@ -148,6 +148,7 @@ func templateFuncs() template.FuncMap {
 		},
 		"plural":      models.Plural,
 		"abbrevCount": abbrevCount,
+		"searchTime":  searchTime,
 		// Always quoted: a term may carry spaces the parser would split on.
 		"comfySearch": func(term string) string {
 			if term == "" {
@@ -303,6 +304,31 @@ func abbrevCount(n int) string {
 	default:
 		return abbrevUnit(n, 1000000, "M")
 	}
+}
+
+// Three significant digits, as a cached search takes well under a
+// millisecond; the unit promotes at 999.5 ms, which rounds to "1000".
+func searchTime(d time.Duration) string {
+	if d < 999500*time.Microsecond {
+		return threeDigits(float64(d)/float64(time.Millisecond)) + " ms"
+	}
+	return threeDigits(d.Seconds()) + " s"
+}
+
+// Fixed-point rather than %g, which turns a long search into "1.23e+03".
+func threeDigits(v float64) string {
+	dec := 2
+	for x := v; x >= 10 && dec > 0; x /= 10 {
+		dec--
+	}
+	for x := v; x > 0 && x < 1; x *= 10 {
+		dec++
+	}
+	s := strconv.FormatFloat(v, 'f', dec, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
 }
 
 func abbrevUnit(n, div int, suffix string) string {
