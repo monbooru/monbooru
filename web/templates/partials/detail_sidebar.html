@@ -4,7 +4,7 @@
   <div id="tags-section" hx-target="#image-tags" hx-swap="outerHTML">
     <div class="sidebar-section-header">
       <span class="sidebar-section-title">Tags</span>
-      <button id="tags-toggle" class="folder-toggle-btn" data-target="tag-groups">▼</button>
+      <button id="tags-toggle" class="folder-toggle-btn" data-target="tag-groups" aria-label="Tags" aria-expanded="true">▼</button>
     </div>
     <div id="tag-groups" class="detail-tag-groups" data-mode="{{.Mode}}">
       {{if .Sections}}

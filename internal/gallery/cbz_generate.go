@@ -21,12 +21,12 @@ type CBZMember struct {
 	filename string
 }
 
-// WriteCollectionCBZ refuses the whole set when a member is not a still
-// image, rather than dropping it, so the operator hears about it.
+// WriteCollectionCBZ refuses the whole set when a member cannot be a page,
+// rather than dropping it, so the operator hears about it.
 func WriteCollectionCBZ(ctx context.Context, dstPath string, members []CBZMember, title string, progress func(processed, total int, message string)) (pages, skipped int, err error) {
 	for _, m := range members {
-		if models.MediaKind(m.FileType) != "image" {
-			return 0, 0, fmt.Errorf("%s has file type %q, not an image: it cannot be a cbz page", filepath.Base(m.Path), m.FileType)
+		if ft, _ := models.LookupFileType(m.FileType); !ft.PageImage {
+			return 0, 0, fmt.Errorf("%s has file type %q, which cannot be a cbz page", filepath.Base(m.Path), m.FileType)
 		}
 	}
 	total := len(members)

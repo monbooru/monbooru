@@ -18,6 +18,15 @@ var (
 	ErrMergeIntoAlias = errors.New("cannot merge into a tag that is itself an alias")
 )
 
+type ErrAliasExists struct {
+	CanonicalID int64
+	Canonical   string
+}
+
+func (e *ErrAliasExists) Error() string {
+	return "this name is already an alias of " + e.Canonical + "; use Repoint to… on the alias's page to move it"
+}
+
 func (s *Service) CreateAlias(name string, categoryID, canonicalID int64) (*models.Tag, error) {
 	return s.CreateAliasFrom(name, categoryID, canonicalID, "user")
 }
@@ -78,12 +87,13 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 		// all went missing reads 0 but still has rows, which an alias
 		// would strand.
 		var existingID int64
+		var existingCanonID sql.NullInt64
 		var existingIsAlias, existingCarried, existingRejected int
 		err = tx.QueryRow(
-			`SELECT id, is_alias, EXISTS (SELECT 1 FROM image_tags WHERE tag_id = tags.id), rejected
+			`SELECT id, is_alias, canonical_tag_id, EXISTS (SELECT 1 FROM image_tags WHERE tag_id = tags.id), rejected
 			 FROM tags WHERE name = ? AND category_id = ?`,
 			normalized, categoryID,
-		).Scan(&existingID, &existingIsAlias, &existingCarried, &existingRejected)
+		).Scan(&existingID, &existingIsAlias, &existingCanonID, &existingCarried, &existingRejected)
 		switch {
 		case err == sql.ErrNoRows:
 			var id int64
@@ -105,34 +115,23 @@ func (s *Service) createAlias(name string, categoryID int64, origin string, cano
 			return ErrTagRejected
 		}
 		if existingIsAlias == 1 {
-			if _, err := tx.Exec(
-				`UPDATE tags SET canonical_tag_id = ? WHERE id = ?`, canonicalID, existingID,
-			); err != nil {
+			if existingCanonID.Int64 == canonicalID {
+				resultID = existingID
+				return nil
+			}
+			var canonical string
+			if err := tx.QueryRow(
+				`SELECT c.name || ':' || t.name FROM tags t JOIN tag_categories c ON c.id = t.category_id WHERE t.id = ?`,
+				existingCanonID.Int64,
+			).Scan(&canonical); err != nil {
 				return err
 			}
-		} else if existingCarried == 1 {
+			return &ErrAliasExists{CanonicalID: existingCanonID.Int64, Canonical: canonical}
+		}
+		if existingCarried == 1 {
 			return ErrAliasNameInUse
-		} else {
-			if _, err := tx.Exec(
-				`UPDATE tags SET is_alias = 1, canonical_tag_id = ?, usage_count = 0 WHERE id = ?`,
-				canonicalID, existingID,
-			); err != nil {
-				return err
-			}
-			if err := dropDistinctPairsTx(tx, existingID); err != nil {
-				return err
-			}
 		}
-		if gained, err = repointImplicationsToCanonicalTx(tx, existingID, canonicalID); err != nil {
-			return err
-		}
-		if err := moveTagNoteTx(tx, existingID, canonicalID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(
-			`UPDATE tags SET canonical_tag_id = ? WHERE canonical_tag_id = ?`,
-			canonicalID, existingID,
-		); err != nil {
+		if gained, err = turnIntoAliasTx(tx, existingID, canonicalID); err != nil {
 			return err
 		}
 		resultID = existingID
@@ -239,30 +238,7 @@ func (s *Service) MergeTags(aliasID, canonicalID int64) error {
 			return fmt.Errorf("merge drop alias rows: %w", err)
 		}
 
-		if _, err := tx.Exec(
-			`UPDATE tags SET is_alias = 1, canonical_tag_id = ?, usage_count = 0 WHERE id = ?`,
-			canonicalID, aliasID,
-		); err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(
-			`UPDATE tags SET canonical_tag_id = ? WHERE canonical_tag_id = ?`,
-			canonicalID, aliasID,
-		); err != nil {
-			return err
-		}
-
-		if gained, err = repointImplicationsToCanonicalTx(tx, aliasID, canonicalID); err != nil {
-			return err
-		}
-		if err := moveTagNoteTx(tx, aliasID, canonicalID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`DELETE FROM folded_tag_pairs WHERE old_id = ? OR new_id = ?`, aliasID, aliasID); err != nil {
-			return err
-		}
-		if err := dropDistinctPairsTx(tx, aliasID); err != nil {
+		if gained, err = turnIntoAliasTx(tx, aliasID, canonicalID); err != nil {
 			return err
 		}
 
@@ -307,6 +283,25 @@ func (s *Service) MergeTags(aliasID, canonicalID int64) error {
 
 // An alias left in tag_implications would never fire, stranding the rows
 // its edges implied. The != filters skip would-be self-edges.
+func turnIntoAliasTx(tx *sql.Tx, id, canonicalID int64) (gained bool, err error) {
+	if _, err := tx.Exec(
+		`UPDATE tags SET is_alias = 1, canonical_tag_id = ?, usage_count = 0 WHERE id = ?`,
+		canonicalID, id,
+	); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`UPDATE tags SET canonical_tag_id = ? WHERE canonical_tag_id = ?`, canonicalID, id); err != nil {
+		return false, err
+	}
+	if gained, err = repointImplicationsToCanonicalTx(tx, id, canonicalID); err != nil {
+		return false, err
+	}
+	if err := moveTagNoteTx(tx, id, canonicalID); err != nil {
+		return false, err
+	}
+	return gained, dropRenamedTagPairsTx(tx, id)
+}
+
 func repointImplicationsToCanonicalTx(tx *sql.Tx, aliasID, canonicalID int64) (gained bool, err error) {
 	if closes, err := repointClosesCycleTx(tx, aliasID, canonicalID); err != nil {
 		return false, err

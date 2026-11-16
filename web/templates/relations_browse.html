@@ -26,7 +26,7 @@
     </div>
   </div>
 
-  <div id="flash-relations" data-action-flash></div>
+  <div id="flash-relations" data-action-flash role="status"></div>
 
   <nav class="browse-tabs">
     <a href="/relations/browse?kind=duplicate"   class="browse-tab{{if eq .Kind "duplicate"}}   browse-tab-active{{end}}">Same image <span class="field-hint">({{.Counts.DupGroups}})</span></a>
@@ -154,6 +154,7 @@
           {{template "partials/relations_card_thumb.html" (dict "ID" $source "ActiveGallery" $.ActiveGallery "ExtraClass" "relations-card-summary-thumb" "Title" (printf "Image %d - added %s" $source (index $card.MemberIngestedAt $source)))}}
           <span class="relations-card-summary-meta">tree, {{len .Members}} images</span>
         </summary>
+        {{$deep := gt (len .Members) 2}}
         {{with .Graph}}
         {{$g := .}}
         <div class="deriv-graph" style="--deriv-cols:{{$g.Cols}}">
@@ -163,8 +164,10 @@
             {{$node := .}}
             <div class="deriv-cell">
               {{template "partials/relations_card_thumb.html" (dict "ID" .ID "ActiveGallery" $.ActiveGallery "Title" (printf "Image %d - added %s" .ID (index $card.MemberIngestedAt .ID)) "Date" (index $card.MemberIngestedAt .ID))}}
+              {{if $deep}}
               {{range $node.Sources}}
               {{template "relation_remove_form" dict "Confirm" "Unlink this derivative edge and queue the pair for the session?" "OK" "Review again" "Label" (printf "review again #%d" .) "ExtraClass" "relations-inline-action" "Edge" (printf "%d-%d" . $node.ID) "Fields" (dict "type" "review-again" "kind" "derivative" "a" . "b" $node.ID)}}
+              {{end}}
               {{end}}
             </div>
             {{end}}
@@ -209,6 +212,7 @@
     <h4 class="dlg-title">Merge same-image groups{{template "webui/dialog_x"}}</h4>
     <p class="field-hint">Which group's original wins on the merged row?</p>
     <ul id="merge-dup-choices" class="merge-dup-choices"></ul>
+    <div id="merge-dup-flash"></div>
     {{template "dialog_actions" dict "ID" "merge-dup-dialog" "Submit" "Merge" "Class" "btn-success"}}
   </form>
 </dialog>
@@ -268,13 +272,22 @@
     }, '', 'Remove');
   });
   // A refusal answers 200 with its message instead of a redirect.
-  function onBrowseGroupsResponse(resp) {
-    var redirect = resp.headers.get('HX-Redirect');
-    if (redirect) {
-      window.location.href = redirect;
-      return;
-    }
-    resp.text().then(function(t) { document.getElementById('flash-relations').innerHTML = t; });
+  function onBrowseGroupsResponse(flashId) {
+    return function(resp) {
+      var redirect = resp.headers.get('HX-Redirect');
+      if (redirect) {
+        window.location.href = redirect;
+        return;
+      }
+      resp.text().then(function(t) { document.getElementById(flashId).innerHTML = t; });
+    };
+  }
+  function keepView(params) {
+    var here = new URLSearchParams(location.search);
+    ['sort', 'page'].forEach(function(k) {
+      if (here.get(k)) params.set(k, here.get(k));
+    });
+    return params;
   }
   function submitDissolve(kind, values) {
     var field = 'group_id';
@@ -282,10 +295,10 @@
     else if (kind === 'not_related') field = 'pair';
     var params = new URLSearchParams();
     values.forEach(function(v) { params.append(field, v); });
-    postForm('/relations/browse-groups/dissolve?kind=' + encodeURIComponent(kind), params, {
+    postForm('/relations/browse-groups/dissolve?kind=' + encodeURIComponent(kind), keepView(params), {
       hx: true,
       flashId: 'flash-relations',
-      onOK: onBrowseGroupsResponse,
+      onOK: onBrowseGroupsResponse('flash-relations'),
     });
   }
   // Only the dup and alt tabs render the merge button.
@@ -296,7 +309,7 @@
     if (sel.length < 2) return;
     if (mergeKind === 'alt') {
       showConfirm('Merge ' + sel.length + ' variant groups into one?', function() {
-        submitMerge(sel.map(function(cb) { return cb.value; }), '/relations/browse-groups/merge?kind=alt', null);
+        submitMerge(sel.map(function(cb) { return cb.value; }), '/relations/browse-groups/merge?kind=alt', null, 'flash-relations');
       }, '', 'Merge');
       return;
     }
@@ -304,6 +317,7 @@
     var choices = document.getElementById('merge-dup-choices');
     if (!dlg || !choices) return;
     choices.innerHTML = '';
+    clearSlots('merge-dup-flash');
     var defaultGroupID = null;
     sel.forEach(function(cb) {
       var card = cb.closest('.relations-card');
@@ -342,19 +356,19 @@
       if (ids.length < 2) return;
       var keep = dupForm.querySelector('input[name="keep_original_from"]:checked');
       submitMerge(ids, '/relations/browse-groups/merge?kind=dup',
-        keep ? keep.value : '');
+        keep ? keep.value : '', 'merge-dup-flash');
     });
   }
-  function submitMerge(ids, url, keepOriginalFrom) {
+  function submitMerge(ids, url, keepOriginalFrom, flashId) {
     var params = new URLSearchParams();
     ids.forEach(function(id) { params.append('group_id', id); });
     if (keepOriginalFrom !== null && keepOriginalFrom !== '') {
       params.append('keep_original_from', keepOriginalFrom);
     }
-    postForm(url, params, {
+    postForm(url, keepView(params), {
       hx: true,
-      flashId: 'flash-relations',
-      onOK: onBrowseGroupsResponse,
+      flashId: flashId,
+      onOK: onBrowseGroupsResponse(flashId),
     });
   }
 })();

@@ -21,6 +21,10 @@ import (
 // extension and a collision counter.
 const maxNameBytes = 180
 
+// maxExtBytes is past any extension a gallery reads; a longer suffix after
+// the last dot is cut with the stem.
+const maxExtBytes = 16
+
 // Scope is the call site a template is parsed for; it decides which
 // separators and tokens are allowed.
 type Scope int
@@ -381,18 +385,30 @@ var formFilenameEscapes = strings.NewReplacer("%22", "\"", "%0A", "\n", "%0D", "
 // SanitizeReceivedName keeps a sender's leading dots, which the ignore list
 // matches dotfiles by.
 func SanitizeReceivedName(s string) string {
-	return strings.TrimRight(fsx.FoldFilename(formFilenameEscapes.Replace(s)), " .")
+	name := strings.TrimRight(fsx.FoldFilename(formFilenameEscapes.Replace(s)), " .")
+	ext := filepath.Ext(name)
+	if len(ext) > maxExtBytes {
+		ext = ""
+	}
+	stem := strings.TrimSuffix(name, ext)
+	if len(stem) <= maxNameBytes {
+		return name
+	}
+	return strings.TrimRight(cutAtRune(stem, maxNameBytes), " .") + ext
 }
 
 func TruncateFilename(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	cut := max
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
+	return strings.Trim(cutAtRune(s, max), " .")
+}
+
+func cutAtRune(s string, max int) string {
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
-	return strings.Trim(s[:cut], " .")
+	return s[:max]
 }
 
 type Naming struct {

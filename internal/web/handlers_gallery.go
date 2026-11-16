@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
@@ -234,6 +235,27 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A cursor page's label falls behind once matches land above it, so
+	// whether rows lie past it is read, not counted; a slow search leaves
+	// that to its count.
+	next := ""
+	if cursorRows && search.CursorPaging(sq) {
+		n := len(result.Results)
+		switch {
+		case n < pageSize && sq.After != 0:
+			next = "none"
+		case result.TotalUnknown:
+			next = "probe"
+		case s.cursorPageEdge(r.Context(), sq, 0, result.Results[n-1].ID):
+			next = "more"
+		default:
+			next = "none"
+		}
+		if next == "none" {
+			totalPages = page
+		}
+	}
+
 	hiddenByCeiling, hiddenLater := 0, false
 	if ceiling.IsActive() {
 		if search.Parse(queryStr) != nil {
@@ -305,12 +327,10 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		if page == 1 && cursorRows {
 			data.PagerMorePrev = s.cursorPageEdge(r.Context(), sq, first, 0)
 		}
-		if cursorRows && !result.TotalUnknown && n >= pageSize && page >= totalPages {
-			data.PagerMoreNext = s.cursorPageEdge(r.Context(), sq, 0, last)
-		}
+		data.PagerMoreNext = next == "more"
 	}
 	if result.TotalUnknown || hiddenLater {
-		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, cursorRows && len(result.Results) >= pageSize)
+		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, next)
 	}
 	// The fragment uses it too, for its collapsed sidebar placeholder.
 	data.SidebarURL = buildSidebarURL(queryStr, ids)
@@ -348,7 +368,7 @@ func pagerCursor(first, last int64) (prev, next string) {
 
 // The count fragment re-renders the pagers, so it takes the listing's
 // resolved sort, order and seed and the page's first and last ids.
-func buildCountURL(q, sort, order string, page int, seed int64, count bool, first, last int64, morePrev, fullCursorPage bool) string {
+func buildCountURL(q, sort, order string, page int, seed int64, count bool, first, last int64, morePrev bool, next string) string {
 	v := setNonEmpty(url.Values{}, "q", q, "sort", sort, "order", order, "page", strconv.Itoa(page))
 	if seed != 0 {
 		v.Set("seed", strconv.FormatInt(seed, 10))
@@ -363,8 +383,8 @@ func buildCountURL(q, sort, order string, page int, seed int64, count bool, firs
 	if morePrev {
 		v.Set("more_prev", "1")
 	}
-	if fullCursorPage {
-		v.Set("full_cursor", "1")
+	if next != "" {
+		v.Set("next", next)
 	}
 	return "/internal/search/count?" + v.Encode()
 }
@@ -405,10 +425,11 @@ func (s *Server) galleryCount(w http.ResponseWriter, r *http.Request) {
 		if pageSize := s.pageSize(r); pageSize > 0 {
 			data.TotalPages = (total + pageSize - 1) / pageSize
 		}
-		if q.Get("full_cursor") == "1" {
+		if next := q.Get("next"); next != "" {
+			data.PagerMoreNext = next == "more" || next == "probe" && s.cursorPageEdge(r.Context(), sq, 0, last)
 			data.TotalPages = max(data.TotalPages, data.Page)
-			if data.Page >= data.TotalPages {
-				data.PagerMoreNext = s.cursorPageEdge(r.Context(), sq, 0, last)
+			if !data.PagerMoreNext {
+				data.TotalPages = data.Page
 			}
 		}
 	}
@@ -528,10 +549,11 @@ type folderOpen struct {
 }
 
 func readFolderOpen(r *http.Request, query string) folderOpen {
-	return folderOpen{keys: folderCookieKeys(r), current: queryFolder(query)}
+	return folderOpen{keys: folderCookieKeys(r), current: db.ASCIILower(queryFolder(query))}
 }
 
 func (o folderOpen) onPath(path string) bool {
+	path = db.ASCIILower(path)
 	return o.current == path || strings.HasPrefix(o.current, path+"/")
 }
 
@@ -582,8 +604,13 @@ func (o folderOpen) level(node *gallery.FolderNode, offset int, query string, bu
 	}
 	*budget -= len(shown)
 	lv.Rows = make([]folderRow, len(shown))
+	if j := slices.Index(shown, pin); j >= 0 {
+		lv.Rows[j] = o.row(&kids[pin], query, budget)
+	}
 	for j, i := range shown {
-		lv.Rows[j] = o.row(&kids[i], query, budget)
+		if i != pin {
+			lv.Rows[j] = o.row(&kids[i], query, budget)
+		}
 	}
 	return lv
 }

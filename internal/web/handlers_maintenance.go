@@ -10,13 +10,17 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
@@ -355,10 +359,11 @@ func (s *Server) startRebuildThumbsJob(cx *library.Gallery) error {
 			Path     string
 			FileType string
 			Width    sql.NullInt64
+			Height   sql.NullInt64
 		}
 		imgs, err := db.QueryAll(cx.DB.Read, db.ScanRow(func(img *imgRow) []any {
-			return []any{&img.ID, &img.Path, &img.FileType, &img.Width}
-		}), `SELECT id, canonical_path, file_type, width FROM images WHERE is_missing = 0`)
+			return []any{&img.ID, &img.Path, &img.FileType, &img.Width, &img.Height}
+		}), `SELECT id, canonical_path, file_type, width, height FROM images WHERE is_missing = 0`)
 		if err != nil {
 			s.jobs.Fail(err.Error())
 			return
@@ -382,6 +387,9 @@ func (s *Server) startRebuildThumbsJob(cx *library.Gallery) error {
 				logx.Warnf("rebuild thumbnail for %d: %v", img.ID, err)
 			} else {
 				rebuilt++
+				if _, err := cx.RecomputePhash(ctx, img.ID); err != nil {
+					logx.Debugf("rebuild phash %d: %v", img.ID, err)
+				}
 			}
 			// An AVIF or JPEG XL decodes to answer, so it is probed only
 			// when its size is missing.
@@ -391,12 +399,104 @@ func (s *Server) startRebuildThumbsJob(cx *library.Gallery) error {
 						logx.Warnf("backfill video dimensions for %d: %v", img.ID, err)
 					}
 				}
+			} else if img.FileType == models.FileTypeJPEG || img.FileType == models.FileTypeWEBP || img.FileType == models.FileTypeCBZ {
+				if w, h, ok := gallery.DisplayDimensions(img.Path, img.FileType); ok && (int64(w) != img.Width.Int64 || int64(h) != img.Height.Int64) {
+					if err := cx.SetDimensions(ctx, img.ID, w, h); err != nil {
+						logx.Warnf("backfill dimensions for %d: %v", img.ID, err)
+					}
+				}
 			}
 			processed++
 		}
 		s.jobs.Complete(fmt.Sprintf("[%s] rebuilt %d thumbnail%s%s.", galleryName, rebuilt, plural(rebuilt), failedNote()))
 	}()
 	return nil
+}
+
+// turnUpgradedThumbs rebuilds, once, the thumbnail and phash of every image
+// an upgraded library holds that is not stored upright; Rebuild thumbnails
+// covers the inner pages of a cbz.
+func (s *Server) turnUpgradedThumbs() {
+	var due []*library.Gallery
+	for _, cx := range s.set.All() {
+		if cx.DB != nil && cx.DB.UnturnedThumbs {
+			due = append(due, cx)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+	slices.SortFunc(due, func(a, b *library.Gallery) int { return cmp.Compare(a.Name, b.Name) })
+	names := make([]string, len(due))
+	for i, cx := range due {
+		names[i] = cx.Name
+	}
+	go func() {
+		for s.jobs.Start(models.JobTypeRebuildThumbs, names...) != nil {
+			select {
+			case <-s.done:
+				return
+			case <-time.After(time.Second):
+			}
+		}
+		ctx := s.jobs.Context()
+		turned, failed := 0, 0
+		for _, cx := range due {
+			if cx.Closed() {
+				continue
+			}
+			type imgRow struct {
+				ID       int64
+				Path     string
+				FileType string
+			}
+			imgs, err := db.QueryAll(cx.DB.Read, db.ScanRow(func(img *imgRow) []any {
+				return []any{&img.ID, &img.Path, &img.FileType}
+			}), `SELECT id, canonical_path, file_type FROM images WHERE is_missing = 0 AND file_type IN (?, ?, ?) ORDER BY id`,
+				models.FileTypeJPEG, models.FileTypeWEBP, models.FileTypeCBZ)
+			if err != nil {
+				s.jobs.Fail(fmt.Sprintf("[%s] turning thumbnails: %v", cx.Name, err))
+				return
+			}
+			for i, img := range imgs {
+				if ctx.Err() != nil {
+					s.jobs.Complete(fmt.Sprintf("turning cancelled (%d turned); Rebuild thumbnails does the rest", turned))
+					return
+				}
+				s.jobs.Update(i, len(imgs), fmt.Sprintf("[%s] turning thumbnails…", cx.Name))
+				var o int
+				if img.FileType == models.FileTypeCBZ {
+					o = gallery.CoverOrientation(img.Path)
+				} else {
+					o, _ = metadata.EXIFOrientation(img.Path, img.FileType)
+				}
+				if o < 2 || o > 8 {
+					continue
+				}
+				if err := gallery.Rebuild(img.Path, cx.ThumbnailsPath, img.ID, img.FileType); err != nil {
+					logx.Warnf("turn thumbnail for %d: %v", img.ID, err)
+					failed++
+					continue
+				}
+				if _, err := cx.RecomputePhash(ctx, img.ID); err != nil {
+					logx.Debugf("turn phash %d: %v", img.ID, err)
+				}
+				if o >= 5 {
+					if w, h, ok := gallery.DisplayDimensions(img.Path, img.FileType); ok {
+						if err := cx.SetDimensions(ctx, img.ID, w, h); err != nil {
+							logx.Warnf("turn dimensions for %d: %v", img.ID, err)
+						}
+					}
+				}
+				turned++
+			}
+		}
+		summary := fmt.Sprintf("Turned %d %s by %s EXIF orientation", turned, models.Plural(turned, "thumbnail", "thumbnails"), models.Plural(turned, "its", "their"))
+		if failed > 0 {
+			summary += fmt.Sprintf(", %d failed", failed)
+		}
+		s.jobs.Complete(summary + ".")
+	}()
 }
 
 // phash first: it reads small thumbnails, so a cancel during the md5 pass
@@ -482,7 +582,7 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.jobs.Complete("Memory caches released.")
-	before := readVmRSS()
+	before := desktop.ProcStatus("self", "VmRSS")
 	ctxs := s.allContexts()
 	for _, cx := range ctxs {
 		if err := cx.ShrinkMemory(); errors.Is(err, db.ErrPoolBusy) {
@@ -493,7 +593,7 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 	}
 	debug.FreeOSMemory()
 	tagger.ReleaseAll()
-	after := readVmRSS()
+	after := desktop.ProcStatus("self", "VmRSS")
 	if before > 0 && after > 0 && before > after {
 		writeInlineFlash(w, "ok", "Freed "+webui.HumanBytes(int64(before-after))+".")
 		return

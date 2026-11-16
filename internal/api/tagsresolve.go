@@ -69,7 +69,11 @@ func (h *Handler) resolveTags(w http.ResponseWriter, r *http.Request) {
 		case tag.Rejected:
 			res.Status = "rejected"
 		case tag.Name != name || tag.CategoryID != catID:
-			res.Status, res.ResolvesTo = "alias", qualifiedName(tag.CategoryName, tag.Name)
+			canonical, err := g.TagSvc.GetTag(tag.ID)
+			if serverError(w, err) {
+				return
+			}
+			res.Status, res.ResolvesTo = "alias", qualifiedName(canonical.CategoryName, canonical.Name)
 		default:
 			res.Status = "exists"
 		}

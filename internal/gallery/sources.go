@@ -394,6 +394,13 @@ func SetPrimarySource(database *db.DB, imageID int64, site, url string) error {
 				site, url, rid); err != nil {
 				return err
 			}
+			if site != curSite {
+				if _, err := tx.Exec(
+					`UPDATE image_annotations SET site = ? WHERE image_id = ? AND site = ? AND post_id = ? AND manual = 0`,
+					site, imageID, curSite, curPost); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})

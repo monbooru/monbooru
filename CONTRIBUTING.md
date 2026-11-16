@@ -77,10 +77,12 @@ flowchart TD
     describe the problem or workflow first, then the solution you have in mind`"]
     bug & idea --> issue["`**Open an issue in the repo it is about**
     see the graph below`"]
-    issue -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
+    issue --> state["`**A label says where it stands**
+    accepted, needs info, postponed or declined, then ready for main once the change is on dev; a milestone is the version it ships in`"]
+    state -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
 
     class ship hub;
-    class bug,idea,issue step;
+    class bug,idea,issue,state step;
     class want ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
@@ -134,22 +136,23 @@ config:
 ---
 flowchart TD
     size{{"How big is it?"}}
-    size -->|"a small fix"| branch
+    size -->|"a small fix, or an issue marked help wanted"| branch
     size -->|"anything bigger, a new dependency, or changes across many templates or handlers"| ask["`**Open an issue first**
-    say what and why, wait for a go-ahead`"]
+    say what and why, wait for it to be marked accepted or help wanted`"]
     ask --> branch["`**Write it on a branch of your fork, off dev**
     follow the existing style, reuse the patterns the code already has, and follow any instructions given in the issue`"]
     branch --> self["`**Read every line of your diff and test it live**
     make test has to pass`"]
     self --> pr["`**Open a pull request against dev**
-    Verify runs the build, the linter and the Go tests on it`"]
+    name the issue it answers on the Issue: line; Verify builds and lints it; the Go tests run when a maintainer comments /test`"]
     pr --> review{{"Review answers in the pull request"}}
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
-    review -->|"accepted"| ship(["`**Squash-merged into dev, ships in the next release** → Credit`"])
+    review -->|"accepted"| ship(["`**Merged into dev, ships in the next release** → Credit`"])
+    review -->|"reimplemented"| redone["`Closed and redone on my side, still credited in the changelog → Credit`"]
 
     class ship hub;
-    class ask,branch,self,pr,declined step;
+    class ask,branch,self,pr,declined,redone step;
     class size,review ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
@@ -160,6 +163,8 @@ flowchart TD
 ```
 
 Two branches. `dev` is where the work happens: one commit per change, the pull requests merged in, and the Go tests. `main` holds one snapshot per release. So check that a pull request targets `dev`.
+
+See [project board](https://github.com/orgs/monbooru/projects/4) for the roadmap.
 
 References:
 

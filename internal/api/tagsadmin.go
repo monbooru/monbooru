@@ -78,6 +78,11 @@ func writeSentinelError(w http.ResponseWriter, err error, table []sentinelStatus
 
 func writeTagError(w http.ResponseWriter, err error) {
 	var coll *tags.ErrCategoryCollision
+	var taken *tags.ErrAliasExists
+	if errors.As(err, &taken) {
+		contract.WriteError(w, http.StatusConflict, "conflict", "this name is already an alias of "+taken.Canonical+"; repoint it with POST /api/v1/tags/merge")
+		return
+	}
 	if errors.As(err, &coll) {
 		contract.WriteError(w, http.StatusConflict, "conflict", err.Error())
 		return

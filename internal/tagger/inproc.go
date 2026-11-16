@@ -22,6 +22,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	ort "github.com/yalue/onnxruntime_go"
@@ -312,9 +313,16 @@ func (b *inprocBackend) probeProvider(provider string) error {
 		cleanup()
 	}
 	if err != nil {
-		return fmt.Errorf("libonnxruntime does not support %s: %w", provider, err)
+		return probeError(provider, err)
 	}
 	return nil
+}
+
+func probeError(provider string, err error) error {
+	if strings.Contains(err.Error(), "error 126") {
+		return fmt.Errorf("ONNX Runtime could not load the %s provider: %w (a DLL the provider needs was not found)", provider, err)
+	}
+	return fmt.Errorf("ONNX Runtime could not load the %s provider: %w", provider, err)
 }
 
 func parseDirectMLDeviceID(v string) int {
@@ -641,7 +649,7 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 			if im.MangaProgress && req.OnProgress != nil {
 				req.OnProgress(workerIdx, fmt.Sprintf("image %d: page %d/%d", im.ID, fIdx+1, len(im.FramePaths)))
 			}
-			inputs, err := prepareInputs(fp, loaded)
+			inputs, err := prepareInputs(fp, im.FileType, loaded)
 			if err != nil {
 				logx.Warnf("tagger: read frame failed: image %d frame %d/%d (%s): %v",
 					im.ID, fIdx+1, len(im.FramePaths), fp, err)
@@ -719,7 +727,7 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 
 // prepareInputs decodes the frame once and pads it once per distinct
 // input shape; the decoded frame is dropped before any inference runs.
-func prepareInputs(path string, loaded []loadedTagger) ([]*image.RGBA, error) {
+func prepareInputs(path, fileType string, loaded []loadedTagger) ([]*image.RGBA, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -734,6 +742,15 @@ func prepareInputs(path string, loaded []loadedTagger) ([]*image.RGBA, error) {
 		return nil, fmt.Errorf("image has no pixels (%dx%d)", img.Bounds().Dx(), img.Bounds().Dy())
 	}
 
+	// Turned after the padding: the square is centred, so it turns the
+	// same, and the full-size frame is never copied.
+	// A still image is read as the type sniffed at ingest, which can differ
+	// from its extension; an extracted frame or page has its own name.
+	switch fileType {
+	case "", models.FileTypeMP4, models.FileTypeWEBM, models.FileTypeAVIF, models.FileTypeJXL, models.FileTypeCBZ:
+		fileType = models.ExtFileType(path)
+	}
+	o, _ := metadata.EXIFOrientation(path, fileType)
 	type padKey struct {
 		size int
 		fill [3]uint8
@@ -743,7 +760,7 @@ func prepareInputs(path string, loaded []loadedTagger) ([]*image.RGBA, error) {
 	for i, lt := range loaded {
 		k := padKey{lt.inputSize, padFill(lt.profile)}
 		if padded[k] == nil {
-			padded[k] = padAndResize(img, lt.inputSize, lt.profile)
+			padded[k] = gallery.Orient(padAndResize(img, lt.inputSize, lt.profile), o).(*image.RGBA)
 		}
 		inputs[i] = padded[k]
 	}

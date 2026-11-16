@@ -128,7 +128,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	}
 
 	funcs := templateFuncs()
-	maps.Copy(funcs, webui.Funcs())
+	maps.Copy(funcs, webui.Funcs(assetVersion))
 	tmpl, err := template.New("").Funcs(funcs).ParseFS(webFS.FS, "templates/*.html", "templates/partials/*.html")
 	if err == nil {
 		tmpl, err = tmpl.ParseFS(webui.Templates, "*.html")
@@ -255,9 +255,9 @@ func (s *Server) runMemoryReclaim() {
 			mins := s.cfg.Tagger.IdleReleaseAfterMinutes
 			s.cfgMu.RUnlock()
 			if mins > 0 {
-				before := readVmRSS()
+				before := desktop.ProcStatus("self", "VmRSS")
 				if tagger.ReleaseIdle(time.Duration(mins) * time.Minute) {
-					after := readVmRSS()
+					after := desktop.ProcStatus("self", "VmRSS")
 					if before > 0 && after > 0 && before > after {
 						logx.Infof("memory reclaim: released idle auto-tagger session (-%s)", webui.HumanBytes(int64(before-after)))
 					} else {
@@ -330,7 +330,10 @@ func (rt *routes) write(pattern string, h http.HandlerFunc) { rt.add(pattern, mo
 
 func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, modeFree, h) }
 
-func (s *Server) StartWatchers() { s.set.StartBackground() }
+func (s *Server) StartWatchers() {
+	s.set.StartBackground()
+	s.turnUpgradedThumbs()
+}
 
 func (s *Server) background(name string) library.Background {
 	watch, maxMB := s.watcherSettings()
@@ -354,9 +357,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes(rt *routes) {
 	// The thumbnail route needs no lock: it takes only the directory from
 	// its context.
-	rt.free("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(s.staticFS))).ServeHTTP)
-	rt.free("GET /static/shared/", http.StripPrefix("/static/shared/", http.FileServer(http.FS(webui.Static))).ServeHTTP)
-	rt.free("GET /static/light/", http.StripPrefix("/static/light/", http.FileServer(http.FS(s.lightFS))).ServeHTTP)
+	rt.free("GET /static/", http.StripPrefix("/static/", webui.StaticHandler(s.staticFS, assetVersion)).ServeHTTP)
+	rt.free("GET /static/shared/", http.StripPrefix("/static/shared/", webui.StaticHandler(webui.Static, assetVersion)).ServeHTTP)
+	rt.free("GET /static/light/", http.StripPrefix("/static/light/", webui.StaticHandler(s.lightFS, assetVersion)).ServeHTTP)
 	rt.free("GET /theme.css", s.serveThemeCSS)
 	rt.free("GET /theme.logo", s.serveThemeLogo)
 	rt.free("GET /theme.favicon", s.serveThemeFavicon)
@@ -391,10 +394,10 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.write("GET /i/{sha}", s.imageByHashHandler)
 	rt.read("GET /images/{id}", s.detailHandler)
 	rt.read("GET /images/{id}/related", s.relatedImagesHandler)
-	rt.read("GET /images/{id}/file", s.serveImageFile)
-	rt.read("GET /images/{id}/view", s.serveImageView)
-	rt.read("GET /images/{id}/page/{n}", s.serveMangaPage)
-	rt.read("GET /images/{id}/page/{n}/thumb", s.serveMangaPageThumb)
+	rt.free("GET /images/{id}/file", s.serveImageFile)
+	rt.free("GET /images/{id}/view", s.serveImageView)
+	rt.free("GET /images/{id}/page/{n}", s.serveMangaPage)
+	rt.free("GET /images/{id}/page/{n}/thumb", s.serveMangaPageThumb)
 	rt.read("POST /images/{id}/page/{n}/extract", s.extractMangaPage)
 	rt.read("POST /images/{id}/generate-collection", s.generateMangaCollection)
 	rt.read("GET /images/{id}/read", s.readerHandler)
@@ -605,6 +608,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /internal/tags/suggest", s.tagSuggest)
 	rt.read("GET /internal/search/suggest", s.searchSuggest)
 	rt.read("GET /internal/search/ids", s.searchIDs)
+	rt.read("POST /internal/search/ids", s.searchIDs)
 	rt.read("GET /internal/search/count", s.galleryCount)
 	rt.read("GET /internal/folders/suggest", s.foldersSuggest)
 	rt.read("GET /internal/folders/children", s.folderChildren)
@@ -756,6 +760,7 @@ type baseData struct {
 	DocURL      string
 	Build       string
 	Theme       bool
+	ColorScheme string
 	// Server-rendered so a navigation does not flash the column before
 	// main.js runs.
 	SidebarCollapsed    bool
@@ -793,8 +798,9 @@ func sidebarCollapsed(r *http.Request) bool {
 	return session.FromCookie(r, sidebarCookieName) == "collapsed"
 }
 
-// main.js writes it: each key encoded once and comma-joined. A value with
-// no comma of its own was encoded twice and reads once more.
+// main.js writes it: each key encoded once and comma-joined behind a
+// leading comma. A value with no comma of its own was encoded twice and
+// reads once more.
 const folderCookieName = "monbooru_folders"
 
 func folderCookieKeys(r *http.Request) map[string]bool {
@@ -853,6 +859,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		DocURL:              DocURL,
 		Build:               BuildLabel(),
 		Theme:               theme.Path != "",
+		ColorScheme:         themeScheme(theme),
 		SidebarCollapsed:    sidebarCollapsed(r),
 		BooruName:           s.booruName(),
 		BooruLogo:           themeLogoURL(theme),
@@ -1055,18 +1062,20 @@ func (s *Server) galleries() []config.Gallery {
 	return slices.Clone(s.cfg.Galleries)
 }
 
+var assetVersion = webui.AssetVersion(webFS.FS, webui.Static, registry.FS)
+
 func themeLogoURL(e webui.Theme) string {
 	if e.Logo != "" {
 		return "/theme.logo"
 	}
-	return cmp.Or(builtinArt[e.Name], "/static/") + "logo.png"
+	return cmp.Or(builtinArt[e.Name], "/static/") + "logo.png?v=" + assetVersion
 }
 
 // Versioned: browsers keep favicons outside the page cache and Firefox
 // does not revalidate them, so a fixed URL keeps the first icon seen.
 func themeFaviconURL(e webui.Theme) string {
 	if e.Favicon == "" {
-		return cmp.Or(builtinArt[e.Name], "/static/") + "favicon.png"
+		return cmp.Or(builtinArt[e.Name], "/static/") + "favicon.png?v=" + assetVersion
 	}
 	return "/theme.favicon?v=" + themeFaviconVersion(e)
 }
@@ -1119,38 +1128,58 @@ func (s *Server) resolveMangaImage(idStr string) (string, bool) {
 }
 
 func (s *Server) serveMangaPage(w http.ResponseWriter, r *http.Request) {
-	s.serveMangaPagePath(w, r, gallery.EnsureMangaPage, "", true)
+	s.serveAfterLockedStart(w, r, func() (string, bool) {
+		return s.planMangaPage(w, r, gallery.EnsureMangaPage, "", true)
+	})
 }
 
 func (s *Server) serveMangaPageThumb(w http.ResponseWriter, r *http.Request) {
-	s.serveMangaPagePath(w, r, gallery.EnsureMangaPageThumb, "-thumb", false)
+	s.serveAfterLockedStart(w, r, func() (string, bool) {
+		return s.planMangaPage(w, r, gallery.EnsureMangaPageThumb, "-thumb", false)
+	})
 }
 
-func (s *Server) serveMangaPagePath(
+// The set's read lock is released before the first byte: a switch queued
+// behind a long stream would stall every request after it.
+func (s *Server) serveAfterLockedStart(w http.ResponseWriter, r *http.Request, plan func() (string, bool)) {
+	path, ok := func() (string, bool) {
+		s.set.RLock()
+		defer s.set.RUnlock()
+		if pageGalleryStale(w, r, s.activeGallery()) {
+			return "", false
+		}
+		return plan()
+	}()
+	if ok {
+		http.ServeFile(w, r, path)
+	}
+}
+
+func (s *Server) planMangaPage(
 	w http.ResponseWriter, r *http.Request,
 	ensure func(thumbnailsPath, canonPath string, imageID int64, n int) (string, error),
 	cacheSuffix string, negotiate bool,
-) {
+) (string, bool) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	n, err := strconv.Atoi(r.PathValue("n"))
 	if err != nil || n < 1 {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	canonPath, ok := s.resolveMangaImage(idStr)
 	if !ok {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	page, err := ensure(s.thumbnailsPath(), canonPath, id, n)
 	if err != nil {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	if fileType := models.ExtFileType(page); negotiate && gallery.IsFFmpegStill(fileType) {
 		w.Header().Add("Vary", "Accept")
@@ -1165,26 +1194,26 @@ func (s *Server) serveMangaPagePath(
 	// The archive's mtime, not the page's: every hit touches the page to keep
 	// it cached, which would make each ETag new.
 	setGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
-	http.ServeFile(w, r, page)
+	return page, true
 }
 
 func (s *Server) serveImageFile(w http.ResponseWriter, r *http.Request) {
-	s.serveImageBytes(w, r, false)
+	s.serveAfterLockedStart(w, r, func() (string, bool) { return s.planImageBytes(w, r, false) })
 }
 
 // The viewers' URL; downloads and <video> stay on /file. A still past the
 // display ceiling, or an AVIF or JPEG XL the browser does not accept, is
 // served as a JPEG rendition.
 func (s *Server) serveImageView(w http.ResponseWriter, r *http.Request) {
-	s.serveImageBytes(w, r, true)
+	s.serveAfterLockedStart(w, r, func() (string, bool) { return s.planImageBytes(w, r, true) })
 }
 
-func (s *Server) serveImageBytes(w http.ResponseWriter, r *http.Request, scaled bool) {
+func (s *Server) planImageBytes(w http.ResponseWriter, r *http.Request, scaled bool) (string, bool) {
 	idStr := r.PathValue("id")
 	cx := s.active()
 	if cx == nil {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	var id int64
 	var canonPath, fileType string
@@ -1193,11 +1222,11 @@ func (s *Server) serveImageBytes(w http.ResponseWriter, r *http.Request, scaled 
 		`SELECT id, canonical_path, file_type, width, height FROM images WHERE id = ?`, idStr,
 	).Scan(&id, &canonPath, &fileType, &width, &height); err != nil {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	if !gallery.NamedInside(cx.GalleryPath, canonPath) {
 		http.NotFound(w, r)
-		return
+		return "", false
 	}
 	if scaled && !gallery.IsVideoType(fileType) && fileType != "cbz" {
 		past := gallery.NeedsViewRendition(int(width.Int64), int(height.Int64))
@@ -1218,8 +1247,7 @@ func (s *Server) serveImageBytes(w http.ResponseWriter, r *http.Request, scaled 
 			} else {
 				setGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
 				w.Header().Set("Content-Type", "image/jpeg")
-				http.ServeFile(w, r, rendition)
-				return
+				return rendition, true
 			}
 		}
 	}
@@ -1228,7 +1256,7 @@ func (s *Server) serveImageBytes(w http.ResponseWriter, r *http.Request, scaled 
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Content-Disposition", gallery.ContentDispositionFor(canonPath))
-	http.ServeFile(w, r, canonPath)
+	return canonPath, true
 }
 
 // A wildcard does not count: every browser sends image/*, whether or not

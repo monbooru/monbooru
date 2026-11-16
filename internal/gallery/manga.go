@@ -141,10 +141,11 @@ func generateImageThumbFromAny(srcPath, dstPath string) error {
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return fmt.Errorf("create thumb dir: %w", err)
 	}
-	if IsFFmpegStill(models.ExtFileType(srcPath)) {
+	fileType := models.ExtFileType(srcPath)
+	if IsFFmpegStill(fileType) {
 		return renderStill(srcPath, dstPath, thumbMaxDim)
 	}
-	return generateImageThumb(srcPath, dstPath)
+	return generateImageThumb(srcPath, dstPath, fileType)
 }
 
 // An empty path would put the dir relative to the working directory.

@@ -13,12 +13,8 @@ import (
 )
 
 func (s *Server) findRelationPairsPost(w http.ResponseWriter, r *http.Request) {
-	if !parseFormOK(w, r) {
-		return
-	}
-	cx := s.active()
-	if cx == nil || cx.DB == nil {
-		externalErr(w, r, "No active gallery.", http.StatusServiceUnavailable)
+	cx, ok := s.relationsForm(w, r)
+	if !ok {
 		return
 	}
 	s.cfgMu.RLock()
@@ -54,12 +50,8 @@ func (s *Server) findRelationPairsPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) resetSkippedPost(w http.ResponseWriter, r *http.Request) {
-	if !parseFormOK(w, r) {
-		return
-	}
-	cx := s.active()
-	if cx == nil || cx.DB == nil {
-		externalErr(w, r, "No active gallery.", http.StatusServiceUnavailable)
+	cx, ok := s.relationsForm(w, r)
+	if !ok {
 		return
 	}
 	n, err := cx.RelationsSvc.ResetSkipped(r.Context())

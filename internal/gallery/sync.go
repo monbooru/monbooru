@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/monbooru/monbooru/internal/db"
-	"github.com/monbooru/monbooru/internal/lookup"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
@@ -146,6 +145,13 @@ func Sync(ctx context.Context, h Handle, maxFileSizeMB int, naming Naming, progr
 				onChange()
 			}
 			progress(i, total, "Phase 2: reconciling...")
+		}
+		if fi.md5 != "" {
+			var err error
+			if fi, err = rehashIfMoved(fi); err != nil {
+				logx.Warnf("hash failed for %q: %v", fi.path, err)
+				continue
+			}
 		}
 		if id := reconcileFile(h, bound, fi, known, bySHA, &result, onPhash); id != 0 {
 			ingested = append(ingested, id)
@@ -319,6 +325,22 @@ func walkGalleryFiles(ctx context.Context, bound *Boundary, maxBytes int64, know
 		return nil, skips, fmt.Errorf("walking gallery: %w", err)
 	}
 	return found, skips, nil
+}
+
+// A file still being written when the walk hashed it has moved on since;
+// the row must not keep the partial bytes' digests.
+func rehashIfMoved(fi syncFileInfo) (syncFileInfo, error) {
+	info, err := os.Stat(fi.path)
+	if err != nil || (info.Size() == fi.size && info.ModTime().UnixNano() == fi.mtimeNano) {
+		return fi, nil
+	}
+	sha, sum, err := hashFileDigests(fi.path)
+	if err != nil {
+		return fi, err
+	}
+	fi.sha256, fi.md5, fi.size = sha, sum, info.Size()
+	fi.mtime, fi.mtimeNano = info.ModTime().Unix(), info.ModTime().UnixNano()
+	return fi, nil
 }
 
 // One full scan beats a SELECT per walked file.
@@ -502,10 +524,14 @@ func respelling(root, canonical, walked string) bool {
 	return err == nil && SameFile(info, canonical)
 }
 
-// CanonicalGone also holds for a path outside the root or one the boundary
-// refuses: after a repoint the old copy can still be on disk.
+// After a repoint the old copy can still be on disk, so a path outside the
+// root counts as left out whether or not it is there.
+func leftOut(bound *Boundary, path string) bool {
+	return !PathInside(bound.Root(), path) || bound.Check(path) != nil
+}
+
 func CanonicalGone(bound *Boundary, path string) bool {
-	if !PathInside(bound.Root(), path) || bound.Check(path) != nil {
+	if leftOut(bound, path) {
 		return true
 	}
 	_, err := os.Stat(path)
@@ -608,8 +634,8 @@ func markImagesMissingChunked(ctx context.Context, database *db.DB, ids []int64)
 }
 
 // A path the walk skipped (size cap, unreadable) keeps its row until its
-// file is gone. An excluded path goes even when present: that copy is
-// another gallery's.
+// file is gone. A left-out path goes even when present: that copy is
+// another gallery's, or the old folder's.
 func pruneStaleAliasPaths(ctx context.Context, database *db.DB, bound *Boundary, foundPaths map[string]struct{}) error {
 	type aliasPath struct {
 		id              int64
@@ -628,7 +654,7 @@ func pruneStaleAliasPaths(ctx context.Context, database *db.DB, bound *Boundary,
 		if _, ok := foundPaths[a.path]; ok {
 			continue
 		}
-		if bound.Check(a.path) != nil {
+		if leftOut(bound, a.path) {
 			staleIDs = append(staleIDs, a.id)
 			continue
 		}
@@ -698,20 +724,14 @@ func applyInPlaceEdit(h Handle, path, newSHA, newMD5 string, newMtime, newMtimeN
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}
-		if _, err := setMissingTx(tx, []int64{imageID}, false); err != nil {
-			return fmt.Errorf("mark row present: %w", err)
+		// A placeholder read keeps its bytes, so its copies still match.
+		if err := rewroteBytesTx(tx, imageID, oldSHA != newSHA, facts.sd, facts.comfy); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(
 			`UPDATE image_paths SET mtime_unix = ?, mtime_nsec = ? WHERE path = ?`, newMtime, newMtimeNano, path,
 		); err != nil {
 			return fmt.Errorf("update image_paths mtime: %w", err)
-		}
-		// The recorded lookup misses are about bytes this row no longer has.
-		if err := lookup.DeleteForImage(tx, imageID); err != nil {
-			return fmt.Errorf("clear lookup history: %w", err)
-		}
-		if err := replaceGenerationMetadata(context.Background(), tx, imageID, facts.sd, facts.comfy); err != nil {
-			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM manga_metadata WHERE image_id = ?`, imageID); err != nil {
 			return fmt.Errorf("clear manga_metadata: %w", err)

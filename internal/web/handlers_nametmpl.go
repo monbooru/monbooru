@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -79,6 +80,9 @@ func (s *Server) namePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total, _ := strconv.Atoi(q.Get("total"))
+	if total == 0 && q.Get("kind") == "search" {
+		total = s.searchPreviewTotal(r)
+	}
 	total = max(total, len(ids))
 
 	rows := make([]namePreviewRow, 0, len(ids))
@@ -271,6 +275,20 @@ func (s *Server) searchPreviewIDs(r *http.Request, want int) []int64 {
 		logx.Warnf("name preview search: %v", err)
 	}
 	return ids
+}
+
+// The page sends no total while its count loads; {n}'s width needs one.
+func (s *Server) searchPreviewTotal(r *http.Request) int {
+	q := r.URL.Query()
+	queryStr := q.Get("q")
+	sortStr := cmp.Or(q.Get("sort"), "newest")
+	sq := viewQuery(search.Parse(queryStr), queryStr, sortStr, cmp.Or(q.Get("order"), search.DefaultOrder(sortStr)), resolveCeiling(r, s.active()))
+	sq.RandomSeed, _ = strconv.ParseInt(q.Get("seed"), 10, 64)
+	n, err := search.Count(r.Context(), s.source(), sq)
+	if err != nil {
+		logx.Warnf("name preview count: %v", err)
+	}
+	return n
 }
 
 func (s *Server) namePreviewIDs(raw []string, want int) []int64 {

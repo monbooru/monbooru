@@ -230,28 +230,39 @@ func (s *Server) pluginPairRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	var notifyErr error
-	if name == monloader.App {
-		notifyErr = s.teardownMonloaderPairing(r)
-	} else {
-		notifyErr = s.teardownPluginPairing(name)
-		logx.Infof("pairing: removed %s pairing from %s", name, session.ClientIP(r))
-		if p, ok := s.effective(name); ok && p.Installed {
-			if p.Enabled {
-				s.setPluginEnabled(name, false)
-				s.peers.Retire(s.pairs, name)
-			}
-			// No flash: a folder has no far end to clean up by hand, and
-			// the token is revoked either way, so a copy the plugin kept
-			// authenticates to nothing.
-			notifyErr = nil
-		}
-	}
+	saveErr, notifyErr := s.removePeerPairing(r, name)
 	s.renderPluginRows(w, r, false)
 	s.renderAuthTokensOOB(w, r)
-	if notifyErr != nil {
+	if saveErr != nil {
+		writeFlashOOB(w, "flash-plugins", "err", "Could not save: "+saveErr.Error())
+	} else if notifyErr != nil {
 		writeFlashOOB(w, "flash-plugins", "warn", "Removed here, but could not reach "+name+" - remove the pairing there too.")
 	}
+}
+
+// A save error leaves the pairing as it was and tells no peer; a notify
+// error is a peer that could not be told, for the operator to clean up
+// there by hand.
+func (s *Server) removePeerPairing(r *http.Request, name string) (saveErr, notifyErr error) {
+	if name == monloader.App {
+		return s.teardownMonloaderPairing(r)
+	}
+	saveErr, notifyErr = s.teardownPluginPairing(name)
+	if saveErr != nil {
+		return saveErr, nil
+	}
+	logx.Infof("pairing: removed %s pairing from %s", name, session.ClientIP(r))
+	if p, ok := s.effective(name); ok && p.Installed {
+		if p.Enabled {
+			s.setPluginEnabled(name, false)
+			s.peers.Retire(s.pairs, name)
+		}
+		// A folder has no far end to clean up by hand, and the token is
+		// revoked either way, so a copy the plugin kept authenticates to
+		// nothing.
+		return nil, nil
+	}
+	return nil, notifyErr
 }
 
 func (s *Server) pluginPause(w http.ResponseWriter, r *http.Request) {
@@ -316,15 +327,20 @@ func (s *Server) setPluginPaused(name string, paused bool) error {
 	})
 }
 
-func (s *Server) teardownPluginPairing(name string) error {
+func (s *Server) teardownPluginPairing(name string) (saveErr, notifyErr error) {
 	p, ok := s.plugin(name)
 	if !ok {
-		return nil
+		if err := s.removePairing(name); err != nil {
+			logx.Errorf("pairing: remove %s failed: %v", name, err)
+			return err, nil
+		}
+		return nil, nil
 	}
 	// Read the address before removePairing drops the token it may live on.
 	base, token := s.pluginAddress(p), p.PeerToken
 	if err := s.removePairing(name); err != nil {
 		logx.Errorf("pairing: remove %s failed: %v", name, err)
+		return err, nil
 	}
-	return s.peers.Teardown(name, base, token)
+	return nil, s.peers.Teardown(name, base, token)
 }

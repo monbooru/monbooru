@@ -218,14 +218,17 @@ func (s *Server) renderMonloaderLight(w http.ResponseWriter, r *http.Request, co
 	s.renderTemplate(w, "webui/peer_light", s.monloaderLight(conn, version, "", r.FormValue("seen")))
 }
 
-func (s *Server) teardownMonloaderPairing(r *http.Request) error {
-	notifyErr := s.ml.Teardown(func() {
-		if err := s.removePairing(monloader.App); err != nil {
-			logx.Errorf("pairing: remove failed: %v", err)
-		}
+func (s *Server) teardownMonloaderPairing(r *http.Request) (saveErr, notifyErr error) {
+	notifyErr = s.ml.Teardown(func() error {
+		saveErr = s.removePairing(monloader.App)
+		return saveErr
 	})
+	if saveErr != nil {
+		logx.Errorf("pairing: remove failed: %v", saveErr)
+		return saveErr, nil
+	}
 	logx.Infof("pairing: removed monloader pairing from %s", session.ClientIP(r))
-	return notifyErr
+	return nil, notifyErr
 }
 
 func (s *Server) removePairing(app string) error {

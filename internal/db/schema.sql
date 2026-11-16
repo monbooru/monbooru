@@ -374,7 +374,6 @@ CREATE INDEX IF NOT EXISTS idx_tag_implications_implied ON tag_implications(impl
 CREATE INDEX IF NOT EXISTS idx_image_tags_user_tag ON image_tags(tag_id) WHERE is_auto = 0;
 CREATE INDEX IF NOT EXISTS idx_image_tags_auto_tagger ON image_tags(tagger_name)
     WHERE is_auto = 1 AND tagger_name IS NOT NULL AND tagger_name != '';
-CREATE INDEX IF NOT EXISTS idx_images_sha256     ON images(sha256);
 CREATE INDEX IF NOT EXISTS idx_images_ingested   ON images(ingested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_favorited  ON images(is_favorited);
 CREATE INDEX IF NOT EXISTS idx_images_source_type ON images(source_type);
@@ -395,6 +394,8 @@ CREATE INDEX IF NOT EXISTS idx_sd_metadata_seed         ON sd_metadata(seed)    
 CREATE INDEX IF NOT EXISTS idx_comfyui_metadata_seed    ON comfyui_metadata(seed)            WHERE seed IS NOT NULL;
 -- NOCASE so a lowercase comfyui: query seeks the stored CamelCase term.
 CREATE INDEX IF NOT EXISTS idx_comfyui_terms_term ON comfyui_terms(term COLLATE NOCASE, image_id);
+-- Every image delete's FK check seeks it, or scans dup_groups per row.
+CREATE INDEX IF NOT EXISTS idx_dup_groups_original ON dup_groups(original_image_id);
 CREATE INDEX IF NOT EXISTS idx_dup_group_members_group ON dup_group_members(group_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_alt_group_members_group ON alt_group_members(group_id, image_id);
 CREATE INDEX IF NOT EXISTS idx_derivative_edges_source ON derivative_edges(source_image_id);

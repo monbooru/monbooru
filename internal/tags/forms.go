@@ -193,7 +193,7 @@ type TagForm struct {
 }
 
 // PlainForms leaves out the aliases and the rating tags, which nothing may
-// rewrite.
+// rewrite, and the rejected tags, which map to nothing.
 func (s *Service) PlainForms(ids []int64) ([]TagForm, error) {
 	var out []TagForm
 	err := db.Chunked(ids, 500, func(chunk []int64) error {
@@ -206,7 +206,7 @@ func (s *Service) PlainForms(ids []int64) ([]TagForm, error) {
 			return f, err
 		},
 			`SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
-			 WHERE t.id IN (`+placeholders+`) AND t.is_alias = 0 AND c.name != 'rating'`, args...)
+			 WHERE t.id IN (`+placeholders+`) AND t.is_alias = 0 AND t.rejected = 0 AND c.name != 'rating'`, args...)
 		out = append(out, batch...)
 		return err
 	})

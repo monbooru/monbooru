@@ -3,6 +3,8 @@ package web
 import (
 	"cmp"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -156,6 +158,10 @@ type detailData struct {
 	// why the gallery leaves it out, empty when the next sync restores it.
 	OnDisk  bool
 	LeftOut string
+	// The box the image is drawn in, held before its bytes arrive.
+	BoxW, BoxH int
+	// The thumbnail fills the box meanwhile.
+	Placeholder bool
 }
 
 // External links go by sha because an image id can be reused after a delete.
@@ -196,8 +202,16 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	img, err := loadImage(ctx, s.db(), id)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		s.notFoundHandler(w, r)
+		return
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		logx.Errorf("detail of image %d: %v", id, err)
+		http.Error(w, "Could not load this image.", http.StatusInternalServerError)
 		return
 	}
 
@@ -408,6 +422,8 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		pxW, pxH = *img.Width, *img.Height
 	}
 	previewScaled := !isManga && !gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(pxW, pxH)
+	boxW, boxH := pxW, pxH
+	placeholder := boxW > 0 && !noPreview
 
 	baseName := filepath.Base(img.CanonicalPath)
 	// FolderPath, not the disk dir: a root-level file has no folder to name.
@@ -482,6 +498,9 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		PreviewNote:       previewNote,
 		PreviewScaled:     previewScaled,
 		PreviewMaxDim:     gallery.ViewMaxDim,
+		BoxW:              boxW,
+		BoxH:              boxH,
+		Placeholder:       placeholder,
 		RewrittenBy:       gallery.RewrittenBy(s.db().Read, img.ID),
 		OnDisk:            onDisk,
 		LeftOut:           leftOut,

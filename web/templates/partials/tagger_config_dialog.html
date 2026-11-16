@@ -143,7 +143,7 @@
       <button type="button" class="btn-sm" data-copy-from="#{{.ID}}" title="{{.Title}}">Copy</button>
       <span class="copy-flash" hidden>copied</span>
     </p>
-    <pre class="code-block tc-export-block">{{range .Lines}}<span{{if .Mark}} class="exp-{{.Mark}}"{{end}}>{{.Text}}</span>{{end}}</pre>
+    <pre class="export-block">{{range .Lines}}<span{{if .Mark}} class="exp-{{.Mark}}"{{end}}>{{.Text}}</span>{{end}}</pre>
     <textarea id="{{.ID}}" hidden readonly>{{.JSON}}</textarea>
 {{end}}
 
