@@ -278,15 +278,11 @@ func (s *Server) sourceMembershipAction(w http.ResponseWriter, r *http.Request, 
 }
 
 func (s *Server) removeSource(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Source removed.", func(d *db.DB, id int64, site, postID string) error {
-		return gallery.RemoveSourceMembership(d, id, site, postID)
-	})
+	s.sourceMembershipAction(w, r, "Source removed.", gallery.RemoveSourceMembership)
 }
 
 func (s *Server) makeSourcePrimary(w http.ResponseWriter, r *http.Request) {
-	s.sourceMembershipAction(w, r, "Primary source updated.", func(d *db.DB, id int64, site, postID string) error {
-		return gallery.MakeSourcePrimary(d, id, site, postID)
-	})
+	s.sourceMembershipAction(w, r, "Primary source updated.", gallery.MakeSourcePrimary)
 }
 
 func (s *Server) keepLocalFile(w http.ResponseWriter, r *http.Request) {
@@ -488,10 +484,7 @@ func (s *Server) setSourceText(w http.ResponseWriter, r *http.Request, field, la
 }
 
 func (s *Server) setSourceCommentary(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "commentary", "commentary", contract.MaxCommentary, "Commentary updated.",
-		func(d *db.DB, id int64, site, postID, val string) error {
-			return gallery.SetSourceCommentary(d, id, site, postID, val)
-		})
+	s.setSourceText(w, r, "commentary", "commentary", contract.MaxCommentary, "Commentary updated.", gallery.SetSourceCommentary)
 }
 
 func (s *Server) removeSourceCommentary(w http.ResponseWriter, r *http.Request) {
@@ -501,10 +494,7 @@ func (s *Server) removeSourceCommentary(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) setSourceTranslation(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "commentary_translated", "translation", contract.MaxCommentary, "Translation updated.",
-		func(d *db.DB, id int64, site, postID, val string) error {
-			return gallery.SetSourceCommentaryTranslated(d, id, site, postID, val)
-		})
+	s.setSourceText(w, r, "commentary_translated", "translation", contract.MaxCommentary, "Translation updated.", gallery.SetSourceCommentaryTranslated)
 }
 
 func (s *Server) removeSourceTranslation(w http.ResponseWriter, r *http.Request) {
@@ -515,10 +505,7 @@ func (s *Server) removeSourceTranslation(w http.ResponseWriter, r *http.Request)
 
 // Freeform, no URL check: a booru declares it as lines of URLs or plain text.
 func (s *Server) setSourceOriginal(w http.ResponseWriter, r *http.Request) {
-	s.setSourceText(w, r, "original", "original source", contract.MaxOriginal, "Original source updated.",
-		func(d *db.DB, id int64, site, postID, val string) error {
-			return gallery.SetSourceOriginal(d, id, site, postID, val)
-		})
+	s.setSourceText(w, r, "original", "original source", contract.MaxOriginal, "Original source updated.", gallery.SetSourceOriginal)
 }
 
 func (s *Server) removeSourceOriginal(w http.ResponseWriter, r *http.Request) {
