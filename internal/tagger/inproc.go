@@ -313,9 +313,16 @@ func (b *inprocBackend) probeProvider(provider string) error {
 		cleanup()
 	}
 	if err != nil {
-		return fmt.Errorf("libonnxruntime does not support %s: %w", provider, err)
+		return probeError(provider, err)
 	}
 	return nil
+}
+
+func probeError(provider string, err error) error {
+	if strings.Contains(err.Error(), "error 126") {
+		return fmt.Errorf("ONNX Runtime could not load the %s provider: %w (a DLL the provider needs was not found)", provider, err)
+	}
+	return fmt.Errorf("ONNX Runtime could not load the %s provider: %w", provider, err)
 }
 
 func parseDirectMLDeviceID(v string) int {

@@ -5,6 +5,7 @@ package tagger
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -78,11 +79,27 @@ func TestProviderProbeReusesALiveEnvironment(t *testing.T) {
 	if err == nil {
 		t.Skip("this onnxruntime library supports CUDA; the probe needs a CPU-only one")
 	}
-	if strings.Contains(err.Error(), "already been initialized") || !strings.Contains(err.Error(), "does not support cuda") {
-		t.Errorf("probe with a live environment: %v, want the library's missing-provider error", err)
+	if strings.Contains(err.Error(), "already been initialized") || !strings.Contains(err.Error(), "could not load the cuda provider") {
+		t.Errorf("probe with a live environment: %v, want the provider's load error", err)
 	}
 	if !defaultBackend.Status().Loaded {
 		t.Error("the probe tore down the live environment")
+	}
+}
+
+func TestProbeErrorKeepsTheRuntimeMessageAndExplainsError126(t *testing.T) {
+	missing := errors.New(`LoadLibrary failed with error 126 "" when trying to load "C:\monbooru\onnxruntime_providers_tensorrt.dll"`)
+	got := probeError("tensorrt", missing).Error()
+	if strings.Contains(got, "does not support") {
+		t.Errorf("a provider that is there with a DLL missing reads as unsupported: %s", got)
+	}
+	if !strings.Contains(got, missing.Error()) || !strings.HasSuffix(got, "(a DLL the provider needs was not found)") {
+		t.Errorf("probeError = %s, want the runtime's message and the missing-DLL hint", got)
+	}
+
+	named := errors.New("Failed to load library libonnxruntime_providers_cuda.so with error: libcublasLt.so.12: cannot open shared object file")
+	if got, want := probeError("cuda", named).Error(), "ONNX Runtime could not load the cuda provider: "+named.Error(); got != want {
+		t.Errorf("probeError = %s, want %s", got, want)
 	}
 }
 
