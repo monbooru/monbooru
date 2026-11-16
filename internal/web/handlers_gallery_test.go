@@ -292,6 +292,9 @@ func TestSearchWarning(t *testing.T) {
 		{"category count that does not parse", "tagcount:character=many", "Could not read: tagcount:character=many"},
 		{"good comparisons", "width:>=100 date:2026-01-01..2026-02-01 size:<2mb tagcount:character=1", ""},
 		{"both kinds", `width:>abc type:video "x`, "Could not read: unterminated quote, width:>abc. Unknown filter value: type:video"},
+		{"group", "( cat OR dog ) -( type:image )", ""},
+		{"group not closed", "( cat OR dog)", "Could not read: unclosed ("},
+		{"dangling operators", "OR cat AND", "Could not read: nothing before OR, nothing after AND"},
 	}
 	for _, c := range cases {
 		expr := search.Parse(c.query)

@@ -51,7 +51,34 @@ func TestParse(t *testing.T) {
 		{"NegatedOperandBeforeOR/-a OR b", "-a OR b", OrExpr{Left: not(tag("a")), Right: tag("b")}},
 		{"NegatedOperandBeforeOR/NOT a OR b", "NOT a OR b", OrExpr{Left: not(tag("a")), Right: tag("b")}},
 		{"NegatedOperandBeforeOR/-a OR -b", "-a OR -b", OrExpr{Left: not(tag("a")), Right: not(tag("b"))}},
-		{"NegatedOperandBeforeOR/c -a OR b", "c -a OR b", AndExpr{Left: tag("c"), Right: OrExpr{Left: not(tag("a")), Right: tag("b")}}},
+		{"NegatedOperandBeforeOR/c -a OR b", "c -a OR b", OrExpr{Left: AndExpr{Left: tag("c"), Right: not(tag("a"))}, Right: tag("b")}},
+		{"Precedence/AND over OR", "cat OR dog beach", OrExpr{Left: tag("cat"), Right: AndExpr{Left: tag("dog"), Right: tag("beach")}}},
+		{"Precedence/AND keyword over OR", "a AND b OR c AND d", OrExpr{Left: AndExpr{Left: tag("a"), Right: tag("b")}, Right: AndExpr{Left: tag("c"), Right: tag("d")}}},
+		{"Group/OR then AND", "( cat OR dog ) beach", AndExpr{Left: OrExpr{Left: tag("cat"), Right: tag("dog")}, Right: tag("beach")}},
+		{"Group/two ORs", "( cat OR dog ) AND ( beach OR forest )", AndExpr{Left: OrExpr{Left: tag("cat"), Right: tag("dog")}, Right: OrExpr{Left: tag("beach"), Right: tag("forest")}}},
+		{"Group/nested", "a OR ( b ( c OR d ) )", OrExpr{Left: tag("a"), Right: AndExpr{Left: tag("b"), Right: OrExpr{Left: tag("c"), Right: tag("d")}}}},
+		{"Group/redundant", "( ( a ) )", tag("a")},
+		{"Group/filters", "( artist:xyz OR artist:abc ) AND -rating:explicit", AndExpr{Left: OrExpr{Left: filter("artist", "xyz"), Right: filter("artist", "abc")}, Right: not(filter("rating", "explicit"))}},
+		{"Group/tabs", "(\ta OR b\t)", OrExpr{Left: tag("a"), Right: tag("b")}},
+		{"NegatedGroup/NOT", "NOT ( cat OR dog )", not(OrExpr{Left: tag("cat"), Right: tag("dog")})},
+		{"NegatedGroup/-(", "-( cat OR dog )", not(OrExpr{Left: tag("cat"), Right: tag("dog")})},
+		{"NegatedGroup/- (", "- ( cat OR dog )", not(OrExpr{Left: tag("cat"), Right: tag("dog")})},
+		{"NegatedGroup/binds tighter than AND", "-( a b ) c", AndExpr{Left: not(AndExpr{Left: tag("a"), Right: tag("b")}), Right: tag("c")}},
+		{"NegatedGroup/double", "NOT -( a )", not(not(tag("a")))},
+		{"ParenInTag/whole", "saber_(fate)", tag("saber_(fate)")},
+		{"ParenInTag/inside a group", "( saber_(fate) OR (cosplay) )", OrExpr{Left: tag("saber_(fate)"), Right: tag("(cosplay)")}},
+		{"ParenInTag/negated", "-(cosplay)", not(tag("(cosplay)"))},
+		{"ParenInTag/quoted", `"(" ")"`, AndExpr{Left: tag("("), Right: tag(")")}},
+		{"LoneDashIsATag", "- a", AndExpr{Left: tag("-"), Right: tag("a")}},
+		{"NOT_KeywordAtEnd", "a NOT", tag("a")},
+		{"Recovery/unclosed", "( a OR b", OrExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/unmatched", "a ) b", AndExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/empty group", "a ( ) b", AndExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/negated empty group", "a -( )", tag("a")},
+		{"Recovery/OR at group edges", "( OR a OR ) b", AndExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/doubled OR", "a OR OR b", OrExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/AND without a right side", "a AND OR b", OrExpr{Left: tag("a"), Right: tag("b")}},
+		{"Recovery/NOT without operand", "NOT ) a", tag("a")},
 		{"NegatedOperandBeforeOR/NOT OR b", "NOT OR b", tag("b")},
 		{"NegatedOperandBeforeOR/-a OR", "-a OR", not(tag("a"))},
 		{"LeadingOR_DropsOperator", "OR 1girl", tag("1girl")},
@@ -97,6 +124,37 @@ func TestParse(t *testing.T) {
 				t.Errorf("Parse(%q) = %#v, want %#v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestUnreadable_Grouping(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"( cat OR dog ) beach", nil},
+		{"-( a ) NOT ( b )", nil},
+		{"saber_(fate) (cosplay)", nil},
+		{"( a OR b", []string{"unclosed ("}},
+		{"( a OR b)", []string{"unclosed ("}},
+		{"a )", []string{"unmatched )"}},
+		{"a ) ) b", []string{"unmatched )"}},
+		{"a ( )", []string{"empty ( )"}},
+		{"-(", []string{"unclosed (", "empty ( )"}},
+		{"OR a", []string{"nothing before OR"}},
+		{"a OR", []string{"nothing after OR"}},
+		{"a OR OR b", []string{"nothing after OR"}},
+		{"( a OR ) b", []string{"nothing after OR"}},
+		{"AND a", []string{"nothing before AND"}},
+		{"a AND", []string{"nothing after AND"}},
+		{"a NOT", []string{"nothing after NOT"}},
+		{"NOT OR a", []string{"nothing after NOT", "nothing before OR"}},
+		{`( "a b`, []string{"unterminated quote", "unclosed ("}},
+		{"( width:>abc", []string{"unclosed (", "width:>abc"}},
+	} {
+		if got := Unreadable(tc.in); !slices.Equal(got, tc.want) {
+			t.Errorf("Unreadable(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -2021,10 +2079,10 @@ func TestExecute_DriverLeafRepeatedUnderNotOrOr(t *testing.T) {
 	attachTag(t, database, onlyRed, red)
 
 	for q, want := range map[string]int{
-		"blue red -blue":         0,
-		"red blue -red":          0,
-		"blue red blue OR green": 1,
-		"red blue red OR x":      1,
+		"blue red -blue":             0,
+		"red blue -red":              0,
+		"blue red ( blue OR green )": 1,
+		"red blue ( red OR x )":      1,
 	} {
 		for _, sort := range []string{"newest", "random"} {
 			res, err := Execute(context.Background(), testSource(database), Query{Expr: Parse(q), Sort: sort, RandomSeed: 7, Page: 1, Limit: 40})
@@ -4847,6 +4905,37 @@ func TestExecute_NegatedOperandBeforeORReturnsTheUnion(t *testing.T) {
 	attachTag(t, database, both, fav)
 
 	checkSearchIDs(t, database, "-sketch OR fav_tag", []int64{favOnly, both, neither})
+}
+
+func TestExecute_GroupsAndPrecedence(t *testing.T) {
+	database, env := setupSearchDB(t)
+	tagged := func(name string, tagNames ...string) int64 {
+		id := ingestTestImageWithID(t, database, env, name)
+		for _, n := range tagNames {
+			attachTag(t, database, id, getOrCreateTagID(t, database, n))
+		}
+		return id
+	}
+	catBeach := tagged("grp_cat_beach.png", "cat", "beach")
+	dogBeach := tagged("grp_dog_beach.png", "dog", "beach")
+	dogForest := tagged("grp_dog_forest.png", "dog", "forest")
+	cat := tagged("grp_cat.png", "cat")
+	plain := tagged("grp_plain.png")
+
+	for _, tc := range []struct {
+		q    string
+		want []int64
+	}{
+		{"cat OR dog beach", []int64{catBeach, dogBeach, cat}},
+		{"( cat OR dog ) beach", []int64{catBeach, dogBeach}},
+		{"( cat OR dog ) AND ( beach OR forest )", []int64{catBeach, dogBeach, dogForest}},
+		{"cat OR ( dog AND beach )", []int64{catBeach, dogBeach, cat}},
+		{"NOT ( cat OR dog )", []int64{plain}},
+		{"-( dog beach )", []int64{catBeach, dogForest, cat, plain}},
+		{"( dog OR -( cat ) ) -forest", []int64{dogBeach, plain}},
+	} {
+		checkSearchIDs(t, database, tc.q, tc.want)
+	}
 }
 
 func TestExecute_GeneratedCompound(t *testing.T) {
