@@ -813,9 +813,13 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 	if n := countRows(t, db, "image_source_urls"); n != 2 {
 		t.Errorf("backfilled %d keys, want 2", n)
 	}
+	mustExec(t, db.Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (1, 'booru', '7', 'https://booru.example/posts/7')`)
 	mustExec(t, db.Write, `DELETE FROM images WHERE id = 1`)
 	if got := sourceURLKeysOf(t, db, 1); len(got) != 0 {
-		t.Errorf("a deleted image kept keys %q", got)
+		t.Errorf("a deleted image with two sources kept keys %q", got)
+	}
+	if got := sourceURLKeysOf(t, db, 2); !slices.Equal(got, []string{`quote.example/"q"\`}) {
+		t.Errorf("another image's keys = %q after the delete", got)
 	}
 }
 
