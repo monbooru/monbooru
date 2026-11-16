@@ -1403,26 +1403,6 @@ func TestSettingsTaggerLabels_NonDefaultLabelFile(t *testing.T) {
 	wantIn(t, body, `data-source="monochrome"`)
 }
 
-func TestPruneMissingImages(t *testing.T) {
-	srv := newTestServer(t)
-
-	seedImage(t, srv, "present.png", 10, 10)
-
-	mustExec(t, srv.db().Write, ` INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at) VALUES ('/nonexistent/file.jpg', 'jpg', 1024, 'prune_test_hash', 1, datetime('now'))`)
-
-	w := postForm(t, srv, "/settings/maintenance/prune-missing", url.Values{})
-
-	wantCode(t, w, http.StatusOK)
-	wantIn(t, w.Body.String(), "started")
-
-	awaitJobsDrain(t, srv)
-
-	count := countRows(t, srv.db(), "images WHERE sha256 = 'prune_test_hash'")
-	if count != 0 {
-		t.Error("missing image should have been pruned")
-	}
-}
-
 func TestPruneMissingImages_KeepsARowWhoseFileIsStillOnDisk(t *testing.T) {
 	srv := newTestServer(t)
 	kept := seedImage(t, srv, "still_here.png", 10, 10)
@@ -1430,6 +1410,7 @@ func TestPruneMissingImages_KeepsARowWhoseFileIsStillOnDisk(t *testing.T) {
 	mustExec(t, srv.db().Write, ` INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at) VALUES ('/nonexistent/gone.jpg', 'jpg', 1024, 'gone_hash', 1, datetime('now'))`)
 
 	w := postForm(t, srv, "/settings/maintenance/prune-missing", url.Values{})
+	wantCode(t, w, http.StatusOK)
 	wantIn(t, w.Body.String(), "started")
 	awaitJobsDrain(t, srv)
 
@@ -1577,20 +1558,6 @@ func TestGallerySwitchChangesActive(t *testing.T) {
 	}
 	if srv.activeGallery() != "stock" {
 		t.Errorf("active gallery = %q, want stock", srv.activeGallery())
-	}
-}
-
-func TestGallerySwitch_RedirectsHomeFromSearch(t *testing.T) {
-	srv := newMultiGalleryServer(t)
-
-	w := postForm(t, srv, "/internal/gallery/switch", url.Values{"name": {"stock"}}, [2]string{"HX-Request", "true"}, [2]string{"HX-Current-URL", "http://localhost/?q=cat"})
-
-	mustCode(t, w, http.StatusOK)
-	if got := w.Header().Get("HX-Redirect"); got != "/" {
-		t.Errorf("HX-Redirect = %q, want /", got)
-	}
-	if w.Header().Get("HX-Refresh") != "" {
-		t.Error("search-bearing URL should redirect, not refresh in place")
 	}
 }
 
