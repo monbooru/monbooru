@@ -1950,7 +1950,7 @@ document.body.addEventListener('htmx:oobAfterSwap', function(e) {
     var prefix = dlg.id.replace(/-dialog$/, '');
     var scopeEl = document.getElementById(prefix + '-scope');
     if (scopeEl && scopeEl.value === 'search') {
-      scopeCount('search', document.getElementById(dlg.dataset.countId || prefix + '-count'), document.getElementById(prefix + '-noun'));
+      scopeCount('search', document.getElementById(prefix + '-count'), document.getElementById(prefix + '-noun'));
     }
   });
 });
@@ -2830,7 +2830,7 @@ function closePluginPage() {
   if (dlg && dlg.open) dlg.close();
 }
 
-// opts: countId, requireMatches (refuse a search scope matching nothing),
+// opts: requireMatches (refuse a search scope matching nothing),
 // radio (re-checked as the default), clearIds (emptied on open),
 // beforeShow, focusId.
 function openBatchDialog(prefix, scope, opts) {
@@ -2839,9 +2839,7 @@ function openBatchDialog(prefix, scope, opts) {
   // flipping here lets each post the search.
   if (scope === 'selection' && selectAllMatching) scope = 'search';
   if (scope === 'selection' && pickedIDs.length === 0) return;
-  var dlg = document.getElementById(prefix + '-dialog');
-  dlg.dataset.countId = opts.countId || prefix + '-count';
-  var n = scopeCount(scope, document.getElementById(dlg.dataset.countId),
+  var n = scopeCount(scope, document.getElementById(prefix + '-count'),
                      document.getElementById(prefix + '-noun'));
   if (opts.requireMatches && scope === 'search' && n === 0) return;
   document.getElementById(prefix + '-scope').value = scope;
@@ -2855,6 +2853,7 @@ function openBatchDialog(prefix, scope, opts) {
     if (el.tagName === 'INPUT') el.value = ''; else el.innerHTML = '';
   });
   clearSlots(prefix + '-flash');
+  var dlg = document.getElementById(prefix + '-dialog');
   if (opts.beforeShow) opts.beforeShow();
   dlg.showModal();
   var focusEl = opts.focusId ? document.getElementById(opts.focusId) : null;

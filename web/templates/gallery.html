@@ -106,8 +106,7 @@
 
 <dialog id="batch-tag-dialog">
   <p class="dlg-title">
-    Add tags to <strong id="batch-tag-count-display"></strong>
-    <span id="batch-tag-noun"></span>:{{template "webui/dialog_x"}}
+    Add tags to {{template "batch_count" "batch-tag"}}:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-tag-form" onsubmit="event.preventDefault(); confirmBatchTag();">
     <input type="hidden" name="scope" id="batch-tag-scope">
@@ -139,8 +138,7 @@
 
 <dialog id="batch-strip-dialog">
   <p class="dlg-title">
-    Remove tags from <strong id="batch-strip-count-display"></strong>
-    <span id="batch-strip-noun"></span>:{{template "webui/dialog_x"}}
+    Remove tags from {{template "batch_count" "batch-strip"}}:{{template "webui/dialog_x"}}
   </p>
   <form id="batch-strip-form" onsubmit="event.preventDefault(); confirmBatchStrip();">
     <input type="hidden" name="scope" id="batch-strip-scope">
@@ -528,7 +526,6 @@ function confirmBatchDownload() {
 // follow the last open's mode.
 function openStripDialog(scope) {
   openBatchDialog('batch-strip', scope, {
-    countId: 'batch-strip-count-display',
     radio: '#batch-strip-form input[name="mode"][value="specific"]',
     clearIds: ['batch-strip-input', 'batch-strip-suggest'],
     beforeShow: updateBatchStripRow
@@ -613,7 +610,6 @@ function confirmBatchAutotag() {
 
 function openTagDialog(scope) {
   openBatchDialog('batch-tag', scope, {
-    countId: 'batch-tag-count-display',
     clearIds: ['batch-tag-input', 'batch-tag-suggest'],
     focusId: 'batch-tag-input'
   });
