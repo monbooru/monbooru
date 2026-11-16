@@ -27,22 +27,27 @@ Designed for organizing your local media collection: images, videos, animated GI
 
 - **Formats**: JPEG, PNG, WebP, AVIF, JPEG XL, GIF, MP4 and WebM, plus CBZ/ZIP archives read as a single item in a built-in manga reader
 - **File watcher** that picks up new, moved and deleted files within seconds; browser upload; SHA-256 deduplication
+- **File naming**: templates set the name and folder of incoming files, from their date, size, hash, origin and more; the same templates rename a selection, or the whole library in one pass
 - **Inbox**: new images wait in the inbox until you've reviewed and tagged them
-- **Multiple galleries** in one instance, each with its own folders and database; per-gallery export and import
+- **Scheduled maintenance**: a daily pass, each step optional, that syncs the gallery, auto-tags the new images, finds related images, and looks up sources through monloader
+- **Multiple galleries** in one instance, each with its own folders and database; per-gallery export and import; transfer images from one gallery to another
 - **Import** from supported booru applications
 
 ### Tags
 
-- **Tag management**: merge duplicates, aliases, implications, custom categories
+- **Tag management**: merge duplicates, aliases, implications, custom categories, cleanup tools; a page per tag with your note, links and a usage graph
+- **Tag provenance**: each tag remembers what applied it (you, an auto-tagger, a booru); view, search and remove tags by source, and reject a tag to keep it off every image
 - **Rating tags** (general / sensitive / questionable / explicit), with a SFW ceiling in the footer that hides anything rated above it
-- **Local auto-tagging** with ONNX models (WD14 SwinV2, animetimm EVA02, JoyTag, Camie v2, PixAI, or any compatible model), on CPU or GPU
+- **Meta tags** set from the file itself, under Danbooru's names: `highres`, `absurdres`, `animated`, `sound` and more
+- **Local auto-tagging** with ONNX models (WD14 SwinV2, animetimm EVA02, JoyTag, Camie v2, PixAI, or any compatible model), on CPU or GPU; several models can run together, on videos and archive pages too
 
 ### Browse and search
 
 - **Gallery** with folder tree, favorites, collections, related-image suggestions, animated previews on hover, and a fullscreen slideshow of a search or a selection
 - **Search** with wildcards, OR, exclusions, saved searches, and filters on folder, date, size, dimensions, category, generation settings, and more
-- **Batch operations** on a selection or a whole search: add or remove tags, move, delete, auto-tag, set collection or source, and more
+- **Batch operations** on a selection or a whole search: add or remove tags, rename, move, delete, auto-tag, set collection or source, download as a zip, and more
 - **Keyboard-driven**: shortcuts on every page, from grid navigation to batch actions; press `?` in the app for the full list
+- **On a phone**: layouts made for a small screen, and swipe between images
 
 ### Image details
 
@@ -135,7 +140,7 @@ contribute back`"| loader
 ```
 
 - **monbooru**: this application; organizes, tags, and serves your collection.
-- **[monloader](https://github.com/monbooru/monloader)**: downloader. Fetches files and per-post metadata (via gallery-dl) from supported boorus and galleries and pushes them into a monbooru gallery over the REST API. It also answers monbooru's reverse lookups against boorus, IQDB, SauceNAO and the Hydrus Public Tag Repository, to backfill tags and sources; when a matched post has a better file than your local copy, one click replaces it in place. The PTR connection can also pull tag aliases and implications into your catalog.
+- **[monloader](https://github.com/monbooru/monloader)**: downloader. Fetches files and per-post metadata (via gallery-dl) from supported boorus and galleries and pushes them into a monbooru gallery over the REST API. It also answers monbooru's reverse lookups against boorus, IQDB, SauceNAO and the Hydrus Public Tag Repository, to backfill tags and sources; when a matched post has a better file than your local copy, one click replaces it in place. The PTR connection can also pull tag aliases and implications into your catalog, and send yours back.
 - **[monsender](https://github.com/monbooru/monsender)**: browser extension; sends the URL of the page you're browsing to monloader.
 - **[monbooru-plugins](https://github.com/monbooru/monbooru-plugins)**: community registry of plugins, themes and extra taggers.
 
