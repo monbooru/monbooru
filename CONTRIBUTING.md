@@ -78,7 +78,7 @@ flowchart TD
     bug & idea --> issue["`**Open an issue in the repo it is about**
     see the graph below`"]
     issue --> state["`**A label says where it stands**
-    accepted, needs info, postponed or declined, then done once the change is on dev; a milestone is the version it ships in`"]
+    accepted, needs info, postponed or declined, then ready for main once the change is on dev; a milestone is the version it ships in`"]
     state -->|"it leads to a change"| ship(["`**Ships** → Credit`"])
 
     class ship hub;
@@ -144,7 +144,7 @@ flowchart TD
     branch --> self["`**Read every line of your diff and test it live**
     make test has to pass`"]
     self --> pr["`**Open a pull request against dev**
-    Verify builds and lints it; the Go tests run when a maintainer comments /test`"]
+    name the issue it answers on the Issue: line; Verify builds and lints it; the Go tests run when a maintainer comments /test`"]
     pr --> review{{"Review answers in the pull request"}}
     review -->|"needs changes"| branch
     review -->|"declined"| declined["`Closed, with the reasons`"]
@@ -163,6 +163,8 @@ flowchart TD
 ```
 
 Two branches. `dev` is where the work happens: one commit per change, the pull requests merged in, and the Go tests. `main` holds one snapshot per release. So check that a pull request targets `dev`.
+
+See [project board](https://github.com/orgs/monbooru/projects/4) for the roadmap.
 
 References:
 
