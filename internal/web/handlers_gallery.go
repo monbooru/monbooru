@@ -155,6 +155,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	searchStart := time.Now()
 	if at, err := strconv.ParseInt(q.Get("at"), 10, 64); err == nil && pageStr == "" && pageSize > 0 {
 		// A cursor would still pick the rows under the page the rank names.
 		sq.After, sq.Before = 0, 0
@@ -168,7 +169,6 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 
 	htmxGridTarget := isHTMXRequest(r) && r.Header.Get("HX-Target") == "gallery-grid"
 
-	searchStart := time.Now()
 	result, err := search.Execute(r.Context(), s.source(), sq)
 	took := time.Since(searchStart)
 	if err != nil {
