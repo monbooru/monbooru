@@ -247,6 +247,10 @@ func (s *Server) setSource(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	postID := strings.TrimSpace(r.FormValue("post_id"))
+	if utf8.RuneCountInString(postID) > contract.MaxPostID {
+		externalErr(w, r, fmt.Sprintf("post id too long (max %d chars)", contract.MaxPostID), http.StatusBadRequest)
+		return
+	}
 	prevSite := strings.TrimSpace(r.FormValue("prev_site"))
 	prevPost := strings.TrimSpace(r.FormValue("prev_post"))
 	// A url-only origin is keyed ("", ""); has_prev tells relabel from add.
