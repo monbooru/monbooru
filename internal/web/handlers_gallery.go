@@ -338,7 +338,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		data.PagerMoreNext = next == "more"
 	}
 	if result.TotalUnknown || hiddenLater {
-				data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, next, took)
+		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, next, took)
 	}
 	// The fragment uses it too, for its collapsed sidebar placeholder.
 	data.SidebarURL = buildSidebarURL(queryStr, ids)
