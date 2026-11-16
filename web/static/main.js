@@ -2317,6 +2317,11 @@ function setFolderCookie(set) {
   document.cookie = 'monbooru_folders=,' + Array.from(set).map(encodeURIComponent).join(',') + '; path=/; max-age=31536000';
 }
 
+function setToggle(btn, open) {
+  btn.textContent = open ? '▼' : '▶';
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
 function toggleFolderItem(btn, targetId, path) {
   var list = document.getElementById(targetId);
   if (list) flipSection(btn, list, path || targetId, false);
@@ -2326,7 +2331,7 @@ function toggleFolderItem(btn, targetId, path) {
 function flipSection(toggle, list, key, defaultOpen) {
   var opening = list.style.display === 'none';
   list.style.display = opening ? '' : 'none';
-  toggle.textContent = opening ? '▼' : '▶';
+  setToggle(toggle, opening);
   var state = getFolderCookie();
   if (opening !== !!defaultOpen) state.add(key);
   else state.delete(key);
@@ -2339,10 +2344,10 @@ function initSectionToggle(toggleId, listId, cookieKey, forceOpen, defaultOpen) 
   if (!toggle || !list) return;
   var offDefault = getFolderCookie().has(cookieKey);
   if (defaultOpen) {
-    if (offDefault) { list.style.display = 'none'; toggle.textContent = '▶'; }
+    if (offDefault) { list.style.display = 'none'; setToggle(toggle, false); }
   } else if (forceOpen || offDefault) {
     list.style.display = '';
-    toggle.textContent = '▼';
+    setToggle(toggle, true);
   }
   var clickToggle = function() { flipSection(toggle, list, cookieKey, defaultOpen); };
   // onclick, not addEventListener: this runs again on each settle that
@@ -2403,10 +2408,10 @@ function initFolderTree() {
 
     if (shouldExpand) {
       list.style.display = '';
-      btn.textContent = '▼';
+      setToggle(btn, true);
       if (urlChanged && urlDriven && treeList) {
         treeList.style.display = '';
-        if (treeToggle) treeToggle.textContent = '▼';
+        if (treeToggle) setToggle(treeToggle, true);
       }
     }
 

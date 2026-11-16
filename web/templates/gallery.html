@@ -15,10 +15,10 @@
       {{if .RandomSeed}}<input type="hidden" name="seed" value="{{.RandomSeed}}">{{end}}
       <button type="submit">Search</button>
       <button type="button" id="fav-filter-btn" class="{{if hasFavFilter .Query}}active{{end}}"
-              onclick="toggleFavFilter()" title="Show favorites (F)">♥&#xFE0E;</button>
+              onclick="toggleFavFilter()" title="Show favorites (F)" aria-label="Show favorites">♥&#xFE0E;</button>
       <button type="button" id="random-sort-btn" class="{{if eq .Sort "random"}}active{{end}}"
-              onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)">⇄</button>
-      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)">▶&#xFE0E;</button>
+              onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)" aria-label="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}}">⇄</button>
+      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)" aria-label="Slideshow">▶&#xFE0E;</button>
     </span>
   </form>
   <div class="gallery-header-end">

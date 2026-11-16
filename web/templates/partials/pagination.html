@@ -1,6 +1,6 @@
 {{define "partials/pagination.html"}}
 {{if or (gt .Total 1) .Unknown}}
-<div class="pagination{{with .Class}} {{.}}{{end}}"{{with .HX}} hx-target="{{.}}" hx-push-url="true"{{end}}>
+<div class="pagination{{with .Class}} {{.}}{{end}}" role="navigation" aria-label="Pages"{{with .HX}} hx-target="{{.}}" hx-push-url="true"{{end}}>
   {{if and (gt .Page 2) (or .Unknown (gt .Total 2))}}
   <a href="{{.Base}}1"{{if .HX}} hx-get="{{.Base}}1"{{end}}>« First</a>
   {{end}}
