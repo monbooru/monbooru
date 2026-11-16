@@ -142,7 +142,7 @@ func TestAddTagsToImageFromTagger_ManualSource(t *testing.T) {
 
 	tag, _ := svc.GetOrCreateTag("sourced", catID)
 	if _, err := svc.AddTagsToImageFromTaggerConf(imgID, []int64{tag.ID}, nil, false, "my_app"); err != nil {
-		t.Fatalf("AddTagsToImageFromTagger: %v", err)
+		t.Fatalf("AddTagsToImageFromTaggerConf: %v", err)
 	}
 
 	var isAuto int
