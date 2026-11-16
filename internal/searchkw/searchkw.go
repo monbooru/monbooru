@@ -13,6 +13,7 @@ var keywordTable = []struct{ key, desc string }{
 	{"inbox", "in inbox"},
 	{"ai", "AI generation tool; a comma list matches any"},
 	{"source", "external source label"},
+	{"sourceurl", "source or credited URL; a prefix, or * wildcards"},
 	{"cat", "by tag category"},
 	{"width", "image width"},
 	{"height", "image height"},
