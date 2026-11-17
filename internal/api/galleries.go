@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
@@ -27,4 +28,32 @@ func (h *Handler) listGalleries(w http.ResponseWriter, r *http.Request) {
 		out = append(out, contract.Gallery{Name: gc.Name, Images: images, Tags: tags, Active: gc.Name == activeName})
 	}
 	contract.WriteJSON(w, http.StatusOK, out)
+}
+
+// Folders come from the images, so an empty folder on disk is not listed;
+// a send to a folder that does not exist yet still creates it.
+func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
+	g, ok := h.resolveGallery(w, r)
+	if !ok {
+		return
+	}
+	tree, err := g.FolderTreeUnder(nil)
+	if err != nil {
+		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "could not read the folders of gallery "+g.Name)
+		return
+	}
+	root := contract.Folder{Children: []contract.Folder{}}
+	if len(tree) > 0 {
+		root = folderOf(tree[0])
+		root.Name = "" // the sidebar's "(root)" is a label, not a name
+	}
+	contract.WriteJSON(w, http.StatusOK, root)
+}
+
+func folderOf(n gallery.FolderNode) contract.Folder {
+	f := contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Children: make([]contract.Folder, 0, len(n.Children))}
+	for _, c := range n.Children {
+		f.Children = append(f.Children, folderOf(c))
+	}
+	return f
 }

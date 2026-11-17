@@ -93,6 +93,12 @@ func buildSpec(baseURL string) map[string]any {
 					"tags":   map[string]any{"type": "integer", "description": "Non-alias tag count"},
 					"active": map[string]any{"type": "boolean", "description": "True for the gallery used when no ?gallery= selector is given"},
 				}),
+				"Folder": objectSchema(nil, map[string]any{
+					"path":     map[string]any{"type": "string", "description": "Relative to the gallery, /-separated; what a folder field takes. Empty for the root"},
+					"name":     map[string]any{"type": "string", "description": "The last path segment; empty for the root"},
+					"images":   map[string]any{"type": "integer", "description": "Visible (non-missing) images in this folder and every folder under it"},
+					"children": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Folder"}, "description": "Subfolders in path order"},
+				}),
 				"Tagger": objectSchema(nil, map[string]any{
 					"name":      map[string]any{"type": "string", "description": "The tagger's folder name under paths.model_path; what tagger_name takes"},
 					"enabled":   map[string]any{"type": "boolean", "description": "Turned on in Settings"},
@@ -984,6 +990,14 @@ func buildSpec(baseURL string) map[string]any {
 					map[string]any{
 						"200": map[string]any{"description": "Galleries with counts and the active flag", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Gallery"}}}}},
 						"500": resp("A gallery's counts could not be read", "#/components/schemas/Error"),
+					}),
+			},
+			"/folders": map[string]any{
+				"get": op("List a gallery's folders", "listFolders",
+					[]map[string]any{galleryParam()},
+					map[string]any{
+						"200": resp("The folder tree from its root; only folders holding a visible image, or a folder under them, are listed", "#/components/schemas/Folder"),
+						"500": resp("The folders could not be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/jobs/current": map[string]any{
