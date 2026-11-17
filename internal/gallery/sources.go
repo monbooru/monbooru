@@ -433,16 +433,22 @@ type SourceRef struct {
 // has by (site, post) is left alone. The claimed md5 is the other file's
 // post, so the copy is kept: the upgrade check would otherwise offer that
 // post's file over target's. A re-pull that claims a new md5 lifts it, as
-// for any kept file.
+// for any kept file. For the same reason the copy is a similarity match,
+// with its own score or 100, so a refresh is not refused as a hash
+// mismatch; not when the claimed md5 is target's own file. A target whose
+// md5 is not computed yet cannot say, so it gets the mark.
 func CopySourcesTx(tx *sql.Tx, target int64, from []SourceRef) (int, error) {
 	added := 0
 	for _, r := range from {
 		res, err := tx.Exec(
 			`INSERT OR IGNORE INTO image_sources (image_id, site, post_id, url, md5, commentary, commentary_translated,
 			        original, similarity, parent_url, upgrade_kept, post_width, post_height, post_size, post_ext, fetched_at)
-			 SELECT ?, site, post_id, url, md5, commentary, commentary_translated,
-			        original, similarity, parent_url, 1, post_width, post_height, post_size, post_ext, fetched_at
-			 FROM image_sources WHERE image_id = ? AND site = ? AND post_id = ?`,
+			 SELECT t.id, s.site, s.post_id, s.url, s.md5, s.commentary, s.commentary_translated, s.original,
+			        CASE WHEN s.md5 != '' AND lower(s.md5) = lower(t.md5) THEN s.similarity
+			             WHEN s.similarity > 0 THEN s.similarity ELSE 100 END,
+			        s.parent_url, 1, s.post_width, s.post_height, s.post_size, s.post_ext, s.fetched_at
+			 FROM image_sources s JOIN images t ON t.id = ?
+			 WHERE s.image_id = ? AND s.site = ? AND s.post_id = ?`,
 			target, r.ImageID, r.Site, r.PostID)
 		if err != nil {
 			return 0, err
