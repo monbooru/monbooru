@@ -69,10 +69,7 @@ func (s *Service) GroupsWithSourcesToCopy(groupIDs []int64) (map[int64]bool, err
 	return out, err
 }
 
-// The whole row comes along, with the post's pulled notes. The claimed md5
-// is the duplicate's post, not the original's file, so the copy is kept:
-// the upgrade check would otherwise offer that post's file over the
-// original. A re-pull that claims a new md5 lifts it, as for any kept file.
+// The whole row comes along, with the post's pulled notes.
 func (s *Service) CopySourcesFromDuplicatesToOriginal(groupID int64) (int, error) {
 	var added int
 	err := s.inWriteTx(func(tx *sql.Tx) error {
@@ -84,45 +81,12 @@ func (s *Service) CopySourcesFromDuplicatesToOriginal(groupID int64) (int, error
 		if err != nil || len(rows) == 0 {
 			return err
 		}
-		for _, r := range rows {
-			res, err := tx.Exec(
-				`INSERT OR IGNORE INTO image_sources (image_id, site, post_id, url, md5, commentary, commentary_translated,
-				        original, similarity, parent_url, upgrade_kept, post_width, post_height, post_size, post_ext, fetched_at)
-				 SELECT ?, site, post_id, url, md5, commentary, commentary_translated,
-				        original, similarity, parent_url, 1, post_width, post_height, post_size, post_ext, fetched_at
-				 FROM image_sources WHERE image_id = ? AND site = ? AND post_id = ?`,
-				original, r.ImageID, r.Site, r.PostID)
-			if err != nil {
-				return err
-			}
-			if n, _ := res.RowsAffected(); n == 0 {
-				continue
-			}
-			added++
-			// Operator-drawn notes stay with the duplicate. Boxes are in each
-			// file's own pixels, so pulled ones are scaled to the original's
-			// size, and skipped when either size is unknown.
-			if _, err := tx.Exec(
-				`INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body, manual, fetched_at)
-				 SELECT o.id, a.site, a.post_id,
-				        CAST(round(a.x * o.width * 1.0 / d.width) AS INTEGER),
-				        CAST(round(a.y * o.height * 1.0 / d.height) AS INTEGER),
-				        CAST(round(a.w * o.width * 1.0 / d.width) AS INTEGER),
-				        CAST(round(a.h * o.height * 1.0 / d.height) AS INTEGER),
-				        a.body, 0, a.fetched_at
-				 FROM image_annotations a
-				 JOIN images d ON d.id = a.image_id
-				 JOIN images o ON o.id = ?
-				 WHERE a.image_id = ? AND a.site = ? AND a.post_id = ? AND a.manual = 0
-				   AND d.width > 0 AND d.height > 0 AND o.width > 0 AND o.height > 0`,
-				original, r.ImageID, r.Site, r.PostID); err != nil {
-				return err
-			}
+		refs := make([]gallery.SourceRef, len(rows))
+		for i, r := range rows {
+			refs[i] = gallery.SourceRef{ImageID: r.ImageID, Site: r.Site, PostID: r.PostID}
 		}
-		if added == 0 {
-			return nil
-		}
-		return gallery.RebindPrimarySourceTx(tx, original)
+		added, err = gallery.CopySourcesTx(tx, original, refs)
+		return err
 	})
 	return added, err
 }

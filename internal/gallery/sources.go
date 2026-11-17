@@ -418,13 +418,66 @@ func sourceTx(database *db.DB, imageID int64, work func(*sql.Tx) error) error {
 		if err := work(tx); err != nil {
 			return err
 		}
-		return RebindPrimarySourceTx(tx, imageID)
+		return rebindPrimarySourceTx(tx, imageID)
 	})
 }
 
-// RebindPrimarySourceTx is for a write outside sourceTx that adds or drops
-// an image's origins.
-func RebindPrimarySourceTx(tx *sql.Tx, imageID int64) error {
+// SourceRef names one origin row of an image.
+type SourceRef struct {
+	ImageID      int64
+	Site, PostID string
+}
+
+// CopySourcesTx copies whole origin rows onto target, with the post's
+// pulled notes, and answers how many it added; an origin target already
+// has by (site, post) is left alone. The claimed md5 is the other file's
+// post, so the copy is kept: the upgrade check would otherwise offer that
+// post's file over target's. A re-pull that claims a new md5 lifts it, as
+// for any kept file.
+func CopySourcesTx(tx *sql.Tx, target int64, from []SourceRef) (int, error) {
+	added := 0
+	for _, r := range from {
+		res, err := tx.Exec(
+			`INSERT OR IGNORE INTO image_sources (image_id, site, post_id, url, md5, commentary, commentary_translated,
+			        original, similarity, parent_url, upgrade_kept, post_width, post_height, post_size, post_ext, fetched_at)
+			 SELECT ?, site, post_id, url, md5, commentary, commentary_translated,
+			        original, similarity, parent_url, 1, post_width, post_height, post_size, post_ext, fetched_at
+			 FROM image_sources WHERE image_id = ? AND site = ? AND post_id = ?`,
+			target, r.ImageID, r.Site, r.PostID)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue
+		}
+		added++
+		// Operator-drawn notes stay behind. Boxes are in each file's own
+		// pixels, so pulled ones are scaled to target's size, and skipped
+		// when either size is unknown.
+		if _, err := tx.Exec(
+			`INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body, manual, fetched_at)
+			 SELECT o.id, a.site, a.post_id,
+			        CAST(round(a.x * o.width * 1.0 / d.width) AS INTEGER),
+			        CAST(round(a.y * o.height * 1.0 / d.height) AS INTEGER),
+			        CAST(round(a.w * o.width * 1.0 / d.width) AS INTEGER),
+			        CAST(round(a.h * o.height * 1.0 / d.height) AS INTEGER),
+			        a.body, 0, a.fetched_at
+			 FROM image_annotations a
+			 JOIN images d ON d.id = a.image_id
+			 JOIN images o ON o.id = ?
+			 WHERE a.image_id = ? AND a.site = ? AND a.post_id = ? AND a.manual = 0
+			   AND d.width > 0 AND d.height > 0 AND o.width > 0 AND o.height > 0`,
+			target, r.ImageID, r.Site, r.PostID); err != nil {
+			return 0, err
+		}
+	}
+	if added == 0 {
+		return 0, nil
+	}
+	return added, rebindPrimarySourceTx(tx, target)
+}
+
+func rebindPrimarySourceTx(tx *sql.Tx, imageID int64) error {
 	var site, url string
 	err := tx.QueryRow(`SELECT site, url FROM image_sources WHERE image_id = ? ORDER BY rowid LIMIT 1`, imageID).Scan(&site, &url)
 	if errors.Is(err, sql.ErrNoRows) {
