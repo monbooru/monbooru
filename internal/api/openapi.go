@@ -1008,6 +1008,20 @@ func buildSpec(baseURL string) map[string]any {
 						"500": resp("The folders could not be read", "#/components/schemas/Error"),
 					}),
 			},
+			"/folders/search": map[string]any{
+				"get": op("Search a gallery's folders", "searchFolders",
+					[]map[string]any{
+						galleryParam(),
+						queryParam("q", "Part of the path, case-insensitive; empty finds nothing"),
+						queryParam("limit", "Results (default 10, max 100)"),
+					},
+					map[string]any{
+						"200": map[string]any{"description": "Folders whose path starts with q, then those holding it elsewhere, each in path order", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{
+							"results": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Folder"}},
+						})}}},
+						"500": resp("The folders could not be read", "#/components/schemas/Error"),
+					}),
+			},
 			"/jobs/current": map[string]any{
 				"get": op("Read the background job state", "currentJob",
 					nil,
