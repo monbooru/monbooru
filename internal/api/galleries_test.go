@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -45,20 +44,22 @@ func TestListFolders(t *testing.T) {
 		folder  string
 		missing bool
 	}
+	nested := []image{{"", false}, {"art", false}, {"art/sketches", false}, {"art/sketches", false}, {"photos", false}}
 	cases := []struct {
 		name   string
 		images []image
-		want   []string // path=images, depth first
+		query  string
+		want   []string // path:name=images/folders
+		total  int
 	}{
-		{"empty gallery", nil, []string{"=0"}},
-		{"root only", []image{{"", false}}, []string{"=1"}},
-		{
-			"nested counts roll up",
-			[]image{{"", false}, {"art", false}, {"art/sketches", false}, {"art/sketches", false}, {"photos", false}},
-			[]string{"=5", "art=3", "art/sketches=2", "photos=1"},
-		},
-		{"a folder holding only subfolders", []image{{"a/b/c", false}}, []string{"=1", "a=1", "a/b=1", "a/b/c=1"}},
-		{"missing images are left out", []image{{"kept", false}, {"gone", true}}, []string{"=1", "kept=1"}},
+		{"empty gallery", nil, "", []string{}, 0},
+		{"root images only", []image{{"", false}}, "", []string{}, 0},
+		{"the top level, counts rolled up", nested, "", []string{"art:art=3/1", "photos:photos=1/0"}, 2},
+		{"a folder's subfolders", nested, "path=art", []string{"art/sketches:sketches=2/0"}, 1},
+		{"slashes around the path are dropped", nested, "path=/art/", []string{"art/sketches:sketches=2/0"}, 1},
+		{"a leaf lists nothing", nested, "path=art/sketches", []string{}, 0},
+		{"a folder holding only subfolders", []image{{"a/b/c", false}}, "path=a", []string{"a/b:b=1/1"}, 1},
+		{"missing images are left out", []image{{"kept", false}, {"gone", true}}, "", []string{"kept:kept=1/0"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,33 +69,70 @@ func TestListFolders(t *testing.T) {
 				mustExec(t, env.database.Write, `UPDATE images SET folder_path = ?, is_missing = ? WHERE id = ?`, img.folder, img.missing, id)
 			}
 
-			w := env.do("GET", "/api/v1/folders")
+			w := env.do("GET", "/api/v1/folders?"+tc.query)
 			mustCode(t, w, http.StatusOK)
-			var root contract.Folder
-			mustDecode(t, w, &root)
-			if root.Path != "" || root.Name != "" {
-				t.Errorf("root = %q/%q, want an empty path and name", root.Path, root.Name)
+			if !strings.Contains(w.Body.String(), `"results":[`) {
+				t.Errorf("results should be an array, never null: %s", w.Body.String())
 			}
-			var got []string
-			var walk func(f contract.Folder)
-			walk = func(f contract.Folder) {
-				got = append(got, fmt.Sprintf("%s=%d", f.Path, f.Images))
-				if f.Children == nil {
-					t.Errorf("%q: children is null, want an array", f.Path)
-				}
-				for _, c := range f.Children {
-					if parent, name := path.Split(c.Path); strings.TrimSuffix(parent, "/") != f.Path || name != c.Name {
-						t.Errorf("%q (name %q) is not a child of %q", c.Path, c.Name, f.Path)
-					}
-					walk(c)
-				}
+			var page struct {
+				Page, Limit, Total int
+				Results            []contract.Folder
 			}
-			walk(root)
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("tree = %v, want %v", got, tc.want)
+			mustDecode(t, w, &page)
+			got := []string{}
+			for _, f := range page.Results {
+				got = append(got, fmt.Sprintf("%s:%s=%d/%d", f.Path, f.Name, f.Images, f.Folders))
+			}
+			if !slices.Equal(got, tc.want) || page.Total != tc.total || page.Page != 1 || page.Limit != 500 {
+				t.Errorf("level = %v (page %d, limit %d, total %d), want %v total %d", got, page.Page, page.Limit, page.Total, tc.want, tc.total)
 			}
 		})
 	}
+}
+
+func TestListFoldersPages(t *testing.T) {
+	env := newTestEnv(t)
+	for i := range 5 {
+		id := env.createTestImage(t, fmt.Sprintf("p%d.png", i), 10+i, 10)
+		mustExec(t, env.database.Write, `UPDATE images SET folder_path = ? WHERE id = ?`, fmt.Sprintf("d%d", i), id)
+	}
+	cases := []struct {
+		query string
+		want  []string
+	}{
+		{"limit=2", []string{"d0", "d1"}},
+		{"limit=2&page=2", []string{"d2", "d3"}},
+		{"limit=2&page=3", []string{"d4"}},
+		{"limit=2&page=9", []string{}},
+		{"page_size=3", []string{"d0", "d1", "d2"}},
+		{"limit=9999", []string{"d0", "d1", "d2", "d3", "d4"}},
+	}
+	for _, tc := range cases {
+		w := env.do("GET", "/api/v1/folders?"+tc.query)
+		mustCode(t, w, http.StatusOK)
+		var page struct {
+			Total   int
+			Limit   int
+			Results []contract.Folder
+		}
+		mustDecode(t, w, &page)
+		got := []string{}
+		for _, f := range page.Results {
+			got = append(got, f.Path)
+		}
+		if !slices.Equal(got, tc.want) || page.Total != 5 || page.Limit > 500 {
+			t.Errorf("%s: %v (total %d, limit %d), want %v of 5", tc.query, got, page.Total, page.Limit, tc.want)
+		}
+	}
+}
+
+func TestListFoldersUnknownPath(t *testing.T) {
+	env := newTestEnv(t)
+	id := env.createTestImage(t, "u.png", 10, 10)
+	mustExec(t, env.database.Write, `UPDATE images SET folder_path = 'art' WHERE id = ?`, id)
+	w := env.do("GET", "/api/v1/folders?path=nowhere")
+	wantCode(t, w, http.StatusNotFound)
+	wantIn(t, w.Body.String(), `"folder not found: nowhere"`)
 }
 
 func TestListFoldersPicksTheGallery(t *testing.T) {
@@ -103,8 +141,11 @@ func TestListFoldersPicksTheGallery(t *testing.T) {
 	wantCode(t, w, http.StatusBadRequest)
 	wantIn(t, w.Body.String(), `"invalid_gallery"`)
 
+	id := env.createTestImage(t, "g.png", 10, 10)
+	mustExec(t, env.database.Write, `UPDATE images SET folder_path = 'mine' WHERE id = ?`, id)
 	w = env.do("GET", "/api/v1/folders?gallery="+env.cfg.DefaultGallery)
 	mustCode(t, w, http.StatusOK)
+	wantIn(t, w.Body.String(), `"path":"mine"`)
 }
 
 func TestListFoldersAnswers500WhenTheReadFails(t *testing.T) {
