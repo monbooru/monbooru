@@ -126,6 +126,47 @@ func TestListFoldersPages(t *testing.T) {
 	}
 }
 
+func TestSearchFolders(t *testing.T) {
+	env := newTestEnv(t)
+	for i, folder := range []string{"art", "art/sketches", "photos/sketchbook", "Sketch"} {
+		id := env.createTestImage(t, fmt.Sprintf("s%d.png", i), 10+i, 10)
+		mustExec(t, env.database.Write, `UPDATE images SET folder_path = ? WHERE id = ?`, folder, id)
+	}
+	cases := []struct {
+		name, query string
+		want        []string
+	}{
+		{"starting with it first, then holding it", "q=sk", []string{"Sketch", "art/sketches", "photos/sketchbook"}},
+		{"any case", "q=ART", []string{"art", "art/sketches"}},
+		{"a folder holding only subfolders is found", "q=pho", []string{"photos", "photos/sketchbook"}},
+		{"the limit", "q=sk&limit=2", []string{"Sketch", "art/sketches"}},
+		{"nothing typed finds nothing", "q=", []string{}},
+		{"no match", "q=zzz", []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := env.do("GET", "/api/v1/folders/search?"+tc.query)
+			mustCode(t, w, http.StatusOK)
+			if !strings.Contains(w.Body.String(), `"results":[`) {
+				t.Errorf("results should be an array, never null: %s", w.Body.String())
+			}
+			var out struct{ Results []contract.Folder }
+			mustDecode(t, w, &out)
+			got := []string{}
+			for _, f := range out.Results {
+				got = append(got, f.Path)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("found %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	w := env.do("GET", "/api/v1/folders/search?q=a&gallery=no_such_gallery")
+	wantCode(t, w, http.StatusBadRequest)
+	wantIn(t, w.Body.String(), `"invalid_gallery"`)
+}
+
 func TestListFoldersUnknownPath(t *testing.T) {
 	env := newTestEnv(t)
 	id := env.createTestImage(t, "u.png", 10, 10)
