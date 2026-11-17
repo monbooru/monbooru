@@ -182,14 +182,18 @@
       <h4 class="dlg-title"><span id="postdecide-dup-id">#?</span> has been marked as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
       <p>Delete <span id="postdecide-dup-id-body">#?</span> from the gallery now?</p>
       <p class="field-hint">The original stays; the duplicate leaves the gallery and its file is removed from disk. This cannot be undone.</p>
-      <label id="postdecide-copy-tags-label" hidden>
-        <input type="checkbox" id="postdecide-copy-tags">
-        Copy unique tags onto the original first
-      </label>
-      <label id="postdecide-copy-sources-label" hidden>
-        <input type="checkbox" id="postdecide-copy-sources">
-        Copy unique sources onto the original first
-      </label>
+      <div class="field" id="postdecide-copy-tags-label" hidden>
+        <label>
+          <input type="checkbox" id="postdecide-copy-tags">
+          Copy unique tags onto the original first
+        </label>
+      </div>
+      <div class="field" id="postdecide-copy-sources-label" hidden>
+        <label>
+          <input type="checkbox" id="postdecide-copy-sources">
+          Copy unique sources onto the original first
+        </label>
+      </div>
       <div id="postdecide-flash"></div>
       <div class="dialog-actions">
         <button type="button" id="postdecide-keep" class="btn-sm" autofocus>Keep file</button>
