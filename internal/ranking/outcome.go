@@ -8,6 +8,7 @@ const (
 	WinnerLeft  Winner = 1
 	WinnerTie   Winner = 2 // "about the same"
 	WinnerRight Winner = 3
+	// Adding a winner? Update Outcome.Valid, and its tests, to match.
 )
 
 // Degree is how strongly a side was picked. Only graded algorithms read
@@ -20,6 +21,7 @@ const (
 	DegreeSlight      Degree = 1
 	DegreeModerate    Degree = 2
 	DegreeStrong      Degree = 3
+	// Adding a degree? Update Outcome.Valid, and its tests, to match.
 )
 
 // Outcome is what a vote recorded.

@@ -18,6 +18,7 @@ const (
 	AlgorithmDefault      AlgorithmID = 0
 	AlgorithmBradleyTerry AlgorithmID = 1
 	AlgorithmGlicko2      AlgorithmID = 2
+	// Adding an algorithm? Update Valid, and its tests, to match.
 )
 
 // recommended is what AlgorithmDefault means in this version. Changing it
@@ -58,7 +59,7 @@ type State any
 type Vote struct {
 	Left, Right int64 // image ids
 	Outcome     Outcome
-	At          time.Time // Used by algorithms that scale votes by recentness
+	At          time.Time // Used by some algorithms (like Glicko-2)
 }
 
 // Algorithm is one way of turning votes into estimates.

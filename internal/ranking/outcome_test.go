@@ -47,4 +47,10 @@ func TestOutcomeValid(t *testing.T) {
 			}
 		}
 	}
+	// Testing far outside each type's range.
+	for _, o := range []Outcome{{255, DegreeUnspecified}, {WinnerRight, 255}} {
+		if o.Valid() {
+			t.Errorf("Outcome{Winner: %d, Degree: %d}.Valid() = true, want false", o.Winner, o.Degree)
+		}
+	}
 }

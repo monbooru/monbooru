@@ -38,19 +38,20 @@ func TestAlgorithmIDValid(t *testing.T) {
 	}
 }
 
-// Default follows the version's recommendation; an explicit choice is
-// never switched.
 func TestResolve(t *testing.T) {
-	cases := []struct {
-		id, want AlgorithmID
-	}{
-		{AlgorithmDefault, AlgorithmBradleyTerry},
-		{AlgorithmBradleyTerry, AlgorithmBradleyTerry},
-		{AlgorithmGlicko2, AlgorithmGlicko2},
+	// Default follows the version's recommendation, which must be a real
+	// algorithm.
+	got := Resolve(AlgorithmDefault)
+	if got != recommended {
+		t.Errorf("Resolve(AlgorithmDefault) = %d, want recommended (%d)", got, recommended)
 	}
-	for _, c := range cases {
-		if got := Resolve(c.id); got != c.want {
-			t.Errorf("Resolve(%d) = %d, want %d", c.id, got, c.want)
+	if got == AlgorithmDefault || !got.Valid() {
+		t.Errorf("Resolve(AlgorithmDefault) = %d, want a real algorithm", got)
+	}
+	// An explicit choice is never switched.
+	for _, id := range []AlgorithmID{AlgorithmBradleyTerry, AlgorithmGlicko2} {
+		if got := Resolve(id); got != id {
+			t.Errorf("Resolve(%d) = %d, want %d", id, got, id)
 		}
 	}
 }
