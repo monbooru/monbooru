@@ -52,7 +52,8 @@ type Estimate struct {
 
 // State is an algorithm's own bookkeeping for one image. Shared code
 // stores it and hands it back but never looks inside; each algorithm keeps
-// its own concrete type in it and unwraps it with a type assertion.
+// its own concrete type in it and unwraps it with a type assertion. This is
+// needed for things like Glicko-2's volatility.
 type State any
 
 // Vote is one stored comparison.
