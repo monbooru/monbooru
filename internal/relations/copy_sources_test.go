@@ -101,6 +101,41 @@ func TestCopySourcesFromDuplicatesToOriginal(t *testing.T) {
 	}
 }
 
+func TestCopySourcesMarksASimilarityMatch(t *testing.T) {
+	aMD5, bMD5 := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	cases := []struct {
+		name               string
+		origMD5, sourceMD5 string
+		score              float64
+		want               float64
+	}{
+		{"another file's post gets 100", aMD5, bMD5, 0, 100},
+		{"its own score is kept", aMD5, bMD5, 87.5, 87.5},
+		{"no claimed md5 gets 100", aMD5, "", 0, 100},
+		{"the original's md5 not computed yet gets 100", "", bMD5, 0, 100},
+		{"the original's own file is no match", aMD5, aMD5, 0, 0},
+		{"whatever the md5's case", aMD5, strings.ToUpper(aMD5), 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database, svc, orig, b, _, gid := dupTrio(t)
+			mustExec(t, database.Write, `UPDATE images SET md5 = ? WHERE id = ?`, tc.origMD5, orig)
+			addSourceRow(t, database, b, "site_b", "7", "https://b.example/7")
+			mustExec(t, database.Write, `UPDATE image_sources SET md5 = ?, similarity = ? WHERE image_id = ?`, tc.sourceMD5, tc.score, b)
+			if _, err := svc.CopySourcesFromDuplicatesToOriginal(gid); err != nil {
+				t.Fatal(err)
+			}
+			var got float64
+			if err := database.Read.QueryRow(`SELECT similarity FROM image_sources WHERE image_id = ? AND site = 'site_b'`, orig).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("similarity = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCopySourcesLeavesPTRSources(t *testing.T) {
 	cases := []struct {
 		name    string
