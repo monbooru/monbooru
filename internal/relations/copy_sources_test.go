@@ -101,6 +101,52 @@ func TestCopySourcesFromDuplicatesToOriginal(t *testing.T) {
 	}
 }
 
+func TestCopySourcesLeavesPTRSources(t *testing.T) {
+	cases := []struct {
+		name    string
+		sources []string // sites on the duplicate
+		want    string   // sites copied, in order
+	}{
+		{"a PTR origin stays", []string{"ptr"}, ""},
+		{"whatever its case", []string{"PTR"}, ""},
+		{"the others still go", []string{"ptr", "site_b"}, "site_b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database, svc, orig, b, _, gid := dupTrio(t)
+			for i, site := range tc.sources {
+				addSourceRow(t, database, b, site, string(rune('1'+i)), "")
+			}
+			with, err := svc.GroupsWithSourcesToCopy([]int64{gid})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if with[gid] != (tc.want != "") {
+				t.Errorf("offered a copy = %v, want %v", with[gid], tc.want != "")
+			}
+			if _, err := svc.CopySourcesFromDuplicatesToOriginal(gid); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			rows, err := database.Read.Query(`SELECT site FROM image_sources WHERE image_id = ? ORDER BY rowid`, orig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var s string
+				if err := rows.Scan(&s); err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, s)
+			}
+			if strings.Join(got, " ") != tc.want {
+				t.Errorf("copied %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCopySourcesGivesASourcelessOriginalItsPrimary(t *testing.T) {
 	database, svc, orig, b, _, gid := dupTrio(t)
 	addSourceRow(t, database, b, "site_b", "7", "https://b.example/7")
