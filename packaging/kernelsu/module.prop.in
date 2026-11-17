@@ -1,0 +1,7 @@
+id=monbooru
+name=Monbooru
+version=@VERSION@
+versionCode=@VERSIONCODE@
+author=monbooru
+description=Local booru gallery served on the phone. Start it from this module's page or the Action button; it listens on 127.0.0.1:8455.
+updateJson=@UPDATEJSON@
