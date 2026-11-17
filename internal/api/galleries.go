@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/shared/contract"
@@ -30,30 +31,47 @@ func (h *Handler) listGalleries(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, out)
 }
 
+// One level at a time, as the sidebar: a {hash:4} layout holds tens of
+// thousands of folders.
+const folderPageSize = 500
+
 // Folders come from the images, so an empty folder on disk is not listed;
 // a send to a folder that does not exist yet still creates it.
-func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.FolderNode, bool) {
 	g, ok := h.resolveGallery(w, r)
 	if !ok {
-		return
+		return nil, false
 	}
 	tree, err := g.FolderTreeUnder(nil)
 	if err != nil {
 		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "could not read the folders of gallery "+g.Name)
-		return
+		return nil, false
 	}
-	root := contract.Folder{Children: []contract.Folder{}}
-	if len(tree) > 0 {
-		root = folderOf(tree[0])
-		root.Name = "" // the sidebar's "(root)" is a label, not a name
-	}
-	contract.WriteJSON(w, http.StatusOK, root)
+	return tree, true
 }
 
-func folderOf(n gallery.FolderNode) contract.Folder {
-	f := contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Children: make([]contract.Folder, 0, len(n.Children))}
-	for _, c := range n.Children {
-		f.Children = append(f.Children, folderOf(c))
+func folderOf(n *gallery.FolderNode) contract.Folder {
+	return contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
+}
+
+// The subfolders of path, a page at a time, read off the cached tree.
+func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
+	tree, ok := h.folderTree(w, r)
+	if !ok {
+		return
 	}
-	return f
+	path := strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
+	node := gallery.FindFolder(tree, path)
+	if node == nil {
+		contract.WriteError(w, http.StatusNotFound, "not_found", "folder not found: "+path)
+		return
+	}
+	offset, limit := parsePage(r, folderPageSize, folderPageSize)
+	kids := node.Children
+	page := kids[min(offset, len(kids)):min(offset+limit, len(kids))]
+	out := make([]contract.Folder, len(page))
+	for i := range page {
+		out[i] = folderOf(&page[i])
+	}
+	writePage(w, offset/limit+1, limit, len(kids), out)
 }
