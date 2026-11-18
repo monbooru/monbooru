@@ -229,7 +229,7 @@ func TestFitIgnoresVoteOrderAndSides(t *testing.T) {
 	votes := append(metricGateVotes(), mixedVotes()...)
 	want := fitStrengths(t, votes, 2)
 
-	rng := rand.New(rand.NewPCG(1, 2))
+	rng := rand.New(rand.NewPCG(502, 754))
 	for round := range 5 {
 		shuffled := append([]ranking.Vote(nil), votes...)
 		rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
@@ -471,9 +471,13 @@ func TestLogLikelihood(t *testing.T) {
 	}
 }
 
-// The fitted strengths are the most likely ones: nudging any image away from
-// its fitted strength makes the votes plus the starting assumption less
-// likely. Checked here without the assumption, on the log-likelihood.
+// The refit claims to find the strengths that explain the votes best: the
+// highest log-likelihood (see logLikelihood). This checks that claim
+// directly, the way you'd check you're on top of a hill by stepping off it
+// in each direction: move one image's fitted strength up or down a little,
+// and the votes must be explained worse every time. If the fit had stopped
+// early, or settled on the wrong point, some nudge would do better. It's run
+// without the starting assumption, so "best" means the votes alone.
 func TestFitWithoutPriorMaximizesLikelihood(t *testing.T) {
 	votes := mixedVotes()
 	best := strengthsOf(fitStrengths(t, votes, math.Inf(1)))

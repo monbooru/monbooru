@@ -27,16 +27,17 @@ import (
 type answerer struct{ threshold float64 }
 
 var (
-	// realisticAnswers matches the following targets: 20% of pairs get no side,
-	// so about 10% ties and 10% skips, and 40% left and 40% right. Per gap
-	// (worked out in Python):
+	// tiesAndSkips is a rough guess, not based on real data, and a step up
+	// from always picking a side. For random pairs of typical images, 20% of
+	// pairs get no side, so about 10% ties and 10% skips, and 40% left and
+	// 40% right. Per gap (worked out in Python):
 	//
 	//	gap (ranking points)   0     1 (174)  2 (347)  3 (521)  4 (695)
 	//	tie chance             13.6%  10.9%    6.0%     2.6%     1.0%
-	realisticAnswers = answerer{threshold: 0.56}
-	// modelOnlyAnswers always picks a side, by the win chance alone: exactly
-	// what the fit assumes, for checking that the fit itself is right.
-	modelOnlyAnswers = answerer{}
+	tiesAndSkips = answerer{threshold: 0.56}
+	// sidesOnly always picks a side, by the win chance alone: exactly what
+	// the fit assumes, for checking that the fit itself is right.
+	sidesOnly = answerer{}
 )
 
 // answer is one answer to a pair whose true strengths differ by gap (left −
@@ -58,7 +59,7 @@ func (a answerer) answer(rng *rand.Rand, gap float64) (o ranking.Outcome, skippe
 
 // simulateVotes shows n random pairs of images whose true strengths are
 // known, and returns the votes. Skipped pairs leave no vote, so with
-// realisticAnswers there are about 0.9 × n. Image i has id i+1.
+// tiesAndSkips there are about 0.9 × n. Image i has id i+1.
 func simulateVotes(rng *rand.Rand, truth []float64, n int, a answerer) []ranking.Vote {
 	votes := make([]ranking.Vote, 0, n)
 	for range n {
@@ -77,8 +78,8 @@ func simulateVotes(rng *rand.Rand, truth []float64, n int, a answerer) []ranking
 // At fixed gaps, the simulated answers follow Rao & Kupper's chances.
 func TestAnswerChances(t *testing.T) {
 	const draws = 200_000 // chance moves each share by about 0.1%
-	rng := rand.New(rand.NewPCG(9, 9))
-	for _, a := range []answerer{realisticAnswers, modelOnlyAnswers} {
+	rng := rand.New(rand.NewPCG(502, 754))
+	for _, a := range []answerer{tiesAndSkips, sidesOnly} {
 		for _, gap := range []float64{-1, 0, 1, 2, 4} {
 			counts := map[string]float64{}
 			for range draws {
@@ -110,17 +111,17 @@ func TestAnswerChances(t *testing.T) {
 	}
 }
 
-// Over random pairs of typical images, realisticAnswers gives the our targets:
-// 10% skips, 10% ties, and left and right about 40% each.
+// Over random pairs of typical images, tiesAndSkips gives its targets: 10%
+// skips, 10% ties, and left and right about 40% each.
 func TestSimulateVotesMix(t *testing.T) {
 	const shown = 100_000
 	truth := make([]float64, 1000)
-	rng := rand.New(rand.NewPCG(5, 5))
+	rng := rand.New(rand.NewPCG(502, 754))
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
 	counts := map[ranking.Winner]int{}
-	votes := simulateVotes(rng, truth, shown, realisticAnswers)
+	votes := simulateVotes(rng, truth, shown, tiesAndSkips)
 	for _, v := range votes {
 		counts[v.Outcome.Winner]++
 	}
@@ -171,12 +172,12 @@ func spacedTruth(n int) []float64 {
 
 // With plenty of votes that follow the model exactly, the refit should find
 // the true strengths: closely correlated, and each within a few
-// uncertainties of the truth. This checks the fit itself; the realistic mix
-// of answers is in the next test. The random numbers are seeded, so the test
+// uncertainties of the truth. This checks the fit itself; answers with ties
+// and skips are in the next test. The random numbers are seeded, so the test
 // always sees the same votes.
 func TestFitRecoversSimulatedStrengths(t *testing.T) {
 	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(42, 1)), truth, 4000, modelOnlyAnswers) // about 200 votes per image
+	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, sidesOnly) // about 200 votes per image
 	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
 
 	fitted := make([]float64, len(truth))
@@ -201,16 +202,16 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 	}
 }
 
-// With realistic answers (ties and skips likelier between close images),
+// With ties and skips (likelier between close images),
 // the fit should still be close: same order, about the true spread, and
 // honest uncertainty. It isn't exact, because counting a tie as half a win
 // isn't quite Rao & Kupper's model. Worked out separately in Python for
-// these 40 images, with unlimited votes: fitted ≈ 1.06 × truth. Across five
-// seeds the measured slope was 1.03 to 1.08, and 38 to 40 of the 40 images
-// were within 2 uncertainties.
-func TestFitWithRealisticAnswers(t *testing.T) {
+// these 40 images, with unlimited votes: fitted ≈ 1.06 × truth. Across six
+// seeds (this one included) the measured slope was 1.03 to 1.11, and 37 to
+// 40 of the 40 images were within 2 uncertainties.
+func TestFitWithTiesAndSkips(t *testing.T) {
 	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(42, 1)), truth, 4000, realisticAnswers) // about 180 votes per image
+	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, tiesAndSkips) // about 180 votes per image
 	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
 
 	fitted := make([]float64, len(truth))
@@ -255,7 +256,7 @@ func slope(a, b []float64) float64 {
 func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 	bt := newTest(t)
 	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(42, 1)), truth, 4000, realisticAnswers)
+	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, tiesAndSkips)
 
 	states := map[int64]ranking.State{}
 	get := func(id int64) ranking.State {
@@ -292,12 +293,12 @@ func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 // uncertainty must be honest: a vote or two can't say much, and the
 // uncertainty has to admit it.
 func TestFitSparseVotes(t *testing.T) {
-	rng := rand.New(rand.NewPCG(7, 7))
+	rng := rand.New(rand.NewPCG(502, 754))
 	truth := make([]float64, 2000)
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
-	votes := simulateVotes(rng, truth, 2000, realisticAnswers) // 2000 pairs shown: about 1800 votes
+	votes := simulateVotes(rng, truth, 2000, tiesAndSkips) // 2000 pairs shown: about 1800 votes
 	fit := fitStrengths(t, votes, 2)
 
 	var trueOnes, fitted []float64
@@ -390,7 +391,7 @@ func TestAccuracy(t *testing.T) {
 	// With true strengths on a bell curve of width 1 (just what we're assuming
 	// for this example, not always the case), an average uncertainty of 1
 	// spans about 68% of the library.
-	rng := rand.New(rand.NewPCG(3, 3))
+	rng := rand.New(rand.NewPCG(502, 754))
 	bell := make([]float64, 200_000)
 	for i := range bell {
 		bell[i] = rng.NormFloat64()
@@ -402,9 +403,9 @@ func TestAccuracy(t *testing.T) {
 	}
 }
 
-// BenchmarkFit times the refit in a 1M-image library at realistic counts
-// of pairs shown (with realisticAnswers, about 90% become votes). Votes are
-// made by hand, so 10k is years of casual use, and 100k is a heavy user.
+// BenchmarkFit times the refit in a 1M-image library at the counts of pairs
+// shown we expect from people voting by hand (with tiesAndSkips, about 90%
+// become votes): 10k is years of casual use, and 100k is a heavy user.
 //
 // Fit only ever sees votes, so the library size matters through how spread
 // out they are: picked from the whole library, almost every vote meets two
@@ -420,7 +421,7 @@ func TestAccuracy(t *testing.T) {
 //	go test -run '^$' -bench BenchmarkFit -benchmem ./internal/ranking/bradleyterry/
 func BenchmarkFit(b *testing.B) {
 	const library = 1_000_000
-	rng := rand.New(rand.NewPCG(1, 2))
+	rng := rand.New(rand.NewPCG(502, 754))
 	truth := make([]float64, library)
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
@@ -437,7 +438,7 @@ func BenchmarkFit(b *testing.B) {
 			b.Run(fmt.Sprintf("%d_pairs_shown/%s", shown, pool.name), func(b *testing.B) {
 				poolTruth := truth[:pool.images]
 				sortedTruth := slices.Sorted(slices.Values(poolTruth))
-				vs := simulateVotes(rand.New(rand.NewPCG(3, 4)), poolTruth, shown, realisticAnswers)
+				vs := simulateVotes(rand.New(rand.NewPCG(754, 502)), poolTruth, shown, tiesAndSkips)
 				bt := newTest(b)
 				var fit map[int64]ranking.State
 				for b.Loop() {
