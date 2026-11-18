@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -390,7 +391,7 @@ func TestFitReturnsOnlyVotedImages(t *testing.T) {
 	if _, err := bt.Encode(got[5]); err != nil {
 		t.Errorf("Encode(Fit result): %v", err)
 	}
-	if _, _, err := bt.Update(got[5], got[8], leftWins); err != nil {
+	if _, _, err := bt.Update(got[5], got[8], leftWins, time.Time{}); err != nil {
 		t.Errorf("Update(Fit results): %v", err)
 	}
 

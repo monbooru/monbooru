@@ -3,6 +3,7 @@ package bradleyterry
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -16,7 +17,7 @@ var (
 // update runs bt.Update on two states and unwraps the results.
 func update(t *testing.T, bt *algorithm, left, right state, o ranking.Outcome) (state, state) {
 	t.Helper()
-	l, r, err := bt.Update(left, right, o)
+	l, r, err := bt.Update(left, right, o, time.Time{})
 	if err != nil {
 		t.Fatalf("Update(%+v, %+v, %+v): %v", left, right, o, err)
 	}
@@ -247,7 +248,7 @@ func TestUpdateIgnoresDegree(t *testing.T) {
 func TestUpdateRejectsInvalidOutcomes(t *testing.T) {
 	bt := newTest(t)
 	for _, o := range []ranking.Outcome{{}, {Winner: 4}, {Winner: ranking.WinnerTie, Degree: ranking.DegreeStrong}} {
-		if _, _, err := bt.Update(bt.Start(), bt.Start(), o); err == nil {
+		if _, _, err := bt.Update(bt.Start(), bt.Start(), o, time.Time{}); err == nil {
 			t.Errorf("Update with outcome %+v succeeded, want an error", o)
 		}
 	}
@@ -268,5 +269,25 @@ func TestUpdateManyVotes(t *testing.T) {
 	}
 	if champion.Strength <= other.Strength {
 		t.Errorf("after 1000 wins the champion %+v is not above %+v", champion, other)
+	}
+}
+
+// Bradley–Terry has no rating periods: time passing changes nothing, and
+// neither does when a vote was made.
+func TestAdvanceAndVoteTimeChangeNothing(t *testing.T) {
+	bt := newTest(t)
+	monday := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	for _, s := range sampleStates {
+		for _, now := range []time.Time{{}, monday, monday.AddDate(10, 0, 0)} {
+			if got := bt.Advance(s, now); got != s {
+				t.Errorf("Advance(%+v, %v) = %+v, want it unchanged", s, now, got)
+			}
+		}
+	}
+	a, b := sampleStates[2], sampleStates[3]
+	l1, r1 := update(t, bt, a, b, leftWins)
+	l2, r2, err := bt.Update(a, b, leftWins, monday.AddDate(3, 0, 0))
+	if err != nil || l2 != l1 || r2 != r1 {
+		t.Errorf("a vote three years later = %+v, %+v, %v; want %+v, %+v, nil", l2, r2, err, l1, r1)
 	}
 }

@@ -20,7 +20,8 @@ const (
 	AlgorithmDefault      AlgorithmID = 0
 	AlgorithmBradleyTerry AlgorithmID = 1
 	AlgorithmGlicko2      AlgorithmID = 2
-	// Adding an algorithm? Update Valid, and its tests, to match.
+	// Adding an algorithm? Update Valid, and its tests, to match, and add it
+	// to algorithms.New: TestNewMatchesValid there checks the two agree.
 )
 
 // recommended is what AlgorithmDefault means in this version. Changing it
@@ -75,9 +76,13 @@ type Algorithm interface {
 	// Shown is what the shared code sees of s. An algorithm method, not a
 	// State one, because it can need the algorithm's settings.
 	Shown(s State) Estimate
-	// Update applies one vote to its two images only. It fails on an
-	// invalid outcome.
-	Update(left, right State, outcome Outcome) (State, State, error)
+	// Update applies one vote, made at time at, to its two images only. It
+	// fails on an invalid outcome. Algorithms that ignore time accept any.
+	Update(left, right State, outcome Outcome, at time.Time) (State, State, error)
+	// Advance brings s up to date at time now, without any new votes: for
+	// algorithms with rating periods (Glicko-2), it closes the periods that
+	// have ended. Others return s unchanged.
+	Advance(s State, now time.Time) State
 	// Fit recomputes every voted image from all votes: the recompute button.
 	Fit(ctx context.Context, votes []Vote) (map[int64]State, error)
 	// Encode and Decode turn a State into bytes for storage and back.

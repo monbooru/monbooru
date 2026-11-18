@@ -2,6 +2,7 @@ package bradleyterry
 
 import (
 	"math"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -15,8 +16,9 @@ const minShrink = 0.0001
 // Update is the quick update after one vote: Weng & Lin (2011), Algorithm 1,
 // for the Bradley–Terry model, with two "teams" of one image each. Each
 // image's strength moves by how surprising the result was, scaled by how
-// unsure we are about it, and its uncertainty shrinks a little.
-func (bt *algorithm) Update(left, right ranking.State, outcome ranking.Outcome) (ranking.State, ranking.State, error) {
+// unsure we are about it, and its uncertainty shrinks a little. When the vote
+// was made doesn't matter to Bradley–Terry, so at is ignored.
+func (bt *algorithm) Update(left, right ranking.State, outcome ranking.Outcome, at time.Time) (ranking.State, ranking.State, error) {
 	score, err := outcome.LeftScore()
 	if err != nil {
 		return nil, nil, err
@@ -43,3 +45,7 @@ func (bt *algorithm) updateOne(me, opponent state, score float64) state {
 	variance *= math.Max(1-shrink, minShrink)
 	return state{Strength: strength, Uncertainty: math.Sqrt(variance)}
 }
+
+// Advance returns s unchanged: Bradley–Terry has no rating periods, and its
+// estimates don't change while no one votes.
+func (bt *algorithm) Advance(s ranking.State, now time.Time) ranking.State { return s }

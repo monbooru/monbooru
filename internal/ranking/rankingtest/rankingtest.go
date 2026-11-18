@@ -7,7 +7,9 @@ package rankingtest
 import (
 	"math"
 	"math/rand/v2"
+	"slices"
 	"sort"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -79,6 +81,16 @@ func SimulateVotes(rng *rand.Rand, truth []float64, n int, a Answerer) []ranking
 		}
 	}
 	return votes
+}
+
+// SpreadOverTime returns a copy of votes made evenly over span, starting at
+// start, in their order: for algorithms that care when votes were made.
+func SpreadOverTime(votes []ranking.Vote, start time.Time, span time.Duration) []ranking.Vote {
+	out := slices.Clone(votes)
+	for i := range out {
+		out[i].At = start.Add(time.Duration(float64(span) * float64(i) / float64(len(out))))
+	}
+	return out
 }
 
 // SpacedTruth gives n true strengths evenly spread from −2 to 2 (rankings

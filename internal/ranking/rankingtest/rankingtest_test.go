@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -80,6 +81,20 @@ func TestSimulateVotesMix(t *testing.T) {
 		if !near(s.got, s.want, 0.01) {
 			t.Errorf("%s share = %.3f, want about %.2f", s.name, s.got, s.want)
 		}
+	}
+}
+
+func TestSpreadOverTime(t *testing.T) {
+	start := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	votes := []ranking.Vote{{Left: 1, Right: 2}, {Left: 2, Right: 3}, {Left: 3, Right: 1}, {Left: 1, Right: 3}}
+	got := SpreadOverTime(votes, start, 4*time.Hour)
+	for i, v := range got {
+		if want := start.Add(time.Duration(i) * time.Hour); !v.At.Equal(want) || v.Left != votes[i].Left || v.Right != votes[i].Right {
+			t.Errorf("vote %d = %+v, want images %d and %d at %v", i, v, votes[i].Left, votes[i].Right, want)
+		}
+	}
+	if !votes[1].At.IsZero() {
+		t.Errorf("SpreadOverTime changed the votes it was given")
 	}
 }
 

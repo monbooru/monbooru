@@ -91,7 +91,7 @@ func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 		return bt.Start()
 	}
 	for _, v := range votes {
-		l, r, err := bt.Update(get(v.Left), get(v.Right), v.Outcome)
+		l, r, err := bt.Update(get(v.Left), get(v.Right), v.Outcome, v.At)
 		if err != nil {
 			t.Fatal(err)
 		}
