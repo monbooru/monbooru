@@ -20,8 +20,10 @@ const (
 	fitMaxStep = 1.0
 	// fitTolerance: stop once a whole pass moves no image further than this.
 	fitTolerance = 1e-10
-	// fitMaxPasses: give up rather than loop forever.
-	fitMaxPasses = 10_000
+	// fitMaxPasses: give up rather than loop forever. Fits seen so far took
+	// 12 to 128 passes, even for a chain of 500,000 images, so this leaves
+	// plenty of room while capping a fit that never settles at seconds.
+	fitMaxPasses = 1_000
 )
 
 // Fit recomputes every voted image from all votes at once: the strengths

@@ -6,169 +6,11 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
-	"sort"
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/ranking"
+	"github.com/monbooru/monbooru/internal/ranking/rankingtest"
 )
-
-// answerer is a simulated person answering pairs, following Rao & Kupper's
-// (1967) tie model. Each time a pair is shown, they feel a preference: the
-// true strength gap plus random noise. If the feeling is weaker than
-// threshold, they don't pick a side, and either call it a tie or skip, 50/50.
-// Otherwise they pick the side they felt. So:
-//
-//	left chance      = sigmoid(gap − threshold)
-//	right chance     = sigmoid(−gap − threshold)
-//	no side picked   = sigmoid(gap + threshold) − sigmoid(gap − threshold)
-//
-// Close images are often left undecided; far apart ones almost never. With a
-// threshold of 0 it's plain Bradley–Terry: left wins with sigmoid(gap).
-type answerer struct{ threshold float64 }
-
-var (
-	// tiesAndSkips is a rough guess, not based on real data, and a step up
-	// from always picking a side. For random pairs of typical images, 20% of
-	// pairs get no side, so about 10% ties and 10% skips, and 40% left and
-	// 40% right. Per gap (worked out in Python):
-	//
-	//	gap (ranking points)   0     1 (174)  2 (347)  3 (521)  4 (695)
-	//	tie chance             13.6%  10.9%    6.0%     2.6%     1.0%
-	tiesAndSkips = answerer{threshold: 0.56}
-	// sidesOnly always picks a side, by the win chance alone: exactly what
-	// the fit assumes, for checking that the fit itself is right.
-	sidesOnly = answerer{}
-)
-
-// answer is one answer to a pair whose true strengths differ by gap (left −
-// right). skipped means no vote is stored.
-func (a answerer) answer(rng *rand.Rand, gap float64) (o ranking.Outcome, skipped bool) {
-	u := rng.Float64()
-	felt := gap + math.Log(u/(1-u)) // logistic noise: P(felt > 0) = sigmoid(gap)
-	switch {
-	case felt > a.threshold:
-		return leftWins, false
-	case felt < -a.threshold:
-		return rightWins, false
-	case rng.IntN(2) == 0:
-		return tie, false
-	default:
-		return ranking.Outcome{}, true
-	}
-}
-
-// simulateVotes shows n random pairs of images whose true strengths are
-// known, and returns the votes. Skipped pairs leave no vote, so with
-// tiesAndSkips there are about 0.9 × n. Image i has id i+1.
-func simulateVotes(rng *rand.Rand, truth []float64, n int, a answerer) []ranking.Vote {
-	votes := make([]ranking.Vote, 0, n)
-	for range n {
-		i := rng.IntN(len(truth))
-		j := rng.IntN(len(truth) - 1)
-		if j >= i {
-			j++ // any image but i
-		}
-		if o, skipped := a.answer(rng, truth[i]-truth[j]); !skipped {
-			votes = append(votes, vote(int64(i+1), int64(j+1), o))
-		}
-	}
-	return votes
-}
-
-// At fixed gaps, the simulated answers follow Rao & Kupper's chances.
-func TestAnswerChances(t *testing.T) {
-	const draws = 200_000 // chance moves each share by about 0.1%
-	rng := rand.New(rand.NewPCG(502, 754))
-	for _, a := range []answerer{tiesAndSkips, sidesOnly} {
-		for _, gap := range []float64{-1, 0, 1, 2, 4} {
-			counts := map[string]float64{}
-			for range draws {
-				o, skipped := a.answer(rng, gap)
-				switch {
-				case skipped:
-					counts["skip"]++
-				case o == leftWins:
-					counts["left"]++
-				case o == rightWins:
-					counts["right"]++
-				case o == tie:
-					counts["tie"]++
-				}
-			}
-			undecided := sigmoid(gap+a.threshold) - sigmoid(gap-a.threshold)
-			want := map[string]float64{
-				"left":  sigmoid(gap - a.threshold),
-				"right": sigmoid(-gap - a.threshold),
-				"tie":   undecided / 2,
-				"skip":  undecided / 2,
-			}
-			for name, w := range want {
-				if got := counts[name] / draws; !near(got, w, 0.005) {
-					t.Errorf("threshold %v, gap %v: %s share = %.4f, want %.4f", a.threshold, gap, name, got, w)
-				}
-			}
-		}
-	}
-}
-
-// Over random pairs of typical images, tiesAndSkips gives its targets: 10%
-// skips, 10% ties, and left and right about 40% each.
-func TestSimulateVotesMix(t *testing.T) {
-	const shown = 100_000
-	truth := make([]float64, 1000)
-	rng := rand.New(rand.NewPCG(502, 754))
-	for i := range truth {
-		truth[i] = rng.NormFloat64()
-	}
-	counts := map[ranking.Winner]int{}
-	votes := simulateVotes(rng, truth, shown, tiesAndSkips)
-	for _, v := range votes {
-		counts[v.Outcome.Winner]++
-	}
-	// With 100,000 pairs, chance alone moves each share by well under 1%.
-	shares := []struct {
-		name      string
-		got, want float64
-	}{
-		{"skip", float64(shown-len(votes)) / shown, 0.1},
-		{"tie", float64(counts[ranking.WinnerTie]) / shown, 0.1},
-		{"left", float64(counts[ranking.WinnerLeft]) / shown, 0.4},
-		{"right", float64(counts[ranking.WinnerRight]) / shown, 0.4},
-	}
-	for _, s := range shares {
-		if !near(s.got, s.want, 0.01) {
-			t.Errorf("%s share = %.3f, want about %.2f", s.name, s.got, s.want)
-		}
-	}
-}
-
-// correlation is the Pearson correlation of two lists: 1 when one is an
-// exact rising straight line of the other, 0 when unrelated.
-func correlation(a, b []float64) float64 {
-	n := float64(len(a))
-	var meanA, meanB float64
-	for i := range a {
-		meanA += a[i] / n
-		meanB += b[i] / n
-	}
-	var cov, varA, varB float64
-	for i := range a {
-		cov += (a[i] - meanA) * (b[i] - meanB)
-		varA += (a[i] - meanA) * (a[i] - meanA)
-		varB += (b[i] - meanB) * (b[i] - meanB)
-	}
-	return cov / math.Sqrt(varA*varB)
-}
-
-// spacedTruth gives n true strengths evenly spread from −2 to 2 (rankings
-// about 1150 to 1850), so they average 0, like the fit does.
-func spacedTruth(n int) []float64 {
-	truth := make([]float64, n)
-	for i := range truth {
-		truth[i] = -2 + 4*float64(i)/float64(n-1)
-	}
-	return truth
-}
 
 // With plenty of votes that follow the model exactly, the refit should find
 // the true strengths: closely correlated, and each within a few
@@ -176,8 +18,8 @@ func spacedTruth(n int) []float64 {
 // and skips are in the next test. The random numbers are seeded, so the test
 // always sees the same votes.
 func TestFitRecoversSimulatedStrengths(t *testing.T) {
-	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, sidesOnly) // about 200 votes per image
+	truth := rankingtest.SpacedTruth(40)
+	votes := rankingtest.SimulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, rankingtest.SidesOnly) // about 200 votes per image
 	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
 
 	fitted := make([]float64, len(truth))
@@ -193,7 +35,7 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 			withinTwo++
 		}
 	}
-	if c := correlation(truth, fitted); c < 0.98 {
+	if c := rankingtest.Correlation(truth, fitted); c < 0.98 {
 		t.Errorf("correlation with the truth = %v, want at least 0.98", c)
 	}
 	// If the uncertainty is honest, about 95% land within 2 of them.
@@ -210,8 +52,8 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 // seeds (this one included) the measured slope was 1.03 to 1.11, and 37 to
 // 40 of the 40 images were within 2 uncertainties.
 func TestFitWithTiesAndSkips(t *testing.T) {
-	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, tiesAndSkips) // about 180 votes per image
+	truth := rankingtest.SpacedTruth(40)
+	votes := rankingtest.SimulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, rankingtest.TiesAndSkips) // about 180 votes per image
 	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
 
 	fitted := make([]float64, len(truth))
@@ -223,10 +65,10 @@ func TestFitWithTiesAndSkips(t *testing.T) {
 			withinTwo++
 		}
 	}
-	if c := correlation(truth, fitted); c < 0.98 {
+	if c := rankingtest.Correlation(truth, fitted); c < 0.98 {
 		t.Errorf("correlation with the truth = %v, want at least 0.98", c)
 	}
-	if got := slope(truth, fitted); got < 0.95 || got > 1.15 {
+	if got := rankingtest.Slope(truth, fitted); got < 0.95 || got > 1.15 {
 		t.Errorf("fitted / true strength = %v, want about 1.06 (0.95 to 1.15)", got)
 	}
 	if share := float64(withinTwo) / float64(len(truth)); share < 0.85 {
@@ -234,29 +76,12 @@ func TestFitWithTiesAndSkips(t *testing.T) {
 	}
 }
 
-// slope is how much b changes per unit of a, on the best straight line
-// through the points (least squares).
-func slope(a, b []float64) float64 {
-	n := float64(len(a))
-	var meanA, meanB float64
-	for i := range a {
-		meanA += a[i] / n
-		meanB += b[i] / n
-	}
-	var cov, varA float64
-	for i := range a {
-		cov += (a[i] - meanA) * (b[i] - meanB)
-		varA += (a[i] - meanA) * (a[i] - meanA)
-	}
-	return cov / varA
-}
-
 // The quick update sees the same votes one at a time. It should get close
 // to the truth and to the refit, though less exactly than the refit.
 func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 	bt := newTest(t)
-	truth := spacedTruth(40)
-	votes := simulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, tiesAndSkips)
+	truth := rankingtest.SpacedTruth(40)
+	votes := rankingtest.SimulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, rankingtest.TiesAndSkips)
 
 	states := map[int64]ranking.State{}
 	get := func(id int64) ranking.State {
@@ -280,10 +105,10 @@ func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 		quick[i] = bt.Shown(states[int64(i+1)]).Strength
 		refit[i] = fit[int64(i+1)].Strength
 	}
-	if c := correlation(truth, quick); c < 0.95 {
+	if c := rankingtest.Correlation(truth, quick); c < 0.95 {
 		t.Errorf("quick update's correlation with the truth = %v, want at least 0.95", c)
 	}
-	if c := correlation(refit, quick); c < 0.95 {
+	if c := rankingtest.Correlation(refit, quick); c < 0.95 {
 		t.Errorf("quick update's correlation with the refit = %v, want at least 0.95", c)
 	}
 }
@@ -298,7 +123,7 @@ func TestFitSparseVotes(t *testing.T) {
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
-	votes := simulateVotes(rng, truth, 2000, tiesAndSkips) // 2000 pairs shown: about 1800 votes
+	votes := rankingtest.SimulateVotes(rng, truth, 2000, rankingtest.TiesAndSkips) // 2000 pairs shown: about 1800 votes
 	fit := fitStrengths(t, votes, 2)
 
 	var trueOnes, fitted []float64
@@ -318,7 +143,7 @@ func TestFitSparseVotes(t *testing.T) {
 	}
 	// Few votes can only say so much. Across five seeds, this correlation
 	// was 0.52 to 0.54; 0.3 still shows the votes are being used.
-	if c := correlation(trueOnes, fitted); c < 0.3 {
+	if c := rankingtest.Correlation(trueOnes, fitted); c < 0.3 {
 		t.Errorf("correlation with the truth = %v, want at least 0.3", c)
 	}
 	// Honest uncertainty: at least 95% within 2 uncertainties (it was over
@@ -328,83 +153,8 @@ func TestFitSparseVotes(t *testing.T) {
 	}
 }
 
-// accuracy sums up a fit against the known truth, over the images it ranked.
-//
-//   - avgUncertainty: the average uncertainty, in strength units (× 173.72
-//     for RD in ranking points).
-//   - impliedRange: how wide that average uncertainty is, as a share of the
-//     library: the share of all the library's true strengths within ± the
-//     average uncertainty of the library's middle. Near 1 = an image could
-//     be almost anywhere; small = its place is pinned down. With a library
-//     spread like a bell curve of width w, it's about 68% when the average
-//     uncertainty equals w.
-//   - withinRange: the share of ranked images whose true strength is within
-//     ± their own uncertainty of their fitted one. About 0.68 if the
-//     uncertainty is honest, whatever its size.
-//
-// sortedTruth is every library image's true strength, sorted.
-func accuracy(fit map[int64]ranking.State, truth, sortedTruth []float64) (avgUncertainty, impliedRange, withinRange float64) {
-	for id, s := range fit {
-		e := s.(state)
-		avgUncertainty += e.Uncertainty
-		if t := truth[id-1]; math.Abs(t-e.Strength) <= e.Uncertainty {
-			withinRange++
-		}
-	}
-	n := float64(len(fit))
-	avgUncertainty, withinRange = avgUncertainty/n, withinRange/n
-
-	middle := 0.0
-	for _, t := range sortedTruth {
-		middle += t / float64(len(sortedTruth))
-	}
-	inside := sort.SearchFloat64s(sortedTruth, middle+avgUncertainty) - sort.SearchFloat64s(sortedTruth, middle-avgUncertainty)
-	return avgUncertainty, float64(inside) / float64(len(sortedTruth)), withinRange
-}
-
-func TestAccuracy(t *testing.T) {
-	// 401 true strengths, −2 to 2 in steps of 0.01, so the middle is 0.
-	truth := make([]float64, 401)
-	for i := range truth {
-		truth[i] = -2 + float64(i)/100
-	}
-	// Image 201's truth is 0, inside its 0 ± 0.5; image 1's truth is −2,
-	// outside its 0 ± 1.5. The average uncertainty is 1, and −1 to 1 holds
-	// 201 of the 401 true strengths.
-	fit := map[int64]ranking.State{
-		201: state{Strength: 0, Uncertainty: 0.5},
-		1:   state{Strength: 0, Uncertainty: 1.5},
-	}
-	avgUncertainty, impliedRange, withinRange := accuracy(fit, truth, truth)
-	if !near(avgUncertainty, 1, 1e-12) {
-		t.Errorf("avgUncertainty = %v, want 1", avgUncertainty)
-	}
-	// A bit of tolerance: −1 and 1 themselves are computed, so they may land
-	// a hair either side.
-	if !near(impliedRange, 201.0/401, 1.0/401) {
-		t.Errorf("impliedRange = %v, want about %v", impliedRange, 201.0/401)
-	}
-	if withinRange != 0.5 {
-		t.Errorf("withinRange = %v, want 0.5", withinRange)
-	}
-
-	// With true strengths on a bell curve of width 1 (just what we're assuming
-	// for this example, not always the case), an average uncertainty of 1
-	// spans about 68% of the library.
-	rng := rand.New(rand.NewPCG(502, 754))
-	bell := make([]float64, 200_000)
-	for i := range bell {
-		bell[i] = rng.NormFloat64()
-	}
-	slices.Sort(bell)
-	_, impliedRange, _ = accuracy(map[int64]ranking.State{1: state{Strength: 0, Uncertainty: 1}}, bell, bell)
-	if !near(impliedRange, 0.6827, 0.005) {
-		t.Errorf("uncertainty 1 on a bell curve of width 1 spans %v of the library, want about 0.68", impliedRange)
-	}
-}
-
 // BenchmarkFit times the refit in a 1M-image library at the counts of pairs
-// shown we expect from people voting by hand (with tiesAndSkips, about 90%
+// shown we expect from people voting by hand (with rankingtest.TiesAndSkips, about 90%
 // become votes): 10k is years of casual use, and 100k is a heavy user.
 //
 // Fit only ever sees votes, so the library size matters through how spread
@@ -412,7 +162,7 @@ func TestAccuracy(t *testing.T) {
 // images nobody has compared yet; picked within one search, votes link up.
 //
 // Besides time and memory, it reports how accurate the result is (see
-// accuracy), over the ranked images: avg_uncertainty (and as avg_RD),
+// rankingtest.Accuracy), over the ranked images: avg_uncertainty (and as avg_RD),
 // implied_range_% (how much of the library, or of the search, that average
 // uncertainty spans), and truth_in_range_% (about 68 if the uncertainty is
 // honest). An unranked image's uncertainty is 2, which spans about 95% of a
@@ -438,7 +188,7 @@ func BenchmarkFit(b *testing.B) {
 			b.Run(fmt.Sprintf("%d_pairs_shown/%s", shown, pool.name), func(b *testing.B) {
 				poolTruth := truth[:pool.images]
 				sortedTruth := slices.Sorted(slices.Values(poolTruth))
-				vs := simulateVotes(rand.New(rand.NewPCG(754, 502)), poolTruth, shown, tiesAndSkips)
+				vs := rankingtest.SimulateVotes(rand.New(rand.NewPCG(754, 502)), poolTruth, shown, rankingtest.TiesAndSkips)
 				bt := newTest(b)
 				var fit map[int64]ranking.State
 				for b.Loop() {
@@ -447,7 +197,11 @@ func BenchmarkFit(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
-				avgUncertainty, impliedRange, withinRange := accuracy(fit, poolTruth, sortedTruth)
+				estimates := make(map[int64]ranking.Estimate, len(fit))
+				for id, s := range fit {
+					estimates[id] = bt.Shown(s)
+				}
+				avgUncertainty, impliedRange, withinRange := rankingtest.Accuracy(estimates, poolTruth, sortedTruth)
 				b.ReportMetric(float64(len(fit)), "ranked_images")
 				b.ReportMetric(avgUncertainty, "avg_uncertainty")
 				b.ReportMetric(ranking.RDFromUncertainty(avgUncertainty), "avg_RD")
