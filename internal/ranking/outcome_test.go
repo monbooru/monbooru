@@ -54,3 +54,28 @@ func TestOutcomeValid(t *testing.T) {
 		}
 	}
 }
+
+func TestOutcomeLeftScore(t *testing.T) {
+	cases := []struct {
+		outcome Outcome
+		want    float64
+	}{
+		{Outcome{WinnerLeft, DegreeUnspecified}, 1},
+		{Outcome{WinnerTie, DegreeUnspecified}, 0.5},
+		{Outcome{WinnerRight, DegreeUnspecified}, 0},
+		// Degree doesn't change the score.
+		{Outcome{WinnerLeft, DegreeStrong}, 1},
+		{Outcome{WinnerRight, DegreeSlight}, 0},
+	}
+	for _, c := range cases {
+		got, err := c.outcome.LeftScore()
+		if err != nil || got != c.want {
+			t.Errorf("%+v.LeftScore() = %v, %v; want %v, nil", c.outcome, got, err, c.want)
+		}
+	}
+	for _, o := range []Outcome{{0, DegreeUnspecified}, {WinnerTie, DegreeStrong}, {WinnerLeft, 4}} {
+		if _, err := o.LeftScore(); err == nil {
+			t.Errorf("%+v.LeftScore() succeeded, want an error", o)
+		}
+	}
+}

@@ -1,5 +1,7 @@
 package ranking
 
+import "fmt"
+
 // Winner is which side a vote picked. We store the side (rather than just the
 // winner's ID) because in some cases we might specifically care about which
 // side was chosen. Users tend to be slightly biased to one side (usually the
@@ -46,4 +48,22 @@ func (o Outcome) Valid() bool {
 		return o.Degree == DegreeUnspecified
 	}
 	return false
+}
+
+// LeftScore is the left image's result as a number: 1 for a win, ½ for "about
+// the same" and 0 for a loss. The right image's is 1 − LeftScore. Ties as half
+// a win are from Glickman (1999), also used by Weng & Lin (2011, eq. 51) and
+// the Glicko-2 paper. Degree is ignored: this is for algorithms that only
+// look at which side won.
+func (o Outcome) LeftScore() (float64, error) {
+	if !o.Valid() {
+		return 0, fmt.Errorf("invalid outcome (winner %d, degree %d)", o.Winner, o.Degree)
+	}
+	switch o.Winner {
+	case WinnerLeft:
+		return 1, nil
+	case WinnerTie:
+		return 0.5, nil
+	}
+	return 0, nil
 }
