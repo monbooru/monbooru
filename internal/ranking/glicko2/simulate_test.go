@@ -32,7 +32,7 @@ func shownFit(t testing.TB, alg *algorithm, votes []ranking.Vote) map[int64]rank
 // checkRecovers runs 40 images with true strengths from −2 to 2 through 4000
 // pairs shown over 20 weeks: about 10 games per image per week, the paper's
 // "moderate to large" number per period. It checks the correlation with the
-// truth, the slope (fitted / true), and the share within 2 uncertainties.
+// truth, the slope (fitted / true), and the share within 2 standard deviations.
 func checkRecovers(t *testing.T, answers rankingtest.Answerer, slopeLow, slopeHigh float64) {
 	t.Helper()
 	alg := newTest(t)
@@ -56,7 +56,7 @@ func checkRecovers(t *testing.T, answers rankingtest.Answerer, slopeLow, slopeHi
 		t.Errorf("fitted / true strength = %v, want %v to %v", s, slopeLow, slopeHigh)
 	}
 	if share := float64(withinTwo) / float64(len(truth)); share < 0.85 {
-		t.Errorf("%.0f%% of images within 2 uncertainties of the truth, want about 95%%", 100*share)
+		t.Errorf("%.0f%% of images within 2 standard deviations of the truth, want about 95%%", 100*share)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 
 // With ties and skips, the order still comes out right, but the spread is a
 // little wider than the truth: across six seeds the slope was 1.04 to 1.14
-// (1.14 at this seed), with 38 to 40 of 40 images within 2 uncertainties.
+// (1.14 at this seed), with 38 to 40 of 40 images within 2 standard deviations.
 // As for Bradley–Terry, a tie as half a win isn't quite Rao & Kupper's
 // model, which the simulated person follows.
 func TestFitWithTiesAndSkips(t *testing.T) {
@@ -112,7 +112,7 @@ func TestFitSparseVotes(t *testing.T) {
 	}
 	// Honest uncertainty: it was over 99.5% across seeds, so on the cautious side.
 	if share := float64(withinTwo) / float64(len(shown)); share < 0.95 {
-		t.Errorf("%.1f%% of images within 2 uncertainties of the truth, want at least 95%%", 100*share)
+		t.Errorf("%.1f%% of images within 2 standard deviations of the truth, want at least 95%%", 100*share)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestFitSparseVotes(t *testing.T) {
 // tie. The uncertainty is the one-game result (φ' ≈ 1.6712, RD 290), grown by
 // the empty weeks between the pair's vote and the year's last vote: never more
 // than √(φ'² + 52σ²). Across six seeds the correlation with the truth was 0.38
-// to 0.42, and over 99.8% of images were within 2 uncertainties.
+// to 0.42, and over 99.8% of images were within 2 standard deviations.
 func TestFitOneVoteEach(t *testing.T) {
 	alg := newTest(t)
 	rng := rand.New(rand.NewPCG(502, 754))
@@ -165,7 +165,7 @@ func TestFitOneVoteEach(t *testing.T) {
 		t.Errorf("correlation with the truth = %v, want at least 0.25", c)
 	}
 	if share := float64(withinTwo) / float64(len(shown)); share < 0.95 {
-		t.Errorf("%.1f%% of images within 2 uncertainties of the truth, want at least 95%%", 100*share)
+		t.Errorf("%.1f%% of images within 2 standard deviations of the truth, want at least 95%%", 100*share)
 	}
 }
 

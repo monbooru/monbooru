@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
+	"github.com/monbooru/monbooru/internal/ranking/bradleyterry"
 )
 
 func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
@@ -117,6 +118,54 @@ func TestSimulateOneVoteEach(t *testing.T) {
 	// With skips re-asked, ties are about 10/90 of the votes.
 	if share := float64(ties) / float64(len(votes)); !near(share, 1.0/9, 0.04) {
 		t.Errorf("tie share = %.3f, want about 0.11", share)
+	}
+}
+
+// SimulatePicked's votes are well formed. With a simulated person who never
+// skips, every pair shown becomes one vote, in order, at start + k × step,
+// between two different images in range. With skips allowed, a skipped pair
+// leaves no vote and its time slot stays empty. (How often the simulated
+// person skips is TiesAndSkips's business, checked in TestSimulateVotesMix,
+// so it isn't pinned here.) Whether picking chooses better pairs is checked
+// with real algorithms in algorithms.TestPickedPairsBeatRandomPairs.
+func TestSimulatePicked(t *testing.T) {
+	alg, err := bradleyterry.New(bradleyterry.DefaultSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	truth := SpacedTruth(300)
+	start := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+
+	votes, err := SimulatePicked(rand.New(rand.NewPCG(502, 754)), truth, 1000, SidesOnly, alg, 50, start, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1000 {
+		t.Fatalf("%d votes from 1000 pairs shown with no skips, want 1000", len(votes))
+	}
+	for k, v := range votes {
+		if v.Left == v.Right || v.Left < 1 || v.Left > 300 || v.Right < 1 || v.Right > 300 {
+			t.Fatalf("vote %+v: want two different images with ids 1 to 300", v)
+		}
+		if want := start.Add(time.Duration(k) * time.Hour); !v.At.Equal(want) {
+			t.Fatalf("vote %d made at %v, want %v", k, v.At, want)
+		}
+	}
+
+	votes, err = SimulatePicked(rand.New(rand.NewPCG(502, 754)), truth, 1000, TiesAndSkips, alg, 50, start, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) >= 1000 || len(votes) == 0 {
+		t.Fatalf("%d votes from 1000 pairs shown with skips, want some but fewer than 1000", len(votes))
+	}
+	previous := start.Add(-time.Hour)
+	for _, v := range votes {
+		// Still on the hour and in order, but with gaps where pairs were skipped.
+		if k := v.At.Sub(start) / time.Hour; !v.At.After(previous) || !v.At.Equal(start.Add(k*time.Hour)) {
+			t.Fatalf("vote %+v: want a time on the hour, after the previous vote (%v)", v, previous)
+		}
+		previous = v.At
 	}
 }
 

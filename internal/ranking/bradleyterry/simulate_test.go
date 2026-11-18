@@ -14,7 +14,7 @@ import (
 
 // With plenty of votes that follow the model exactly, the refit should find
 // the true strengths: closely correlated, and each within a few
-// uncertainties of the truth. This checks the fit itself; answers with ties
+// standard deviations of the truth. This checks the fit itself; answers with ties
 // and skips are in the next test. The random numbers are seeded, so the test
 // always sees the same votes.
 func TestFitRecoversSimulatedStrengths(t *testing.T) {
@@ -29,7 +29,7 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 		fitted[i] = got.Strength
 		miss := math.Abs(got.Strength - want)
 		if miss > 4*got.Uncertainty {
-			t.Errorf("image %d: fitted %v ± %v, truth %v: more than 4 uncertainties off", i+1, got.Strength, got.Uncertainty, want)
+			t.Errorf("image %d: fitted %v ± %v, truth %v: more than 4 standard deviations off", i+1, got.Strength, got.Uncertainty, want)
 		}
 		if miss <= 2*got.Uncertainty {
 			withinTwo++
@@ -38,9 +38,9 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 	if c := rankingtest.Correlation(truth, fitted); c < 0.98 {
 		t.Errorf("correlation with the truth = %v, want at least 0.98", c)
 	}
-	// If the uncertainty is honest, about 95% land within 2 of them.
+	// If the uncertainty is honest, about 95% land within 2 standard deviations.
 	if share := float64(withinTwo) / float64(len(truth)); share < 0.85 {
-		t.Errorf("%.0f%% of images within 2 uncertainties of the truth, want about 95%%", 100*share)
+		t.Errorf("%.0f%% of images within 2 standard deviations of the truth, want about 95%%", 100*share)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestFitRecoversSimulatedStrengths(t *testing.T) {
 // isn't quite Rao & Kupper's model. Worked out separately in Python for
 // these 40 images, with unlimited votes: fitted ≈ 1.06 × truth. Across six
 // seeds (this one included) the measured slope was 1.03 to 1.11, and 37 to
-// 40 of the 40 images were within 2 uncertainties.
+// 40 of the 40 images were within 2 standard deviations.
 func TestFitWithTiesAndSkips(t *testing.T) {
 	truth := rankingtest.SpacedTruth(40)
 	votes := rankingtest.SimulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, rankingtest.TiesAndSkips) // about 180 votes per image
@@ -72,7 +72,7 @@ func TestFitWithTiesAndSkips(t *testing.T) {
 		t.Errorf("fitted / true strength = %v, want about 1.06 (0.95 to 1.15)", got)
 	}
 	if share := float64(withinTwo) / float64(len(truth)); share < 0.85 {
-		t.Errorf("%.0f%% of images within 2 uncertainties of the truth, want about 95%%", 100*share)
+		t.Errorf("%.0f%% of images within 2 standard deviations of the truth, want about 95%%", 100*share)
 	}
 }
 
@@ -146,10 +146,10 @@ func TestFitSparseVotes(t *testing.T) {
 	if c := rankingtest.Correlation(trueOnes, fitted); c < 0.3 {
 		t.Errorf("correlation with the truth = %v, want at least 0.3", c)
 	}
-	// Honest uncertainty: at least 95% within 2 uncertainties (it was over
+	// Honest uncertainty: at least 95% within 2 standard deviations (it was over
 	// 99% across seeds, so the uncertainty is on the cautious side).
 	if share := float64(withinTwo) / float64(len(fit)); share < 0.95 {
-		t.Errorf("%.1f%% of images within 2 uncertainties of the truth, want at least 95%%", 100*share)
+		t.Errorf("%.1f%% of images within 2 standard deviations of the truth, want at least 95%%", 100*share)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestFitSparseVotes(t *testing.T) {
 // a tie, uncertainty 1/√(¼ + ¼) = 1.4142 (the vote's ¼ plus the starting
 // assumption's ¼). All a single vote can say is which of the two is better:
 // across six seeds the correlation with the truth was 0.38 to 0.42, and over
-// 99.8% of images were within 2 uncertainties.
+// 99.8% of images were within 2 standard deviations.
 func TestFitOneVoteEach(t *testing.T) {
 	rng := rand.New(rand.NewPCG(502, 754))
 	truth := make([]float64, 2000)
@@ -205,7 +205,7 @@ func TestFitOneVoteEach(t *testing.T) {
 		t.Errorf("correlation with the truth = %v, want at least 0.25", c)
 	}
 	if share := float64(withinTwo) / float64(len(fit)); share < 0.95 {
-		t.Errorf("%.1f%% of images within 2 uncertainties of the truth, want at least 95%%", 100*share)
+		t.Errorf("%.1f%% of images within 2 standard deviations of the truth, want at least 95%%", 100*share)
 	}
 }
 
