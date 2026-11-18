@@ -153,6 +153,62 @@ func TestFitSparseVotes(t *testing.T) {
 	}
 }
 
+// The very sparse case: half the images get one vote each, the other half
+// none, so every vote is between two images that meet no one else. Each pair
+// is then the one-vote case worked out by hand in TestFitOneVote: the winner
+// at +0.7408 and the loser at −0.7408, uncertainty 1.5794; or both at 0 after
+// a tie, uncertainty 1/√(¼ + ¼) = 1.4142 (the vote's ¼ plus the starting
+// assumption's ¼). All a single vote can say is which of the two is better:
+// across six seeds the correlation with the truth was 0.38 to 0.42, and over
+// 99.8% of images were within 2 uncertainties.
+func TestFitOneVoteEach(t *testing.T) {
+	rng := rand.New(rand.NewPCG(502, 754))
+	truth := make([]float64, 2000)
+	for i := range truth {
+		truth[i] = rng.NormFloat64()
+	}
+	votes := rankingtest.SimulateOneVoteEach(rng, truth, rankingtest.TiesAndSkips)
+	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
+	if len(fit) != 1000 {
+		t.Errorf("%d images ranked, want the 1000 that got a vote", len(fit))
+	}
+
+	const winner, winnerUncertainty = 0.7407743930623084, 1.5793690933393363
+	tieUncertainty := 1 / math.Sqrt(0.5)
+	for _, v := range votes {
+		l, r := fit[v.Left], fit[v.Right]
+		var want [2]state
+		switch v.Outcome {
+		case leftWins:
+			want = [2]state{{winner, winnerUncertainty}, {-winner, winnerUncertainty}}
+		case rightWins:
+			want = [2]state{{-winner, winnerUncertainty}, {winner, winnerUncertainty}}
+		default:
+			want = [2]state{{0, tieUncertainty}, {0, tieUncertainty}}
+		}
+		for k, got := range [2]state{l, r} {
+			if !near(got.Strength, want[k].Strength, 1e-8) || !near(got.Uncertainty, want[k].Uncertainty, 1e-8) {
+				t.Errorf("vote %+v: image %d = %+v, want %+v", v, [2]int64{v.Left, v.Right}[k], got, want[k])
+			}
+		}
+	}
+
+	var trueOnes, fitted []float64
+	withinTwo := 0
+	for id, s := range fit {
+		trueOnes, fitted = append(trueOnes, truth[id-1]), append(fitted, s.Strength)
+		if math.Abs(s.Strength-truth[id-1]) <= 2*s.Uncertainty {
+			withinTwo++
+		}
+	}
+	if c := rankingtest.Correlation(trueOnes, fitted); c < 0.25 {
+		t.Errorf("correlation with the truth = %v, want at least 0.25", c)
+	}
+	if share := float64(withinTwo) / float64(len(fit)); share < 0.95 {
+		t.Errorf("%.1f%% of images within 2 uncertainties of the truth, want at least 95%%", 100*share)
+	}
+}
+
 // BenchmarkFit times the refit in a 1M-image library at the counts of pairs
 // shown we expect from people voting by hand (with rankingtest.TiesAndSkips, about 90%
 // become votes): 10k is years of casual use, and 100k is a heavy user.

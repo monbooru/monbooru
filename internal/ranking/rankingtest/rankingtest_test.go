@@ -84,6 +84,42 @@ func TestSimulateVotesMix(t *testing.T) {
 	}
 }
 
+func TestSimulateOneVoteEach(t *testing.T) {
+	truth := make([]float64, 2000)
+	rng := rand.New(rand.NewPCG(502, 754))
+	for i := range truth {
+		truth[i] = rng.NormFloat64()
+	}
+	votes := SimulateOneVoteEach(rng, truth, TiesAndSkips)
+	if len(votes) != 500 {
+		t.Errorf("%d votes, want 500 (half of 2000 images, two per vote)", len(votes))
+	}
+	seen := map[int64]int{}
+	ties := 0
+	for _, v := range votes {
+		seen[v.Left]++
+		seen[v.Right]++
+		if v.Outcome == tie {
+			ties++
+		}
+		if v.Left == v.Right || v.Left < 1 || v.Left > 2000 || v.Right < 1 || v.Right > 2000 {
+			t.Fatalf("vote %+v: want two different images with ids 1 to 2000", v)
+		}
+	}
+	if len(seen) != 1000 {
+		t.Errorf("%d images voted, want exactly 1000", len(seen))
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("image %d is in %d votes, want 1", id, n)
+		}
+	}
+	// With skips re-asked, ties are about 10/90 of the votes.
+	if share := float64(ties) / float64(len(votes)); !near(share, 1.0/9, 0.04) {
+		t.Errorf("tie share = %.3f, want about 0.11", share)
+	}
+}
+
 func TestSpreadOverTime(t *testing.T) {
 	start := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
 	votes := []ranking.Vote{{Left: 1, Right: 2}, {Left: 2, Right: 3}, {Left: 3, Right: 1}, {Left: 1, Right: 3}}

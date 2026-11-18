@@ -83,6 +83,29 @@ func SimulateVotes(rng *rand.Rand, truth []float64, n int, a Answerer) []ranking
 	return votes
 }
 
+// SimulateOneVoteEach is the very sparse case: a random half of the images
+// get exactly one vote each, and the other half none. The voted half is
+// paired off at random, so every vote is between two images that meet no one
+// else. When the simulated person skips a pair, they're simply asked about the
+// same pair again (a fresh random answer) until they pick a side or call a
+// tie: a shortcut that keeps the split exactly half and half. (The real Rank
+// page doesn't bring a skipped pair back.) Image i has id i+1.
+func SimulateOneVoteEach(rng *rand.Rand, truth []float64, a Answerer) []ranking.Vote {
+	order := rng.Perm(len(truth))
+	voted := order[:len(order)/2]
+	votes := make([]ranking.Vote, 0, len(voted)/2)
+	for k := 0; k+1 < len(voted); k += 2 {
+		i, j := voted[k], voted[k+1]
+		for {
+			if o, skipped := a.Answer(rng, truth[i]-truth[j]); !skipped {
+				votes = append(votes, ranking.Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
+				break
+			}
+		}
+	}
+	return votes
+}
+
 // SpreadOverTime returns a copy of votes made evenly over span, starting at
 // start, in their order: for algorithms that care when votes were made.
 func SpreadOverTime(votes []ranking.Vote, start time.Time, span time.Duration) []ranking.Vote {
