@@ -70,7 +70,7 @@ Monbooru runs on Linux (x86_64, arm64) and Windows (x86_64). Once started, it's 
 
 Edit the volume paths in [`docker/docker-compose.yml`](docker/docker-compose.yml), then run `docker compose up -d`.
 
-For faster auto-tagging, use the `latest-cuda` image (NVIDIA) or `latest-openvino` (Intel GPU). The `latest-lite` image has no auto-tagger of its own and tags through a [monworker](https://github.com/monbooru/monworker) on another machine.
+`latest` can only do CPU auto-tagging. For faster auto-tagging, use the `latest-cuda` image (NVIDIA) or `latest-openvino` (Intel GPU). The `latest-lite` image has no auto-tagger of its own and tags through a [monworker](https://github.com/monbooru/monworker) on another machine.
 
 ### Download
 
@@ -78,7 +78,7 @@ Download a build for your system from the [releases](https://github.com/monbooru
 
 Downloads come in two flavours:
 
-- **lite** is the program and ffmpeg. It tags through a [monworker](https://github.com/monbooru/monworker) you run on this machine or another one.
+- **lite** is the program and ffmpeg. It can only tag through a [monworker](https://github.com/monbooru/monworker) you run on this machine or another one.
 - **bundled** adds monworker beside it, so auto-tagging works out of the box.
 
 Beside the portable archives, Linux bundled builds also ship as an AppImage and as a Flatpak.
