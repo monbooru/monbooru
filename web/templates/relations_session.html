@@ -369,8 +369,11 @@
   }
   function zoomOnWheel(e) {
     e.preventDefault();
+    if (!e.deltaY) return;
     var p = stagePoint(e);
-    setZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), p.x, p.y);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    setZoom(zoom * Math.exp(-dy * 0.0018), p.x, p.y);
   }
 
   // Zoomed in, one finger or the mouse pans and the split moves by its
