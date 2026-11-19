@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
@@ -575,6 +577,88 @@ func TestPairedTokenPrivilegesLocked(t *testing.T) {
 		t.Fatalf("paired token scopes changed to %q; want them unchanged (manage via pairing)", got)
 	}
 	wantIn(t, w.Body.String(), "pairing")
+}
+
+func wantBooruURL(srv *Server, tok apitoken.Token) string {
+	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+}
+
+func TestBooruEndpointsInSettings(t *testing.T) {
+	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
+	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
+	paired, _ := apitoken.New("monloader (paired)", config.AllScopes)
+	paired.Paired = "monloader"
+	cases := []struct {
+		name   string
+		tokens []apitoken.Token
+		listed []apitoken.Token
+	}{
+		{"none without a token", nil, nil},
+		{"a read token has one", []apitoken.Token{reader}, []apitoken.Token{reader}},
+		{"not without read, nor paired", []apitoken.Token{reader, writer, paired}, []apitoken.Token{reader}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, tc.tokens)
+			w := do(srv, "GET", "/settings")
+			mustCode(t, w, http.StatusOK)
+			body := w.Body.String()
+			wantIn(t, body, "Danbooru compatible endpoint")
+			for _, tok := range tc.tokens {
+				listed := slices.ContainsFunc(tc.listed, func(l apitoken.Token) bool { return l.ID == tok.ID })
+				if got := strings.Contains(body, wantBooruURL(srv, tok)); got != listed {
+					t.Errorf("%s's address shown = %v, want %v", tok.Name, got, listed)
+				}
+			}
+			if len(tc.listed) == 0 {
+				wantIn(t, body, "No address yet")
+			}
+		})
+	}
+}
+
+func TestBooruEndpointsFollowTheTokens(t *testing.T) {
+	srv := newTestServer(t)
+	tok, _ := apitoken.New("reader", config.AllScopes)
+	setTokens(srv, []apitoken.Token{tok})
+
+	form := url.Values{"scope": {config.ScopeWrite}}
+	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+tok.ID+"/privileges", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", tok.ID)
+	w := httptest.NewRecorder()
+	srv.settingsTokenPrivilegesPost(w, req)
+	wantIn(t, w.Body.String(), `id="booru-endpoints" hx-swap-oob="true"`)
+	wantNotIn(t, w.Body.String(), wantBooruURL(srv, tok))
+
+	setTokens(srv, []apitoken.Token{tok})
+	body := revokeToken(srv, tok.ID)
+	wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+	wantNotIn(t, body, wantBooruURL(srv, tok))
+}
+
+// The layer checks its own key, so a login in the web UI does not turn
+// the apps away.
+func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
+	srv := newTestServer(t)
+	setTestPassword(t, srv, "s3cret")
+	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	setTokens(srv, []apitoken.Token{tok})
+	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+	cases := []struct {
+		name, path string
+		code       int
+	}{
+		{"its address", path + "/posts.json", http.StatusOK},
+		{"a wrong key", api.BooruPath(srv.cfg.Galleries[0].Name, strings.Repeat("0", 32)) + "/posts.json", http.StatusUnauthorized},
+		{"the web UI still", "/", http.StatusSeeOther},
+	}
+	for _, tc := range cases {
+		if w := do(srv, "GET", tc.path); w.Code != tc.code {
+			t.Errorf("%s: %d, want %d", tc.name, w.Code, tc.code)
+		}
+	}
 }
 
 func TestHealth_AnswersWithPasswordAuthOn(t *testing.T) {
