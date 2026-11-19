@@ -25,12 +25,12 @@ modules:
     sources:
       - type: archive
         only-arches: [x86_64]
-        url: https://github.com/monbooru/monworker/releases/download/v1.0.0/monworker_1.0.0_linux_amd64.tar.gz
-        sha256: e36988f64a0b52e74e905a3efc275daaa67187d48046f6c06e08fce5dc5057fb
+        url: https://github.com/monbooru/monworker/releases/download/v1.0.1/monworker_1.0.1_linux_amd64.tar.gz
+        sha256: 4986ff0b821d9f7c442266ea24138e4f17cbfc43ddb9c911ccf03f6694a65d53
       - type: archive
         only-arches: [aarch64]
-        url: https://github.com/monbooru/monworker/releases/download/v1.0.0/monworker_1.0.0_linux_arm64.tar.gz
-        sha256: d753302198851703d926df071c66e8dbebc9ca923a9bb30c8835a0ecced26bd2
+        url: https://github.com/monbooru/monworker/releases/download/v1.0.1/monworker_1.0.1_linux_arm64.tar.gz
+        sha256: 226bc2322fe83d7ed20e9ee9bb8cf19aa9a5dae2f9385bfc65116e1c74ecb7b7
 
   - name: ffmpeg
     buildsystem: simple
