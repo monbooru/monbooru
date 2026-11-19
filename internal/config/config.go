@@ -339,6 +339,9 @@ type AuthConfig struct {
 	PasswordHash        string        `toml:"password_hash"`
 	SessionLifetimeDays int           `toml:"session_lifetime_days"`
 	Tokens              apitoken.List `toml:"tokens,omitempty"`
+	// The token whose key opens the Danbooru compatible layer; empty keeps
+	// the layer closed.
+	BooruTokenID string `toml:"booru_token_id,omitempty"`
 }
 
 const (

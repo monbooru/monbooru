@@ -22,9 +22,10 @@ import (
 )
 
 // The booru layer answers like a read-only Danbooru server, so booru client
-// apps can browse a gallery. Each gallery and token has its own address,
-// /booru/{gallery}/{key}/: the apps send no credentials when they load
-// images or notes, so the key in the path is the only auth.
+// apps can browse a gallery. Each gallery has its own address,
+// /booru/{gallery}/{key}/, keyed by the one token Settings picks: the apps
+// send no credentials when they load images or notes, so the key in the
+// path is the only auth.
 
 const (
 	BooruPrefix = "/booru/"
@@ -45,8 +46,8 @@ func BooruKey(tokenHash string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// BooruToken says whether a token has an address: a paired token belongs
-// to an app, not to a person adding a booru.
+// BooruToken says whether Settings may pick a token for the layer: a
+// paired token belongs to an app, not to a person adding a booru.
 func BooruToken(t apitoken.Token) bool { return t.Paired == "" && t.HasScope(config.ScopeRead) }
 
 func BooruPath(gallery, key string) string { return BooruPrefix + gallery + "/" + key }
@@ -74,13 +75,21 @@ func RedactBooruPath(path string) string {
 	return BooruPrefix + name + "/<key>/" + rest
 }
 
-func booruKeyValid(tokens apitoken.List, key string) bool {
-	for _, t := range tokens {
-		if BooruToken(t) && subtle.ConstantTimeCompare([]byte(BooruKey(t.TokenHash)), []byte(key)) == 1 {
-			return true
-		}
+// ChosenBooruToken is the token Settings picked for the layer, while it
+// still can be one; nil keeps the layer closed.
+func ChosenBooruToken(auth config.AuthConfig) *apitoken.Token {
+	if auth.BooruTokenID == "" {
+		return nil
 	}
-	return false
+	if t := auth.Tokens.ByID(auth.BooruTokenID); t != nil && BooruToken(*t) {
+		return t
+	}
+	return nil
+}
+
+func booruKeyValid(auth config.AuthConfig, key string) bool {
+	t := ChosenBooruToken(auth)
+	return t != nil && subtle.ConstantTimeCompare([]byte(BooruKey(t.TokenHash)), []byte(key)) == 1
 }
 
 type booruHandler func(http.ResponseWriter, *http.Request, *library.Gallery)
@@ -114,7 +123,7 @@ func (h *Handler) booruFavicon(w http.ResponseWriter, r *http.Request, _ *librar
 // about which galleries exist.
 func (h *Handler) booru(next booruHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !booruKeyValid(h.cfg().Auth.Tokens, r.PathValue("key")) {
+		if !booruKeyValid(h.cfg().Auth, r.PathValue("key")) {
 			contract.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid key")
 			return
 		}
