@@ -35,8 +35,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
     cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /opt/ffmpeg/ && \
     cp /tmp/ff/licenses/* /opt/licenses/ffmpeg/
 
-# The worker's image carries ONNX Runtime and its provider's libraries,
-# and runs as uid 1000 too; monbooru starts the worker from PATH.
 FROM ghcr.io/monbooru/monworker:v${MONWORKER_VERSION}
 
 COPY --from=assets --chown=1000:1000 /idsrc/home /home/monbooru

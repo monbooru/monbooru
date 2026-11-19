@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* && \
     install -d -o 1000 -g 1000 /idsrc/home
 
-# ffmpeg + ffprobe: the project's trimmed fully-static builds.
 ARG FFMPEG_BUILD=v8.1.3-mb4
 ARG FFMPEG_NAME=ffmpeg-8.1.3-mb4
 ARG FFMPEG_SHA256_LINUX64=b4f4b357683462fbdbeaadf98ada904afe80c725d3ce8c0e1e84f75d1bb2108c
@@ -35,8 +34,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
     cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /opt/ffmpeg/ && \
     cp /tmp/ff/licenses/* /opt/licenses/ffmpeg/
 
-# The worker's image carries ONNX Runtime and its provider's libraries,
-# and runs as uid 1000 too; monbooru starts the worker from PATH.
 FROM ghcr.io/monbooru/monworker:v${MONWORKER_VERSION}-openvino
 
 COPY --from=assets --chown=1000:1000 /idsrc/home /home/monbooru
