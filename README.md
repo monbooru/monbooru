@@ -120,7 +120,7 @@ downloader`"]
     booru(["`**monbooru**
 Your self-hosted booru`"])
     worker["`**monworker**
-ML worker`"]
+Machine Learning worker`"]
 
     web -->|browse| sender
     sender -->|send URL| loader
