@@ -405,7 +405,7 @@ func TestTheClientCapsAnAnswer(t *testing.T) {
 }
 
 func TestTagRulesForAsksForEveryNameInOneCall(t *testing.T) {
-	var asked tagRulesRequest
+	var asked contract.TagRulesRequest
 	l := stubLink(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/rules" {
 			t.Errorf("%s %s, want POST /api/v1/rules", r.Method, r.URL.Path)
@@ -413,7 +413,7 @@ func TestTagRulesForAsksForEveryNameInOneCall(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&asked)
 		_, _ = io.WriteString(w, `{"results":[{"category_kept":true,"sites":[{"site":"danbooru","rule":"drop"}]},{"category_kept":false,"sites":[]}]}`)
 	})
-	got, err := l.TagRulesFor(t.Context(), []TagName{{Tag: "miku", Category: "character"}, {Tag: "absurdres", Category: "meta"}})
+	got, err := l.TagRulesFor(t.Context(), []contract.TagName{{Tag: "miku", Category: "character"}, {Tag: "absurdres", Category: "meta"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestTagRulesForNamesAMonloaderWithoutTheCall(t *testing.T) {
 			}
 			w.WriteHeader(status)
 		})
-		if _, err := l.TagRulesFor(t.Context(), []TagName{{Tag: "miku", Category: "character"}}); !errors.Is(err, ErrNoRules) {
+		if _, err := l.TagRulesFor(t.Context(), []contract.TagName{{Tag: "miku", Category: "character"}}); !errors.Is(err, ErrNoRules) {
 			t.Errorf("%d: err = %v, want ErrNoRules", status, err)
 		}
 	}

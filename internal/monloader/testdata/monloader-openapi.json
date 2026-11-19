@@ -686,6 +686,10 @@
       "description": "global or site when a blacklist rule names the tag, before or after its rule; absent otherwise",
       "type": "string"
      },
+     "blacklist_condition": {
+      "description": "The rest of that line, as written, once the token naming the tag is left out: what a post must also match to be skipped; empty when the line names the tag alone, absent when no line does",
+      "type": "string"
+     },
      "blacklist_line": {
       "description": "The blacklist line that names the tag, as written; a line with other tags skips only the posts that also match them",
       "type": "string"
@@ -710,7 +714,14 @@
       "type": "array"
      },
      "renamed_from": {
-      "description": "The names the site's tag rules turn into this tag",
+      "description": "The names the site's tag rules turn into this tag; a rule with a * gives the name it rebuilds, or its key when the target holds no *",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "renamed_from_global": {
+      "description": "The same for the rules for all sites, without the names a rule of the site's own takes first",
       "items": {
        "type": "string"
       },
@@ -718,6 +729,14 @@
      },
      "rule": {
       "description": "none, drop, rename, move: the site's tag rule on the name",
+      "type": "string"
+     },
+     "rule_key": {
+      "description": "The tag rule that does it, as written: the name, or a key with a *",
+      "type": "string"
+     },
+     "rule_list": {
+      "description": "site for the site's own tag rules, global for the rules for all sites, read when none of the site's matches",
       "type": "string"
      },
      "site": {
