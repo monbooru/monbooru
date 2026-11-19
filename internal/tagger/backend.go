@@ -59,10 +59,6 @@ type RunRequest struct {
 	IdleReleaseMinutes int
 	Taggers            []TaggerStatus
 	Provider           string
-	CatIDs             map[string]int64
-	GeneralCatID       int64
-	InferredCats       map[string]int64
-	MinHitFraction     float64
 	Parallel           int
 	Images             []BackendImageRequest
 	// OnProgress may be nil. An empty msg marks an image done; any other
@@ -83,11 +79,13 @@ type RunResponse struct {
 	Results []BackendImageResult
 }
 
-// Err is a string because gob cannot encode an error interface over IPC.
+// Scores follows RunRequest.Taggers, each holding the frames that tagger
+// read; nil Scores without Err is an image the run never reached. Err is
+// a string because gob cannot encode an error interface over IPC.
 type BackendImageResult struct {
-	ID   int64
-	Tags map[TagKey]Scored
-	Err  string
+	ID     int64
+	Scores [][]SparseScores
+	Err    string
 }
 
 var (

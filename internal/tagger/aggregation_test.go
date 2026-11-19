@@ -1,6 +1,7 @@
 package tagger
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -103,7 +104,7 @@ func TestAggregation_HitCountGatesShortTail(t *testing.T) {
 		perFrame[i] = make([]float32, 1)
 	}
 	perFrame[7][0] = 0.95
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         ResolveMinHits(0.05, 50),
 		GlobalThreshold: 0.35,
 	})
@@ -123,7 +124,7 @@ func TestAggregation_AvgConfidence(t *testing.T) {
 		{0},
 		{0},
 	}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         ResolveMinHits(0.05, 5),
 		GlobalThreshold: 0.35,
 	})
@@ -145,7 +146,7 @@ func TestAggregation_PerTaggerTopK(t *testing.T) {
 
 		perFrame[0][i] = float32(0.95) - float32(i)*0.01
 	}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         1,
 		GlobalThreshold: 0.35,
 	})
@@ -174,7 +175,7 @@ func TestAggregation_DisabledByZeroFraction(t *testing.T) {
 		perFrame[i] = make([]float32, 1)
 	}
 	perFrame[12][0] = 0.9
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         ResolveMinHits(0, 50),
 		GlobalThreshold: 0.35,
 	})
@@ -192,7 +193,7 @@ func TestAggregation_SingleImagePath(t *testing.T) {
 		{Name: "E", CatID: 1, CatName: "general"},
 	}
 	perFrame := [][]float32{{0.75, 0.20}}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         ResolveMinHits(0.05, 1),
 		GlobalThreshold: 0.50,
 	})
@@ -211,11 +212,11 @@ func TestAggregation_DropsNonFiniteScores(t *testing.T) {
 	}
 	nan := float32(math.NaN())
 	opts := AggregateOpts{MinHits: 1, GlobalThreshold: 0.04}
-	cands := AggregateInferenceScores([][]float32{{0.1, nan}, {0.1, 0.05}}, labels, opts)
+	cands := AggregateInferenceScores(dense([][]float32{{0.1, nan}, {0.1, 0.05}}), labels, opts)
 	if len(cands) != 2 || slices.ContainsFunc(cands, func(c AggregatedCandidate) bool { return c.Score != c.Score }) {
 		t.Errorf("one NaN frame: got %+v, want a and b at finite scores", cands)
 	}
-	if cands := AggregateInferenceScores([][]float32{{nan, nan}}, labels, opts); len(cands) != 0 {
+	if cands := AggregateInferenceScores(dense([][]float32{{nan, nan}}), labels, opts); len(cands) != 0 {
 		t.Errorf("an all-NaN tensor tagged %+v", cands)
 	}
 }
@@ -226,7 +227,7 @@ func TestAggregation_PerCategoryThreshold(t *testing.T) {
 		{Name: "blue_eyes", CatID: 1, CatName: "general"},
 	}
 	perFrame := [][]float32{{0.70, 0.70}}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:            1,
 		GlobalThreshold:    0.35,
 		CategoryThresholds: map[string]float64{"character": 0.85},
@@ -242,7 +243,7 @@ func TestAggregation_DisabledCategorySuppressed(t *testing.T) {
 		{Name: "blue_eyes", CatID: 1, CatName: "general"},
 	}
 	perFrame := [][]float32{{0.95, 0.95}}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:            1,
 		GlobalThreshold:    0.35,
 		DisabledCategories: []string{"general"},
@@ -259,7 +260,7 @@ func TestAggregation_TopKExplicitZeroIsUncapped(t *testing.T) {
 	for i := 0; i < total; i++ {
 		perFrame[0][i] = 0.5 + float32(i)*0.005
 	}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         1,
 		GlobalThreshold: 0.35,
 		PerCategoryTopK: map[string]int{"general": 0},
@@ -280,7 +281,7 @@ func TestAggregation_PerCategoryCapIsIndependent(t *testing.T) {
 	for i := range labels {
 		perFrame[0][i] = 0.6
 	}
-	cands := AggregateInferenceScores(perFrame, labels, AggregateOpts{
+	cands := AggregateInferenceScores(dense(perFrame), labels, AggregateOpts{
 		MinHits:         1,
 		GlobalThreshold: 0.35,
 	})
@@ -298,5 +299,24 @@ func TestAggregation_PerCategoryCapIsIndependent(t *testing.T) {
 	}
 	if charCount != 8 {
 		t.Errorf("character count = %d, want 8 (default cap)", charCount)
+	}
+}
+
+func dense(frames [][]float32) []SparseScores {
+	out := make([]SparseScores, len(frames))
+	for f, scores := range frames {
+		for i, s := range scores {
+			out[f].I = append(out[f].I, int32(i))
+			out[f].S = append(out[f].S, s)
+		}
+	}
+	return out
+}
+
+func TestSparseScores_KeepsWhatAggregationCounts(t *testing.T) {
+	nan := float32(math.NaN())
+	got := sparseScores([]float32{0.0009, 0.001, nan, 0.5, 0})
+	if fmt.Sprint(got.I) != "[1 3]" || fmt.Sprint(got.S) != "[0.001 0.5]" {
+		t.Errorf("sparse = %v %v, want [1 3] [0.001 0.5]", got.I, got.S)
 	}
 }

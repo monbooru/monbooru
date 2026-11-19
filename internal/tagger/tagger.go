@@ -161,6 +161,13 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 		}
 	}
 
+	cands := make([][]CandidateLabel, len(taggers))
+	for i, t := range taggers {
+		if cands[i], err = taggerCandidates(cfg.Paths.ModelPath, t, catIDs, generalCatID, inferredCats); err != nil {
+			return 0, err
+		}
+	}
+
 	parallel := min(max(1, cfg.Tagger.Parallel), len(ids))
 
 	// The job has one status line, so each worker writes its own slot and
@@ -213,10 +220,6 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 			IdleReleaseMinutes: cfg.Tagger.IdleReleaseAfterMinutes,
 			Taggers:            taggers,
 			Provider:           provider,
-			CatIDs:             catIDs,
-			GeneralCatID:       generalCatID,
-			InferredCats:       inferredCats,
-			MinHitFraction:     cfg.Tagger.Aggregation.MinHitFraction,
 			Parallel:           parallel,
 			Images:             requests,
 			OnProgress: func(workerIdx int, msg string) {
@@ -230,16 +233,18 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 			return err
 		}
 
-		for _, r := range resp.Results {
+		for i, r := range resp.Results {
 			if r.Err != "" {
 				skipped.Add(1)
 				continue
 			}
-			if r.Tags == nil {
+			if r.Scores == nil || i >= len(requests) {
 				// Cancelled mid-image - skip writing partial state.
 				continue
 			}
-			if storeErr := h.TagSvc.ApplyTaggerResults(ctx, r.ID, taggerHits(r.Tags), taggerNames); storeErr != nil {
+			minHits := ResolveMinHits(cfg.Tagger.Aggregation.MinHitFraction, len(requests[i].FramePaths))
+			merged := mergeTaggers(taggers, cands, r.Scores, minHits)
+			if storeErr := h.TagSvc.ApplyTaggerResults(ctx, r.ID, taggerHits(merged), taggerNames); storeErr != nil {
 				logx.Warnf("tagger: store results for image %d: %v", r.ID, storeErr)
 				skipped.Add(1)
 			}

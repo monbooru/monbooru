@@ -51,17 +51,22 @@ func TestConformance_MatchesTheReferenceScores(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := &inprocBackend{}
 			defer b.ReleaseAll()
+			taggers := []TaggerStatus{*tagger}
+			cands, err := taggerCandidates(modelPath, *tagger, cats, 1, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for image, scores := range ref {
 				resp, err := b.Run(context.Background(), RunRequest{
-					ModelPath: modelPath, SessionParallel: 1, Taggers: []TaggerStatus{*tagger},
-					Provider: "cpu", CatIDs: cats, GeneralCatID: 1, Parallel: 1,
+					ModelPath: modelPath, SessionParallel: 1, Taggers: taggers,
+					Provider: "cpu", Parallel: 1,
 					Images: []BackendImageRequest{{ID: 1, FramePaths: []string{filepath.Join(evalDir, "images", image)}}},
 				})
 				if err != nil || resp.Results[0].Err != "" {
 					t.Fatalf("%s: %v %s", image, err, resp.Results[0].Err)
 				}
 				got := map[string]float32{}
-				for k, s := range resp.Results[0].Tags {
+				for k, s := range mergeTaggers(taggers, [][]CandidateLabel{cands}, resp.Results[0].Scores, 1) {
 					got[k.Name] = s.Score
 				}
 				want := map[string]float32{}

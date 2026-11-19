@@ -4,6 +4,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 )
 
 type fakeBackend struct {
-	tags      map[tagger.TagKey]tagger.Scored
+	labels    int
 	runs      int
 	providers []string
 }
@@ -27,9 +28,18 @@ type fakeBackend struct {
 func (b *fakeBackend) Run(_ context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
 	b.runs++
 	b.providers = append(b.providers, req.Provider)
+	frame := tagger.SparseScores{}
+	for i := range b.labels {
+		frame.I = append(frame.I, int32(i))
+		frame.S = append(frame.S, 0.9)
+	}
 	resp := tagger.RunResponse{}
 	for _, img := range req.Images {
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Tags: b.tags})
+		scores := make([][]tagger.SparseScores, len(req.Taggers))
+		for i := range scores {
+			scores[i] = []tagger.SparseScores{frame}
+		}
+		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Scores: scores})
 	}
 	return resp, nil
 }
@@ -45,12 +55,14 @@ func enableDummyTagger(t *testing.T, srv *Server, labels ...string) *fakeBackend
 	srv.cfg.Tagger.Taggers = []config.TaggerInstance{{Name: "wd14", Enabled: true, ConfidenceThreshold: 0.1}}
 	srv.cfgMu.Unlock()
 
-	generalID := srv.active().GeneralCategoryID
-	scored := map[tagger.TagKey]tagger.Scored{}
-	for _, l := range labels {
-		scored[tagger.TagKey{Name: l, CatID: generalID}] = tagger.Scored{Score: 0.9, TaggerName: "wd14"}
+	if len(labels) > 0 {
+		csv := "tag_id,name,category\n"
+		for i, l := range labels {
+			csv += fmt.Sprintf("%d,%s,0\n", i, l)
+		}
+		installTagger(t, srv.cfg.Paths.ModelPath, "wd14", csv)
 	}
-	b := &fakeBackend{tags: scored}
+	b := &fakeBackend{labels: len(labels)}
 	tagger.SetBackend(b)
 	return b
 }

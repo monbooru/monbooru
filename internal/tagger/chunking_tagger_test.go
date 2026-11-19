@@ -46,18 +46,8 @@ func insertTaggerTestImage(t *testing.T, database *db.DB, sha string) int64 {
 	return id
 }
 
-func catIDForName(t *testing.T, database *db.DB, name string) int64 {
-	t.Helper()
-	var id int64
-	if err := database.Read.QueryRow(`SELECT id FROM tag_categories WHERE name = ?`, name).Scan(&id); err != nil {
-		t.Fatalf("category %q: %v", name, err)
-	}
-	return id
-}
-
 type chunkRecorder struct {
 	mgr    *jobs.Manager
-	tag    TagKey
 	failOn int
 	images []int
 	msgs   []string
@@ -80,10 +70,7 @@ func (b *chunkRecorder) Run(_ context.Context, req RunRequest) (RunResponse, err
 	}
 	resp := RunResponse{}
 	for _, im := range req.Images {
-		resp.Results = append(resp.Results, BackendImageResult{
-			ID:   im.ID,
-			Tags: map[TagKey]Scored{b.tag: {Score: 0.9, TaggerName: "stub"}},
-		})
+		resp.Results = append(resp.Results, BackendImageResult{ID: im.ID, Scores: everyLabel(req.Taggers, 1)})
 	}
 	return resp, nil
 }
@@ -91,6 +78,27 @@ func (b *chunkRecorder) Run(_ context.Context, req RunRequest) (RunResponse, err
 func (b *chunkRecorder) Status() CacheStatus              { return CacheStatus{} }
 func (b *chunkRecorder) ReleaseIdle(_ time.Duration) bool { return false }
 func (b *chunkRecorder) ReleaseAll()                      {}
+
+func everyLabel(taggers []TaggerStatus, labels int) [][]SparseScores {
+	frame := SparseScores{}
+	for i := range labels {
+		frame.I = append(frame.I, int32(i))
+		frame.S = append(frame.S, 0.9)
+	}
+	out := make([][]SparseScores, len(taggers))
+	for i := range out {
+		out[i] = []SparseScores{frame}
+	}
+	return out
+}
+
+func stubTagger(t *testing.T, cfg *config.Config) []TaggerStatus {
+	t.Helper()
+	cfg.Paths.ModelPath = t.TempDir()
+	makeTaggerDir(t, cfg.Paths.ModelPath, "stub", []string{"model.onnx"})
+	mustWriteFile(t, filepath.Join(cfg.Paths.ModelPath, "stub", "tags.csv"), []byte("tag_id,name,category\n0,landscape,0\n"), 0o644)
+	return []TaggerStatus{{TaggerInstance: config.TaggerInstance{Name: "stub", Enabled: true, ConfidenceThreshold: 0.35, ModelFile: "model.onnx", TagsFile: "tags.csv"}}}
+}
 
 func runChunkedScope(t *testing.T, n, failOn int) (*db.DB, *chunkRecorder, error) {
 	t.Helper()
@@ -106,18 +114,14 @@ func runChunkedScope(t *testing.T, n, failOn int) (*db.DB, *chunkRecorder, error
 	}
 	mgr.Update(0, n, "starting (loading model may take a few seconds)…")
 
-	rec := &chunkRecorder{
-		mgr:    mgr,
-		tag:    TagKey{Name: "landscape", CatID: catIDForName(t, database, "general")},
-		failOn: failOn,
-	}
+	rec := &chunkRecorder{mgr: mgr, failOn: failOn}
 	prev := activeBackend()
 	SetBackend(rec)
 	t.Cleanup(func() { SetBackend(prev) })
 
 	cfg := &config.Config{}
 	cfg.Tagger.Parallel = 1
-	taggers := []TaggerStatus{{TaggerInstance: config.TaggerInstance{Name: "stub", Enabled: true}}}
+	taggers := stubTagger(t, cfg)
 	_, err := RunWithTaggers(context.Background(), gallery.Handle{DB: database, TagSvc: tags.New(database, nil)}, cfg, ids, taggers, mgr, "cpu")
 	return database, rec, err
 }
@@ -186,16 +190,12 @@ func TestRunWithTaggers_BoundsAChunkByFrames(t *testing.T) {
 			t.Fatal(err)
 		}
 		thumbs := t.TempDir()
-		rec := &chunkRecorder{
-			mgr:      mgr,
-			tag:      TagKey{Name: "landscape", CatID: catIDForName(t, database, "general")},
-			pageDirs: filepath.Dir(gallery.MangaCacheDir(thumbs)),
-		}
+		rec := &chunkRecorder{mgr: mgr, pageDirs: filepath.Dir(gallery.MangaCacheDir(thumbs))}
 		prev := activeBackend()
 		SetBackend(rec)
 		cfg := &config.Config{}
 		cfg.Tagger.Parallel = tc.parallel
-		taggers := []TaggerStatus{{TaggerInstance: config.TaggerInstance{Name: "stub", Enabled: true}}}
+		taggers := stubTagger(t, cfg)
 		_, err := RunWithTaggers(context.Background(),
 			gallery.Handle{DB: database, TagSvc: tags.New(database, nil), ThumbnailsPath: thumbs},
 			cfg, ids, taggers, mgr, "cpu")

@@ -137,19 +137,21 @@ func TestCreateImage_AutotagCancelReportsCancelled(t *testing.T) {
 }
 
 type countingBackend struct {
-	runs atomic.Int32
-	tags map[tagger.TagKey]tagger.Scored
+	runs   atomic.Int32
+	answer bool
 }
 
 func (b *countingBackend) Run(ctx context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
 	b.runs.Add(1)
-	if b.tags == nil {
+	if !b.answer {
 		<-ctx.Done()
 		return tagger.RunResponse{}, ctx.Err()
 	}
 	resp := tagger.RunResponse{}
 	for _, img := range req.Images {
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Tags: b.tags})
+		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Scores: [][]tagger.SparseScores{
+			{{I: []int32{0}, S: []float32{0.9}}},
+		}})
 	}
 	return resp, nil
 }
@@ -158,10 +160,8 @@ func (*countingBackend) Status() tagger.CacheStatus       { return tagger.CacheS
 func (*countingBackend) ReleaseIdle(_ time.Duration) bool { return false }
 func (*countingBackend) ReleaseAll()                      {}
 
-func sampleBackend(env *testEnv) *countingBackend {
-	return &countingBackend{tags: map[tagger.TagKey]tagger.Scored{
-		{Name: "sample", CatID: env.gallery.GeneralCategoryID}: {Score: 0.9, TaggerName: "wd14"},
-	}}
+func sampleBackend() *countingBackend {
+	return &countingBackend{answer: true}
 }
 
 func uploadForAutotag(t *testing.T, env *testEnv, name string, size int) (id int64, note string) {
@@ -195,7 +195,7 @@ func awaitQueueDrained(t *testing.T, env *testEnv) {
 
 func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend(env)
+	b := sampleBackend()
 	enableStubTagger(t, env, b)
 	if err := env.handler.jobs.Start(models.JobTypeSync); err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func autotagged(t *testing.T, env *testEnv, id int64) int {
 
 func TestAutotagImage_TagsAnExistingImage(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend(env)
+	b := sampleBackend()
 	enableStubTagger(t, env, b)
 	id := env.createTestImage(t, "later.png", 15, 15)
 
@@ -296,7 +296,7 @@ func TestAutotagImage_TagsAnExistingImage(t *testing.T) {
 
 func TestAutotagImages_RunsTheIDsAsOneJob(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend(env)
+	b := sampleBackend()
 	enableStubTagger(t, env, b)
 	first := env.createTestImage(t, "first.png", 15, 15)
 	second := env.createTestImage(t, "second.png", 16, 16)

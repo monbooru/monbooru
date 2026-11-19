@@ -254,12 +254,17 @@ func modelsDir(t *testing.T) string {
 
 func runOne(t *testing.T, b *inprocBackend, modelPath string, taggers []TaggerStatus, cats map[string]int64, frames []string) map[TagKey]Scored {
 	t.Helper()
+	cands := make([][]CandidateLabel, len(taggers))
+	for i, tg := range taggers {
+		var err error
+		if cands[i], err = taggerCandidates(modelPath, tg, cats, cats["general"], nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	resp, err := b.Run(context.Background(), RunRequest{
 
 		ModelPath: modelPath, SessionParallel: 1, IdleReleaseMinutes: 15,
-		Taggers: taggers, Provider: "cpu",
-		CatIDs: cats, GeneralCatID: cats["general"],
-		MinHitFraction: 0.05, Parallel: 1,
+		Taggers: taggers, Provider: "cpu", Parallel: 1,
 		Images: []BackendImageRequest{{ID: 1, FramePaths: frames}},
 	})
 	if err != nil {
@@ -268,5 +273,5 @@ func runOne(t *testing.T, b *inprocBackend, modelPath string, taggers []TaggerSt
 	if resp.Results[0].Err != "" {
 		t.Fatalf("image error: %s", resp.Results[0].Err)
 	}
-	return resp.Results[0].Tags
+	return mergeTaggers(taggers, cands, resp.Results[0].Scores, ResolveMinHits(0.05, len(frames)))
 }

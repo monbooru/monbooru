@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -44,7 +45,6 @@ func TestFrameRoundtrip(t *testing.T) {
 					IdleReleaseMinutes: 15,
 					Provider:           "cpu",
 					Parallel:           2,
-					MinHitFraction:     0.05,
 					Images: []BackendImageRequest{
 						{ID: 1, FramePaths: []string{"/tmp/a.png"}},
 						{ID: 2, FramePaths: []string{"/tmp/b.png"}, MangaProgress: true},
@@ -70,7 +70,7 @@ func TestFrameRoundtrip(t *testing.T) {
 				if got.Run == nil {
 					t.Fatalf("Run round-trip lost the payload")
 				}
-				if got.Run.Parallel != c.in.Run.Parallel || got.Run.MinHitFraction != c.in.Run.MinHitFraction ||
+				if got.Run.Parallel != c.in.Run.Parallel ||
 					got.Run.ModelPath != c.in.Run.ModelPath || got.Run.DataPath != c.in.Run.DataPath ||
 					got.Run.SessionParallel != c.in.Run.SessionParallel ||
 					got.Run.IdleReleaseMinutes != c.in.Run.IdleReleaseMinutes {
@@ -341,8 +341,8 @@ func TestResponseRoundtrip(t *testing.T) {
 		name string
 		in   ipcResponse
 	}{
-		{"run_ok", ipcResponse{Run: &RunResponse{Results: []BackendImageResult{{ID: 7, Tags: map[TagKey]Scored{
-			{Name: "blue_eyes", CatID: 0}: {Score: 0.91, TaggerName: "wd-swinv2"},
+		{"run_ok", ipcResponse{Run: &RunResponse{Results: []BackendImageResult{{ID: 7, Scores: [][]SparseScores{
+			{{I: []int32{3, 17}, S: []float32{0.91, 0.4}}},
 		}}}}}},
 		{"status_loaded", ipcResponse{Status: &CacheStatus{Loaded: true, Provider: "cpu", InUse: false, Sessions: []string{"wd-swinv2"}}}},
 		{"release_idle_true", ipcResponse{Released: true}},
@@ -363,6 +363,9 @@ func TestResponseRoundtrip(t *testing.T) {
 			}
 			if got.Released != c.in.Released {
 				t.Errorf("Released mismatch: got %v, want %v", got.Released, c.in.Released)
+			}
+			if c.in.Run != nil && fmt.Sprint(got.Run.Results) != fmt.Sprint(c.in.Run.Results) {
+				t.Errorf("Results mismatch: got %v, want %v", got.Run.Results, c.in.Run.Results)
 			}
 		})
 	}

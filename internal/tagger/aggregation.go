@@ -74,23 +74,47 @@ type AggregateOpts struct {
 	DisabledCategories []string
 }
 
+// A score under scoreFloor counts as no hit, so a frame travels as the
+// labels at or above it.
+const scoreFloor = 0.001
+
+// SparseScores is one frame's scores at or above scoreFloor: I holds the
+// label indexes in ascending order, S their scores.
+type SparseScores struct {
+	I []int32
+	S []float32
+}
+
+func sparseScores(dense []float32) SparseScores {
+	var out SparseScores
+	for i, s := range dense {
+		if s >= scoreFloor {
+			out.I = append(out.I, int32(i))
+			out.S = append(out.S, s)
+		}
+	}
+	return out
+}
+
 // AggregateInferenceScores returns the survivors in no particular order.
-func AggregateInferenceScores(perFrame [][]float32, labels []CandidateLabel, opts AggregateOpts) []AggregatedCandidate {
+func AggregateInferenceScores(perFrame []SparseScores, labels []CandidateLabel, opts AggregateOpts) []AggregatedCandidate {
 	type accum struct {
 		sum  float32
 		hits int
 	}
 	agg := map[int]accum{}
-	for _, scores := range perFrame {
-		for idx, s := range scores {
-			// Written so a NaN fails it: NaN compares false both ways.
-			if !(s >= 0.001) {
-				continue
+	for _, frame := range perFrame {
+		for j, idx := range frame.I {
+			if j >= len(frame.S) || idx < 0 {
+				break
 			}
-			e := agg[idx]
-			e.sum += s
-			e.hits++
-			agg[idx] = e
+			// Written so a NaN fails it: NaN compares false both ways.
+			if s := frame.S[j]; s >= scoreFloor {
+				e := agg[int(idx)]
+				e.sum += s
+				e.hits++
+				agg[int(idx)] = e
+			}
 		}
 	}
 

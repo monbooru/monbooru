@@ -32,9 +32,7 @@ import (
 // threshold edits apply without a session rebuild.
 type loadedTagger struct {
 	*loadedSession
-	cfg        config.TaggerInstance
-	candidates []CandidateLabel
-	dispatch   *DispatchTable
+	cfg config.TaggerInstance
 }
 
 type loadedSession struct {
@@ -560,7 +558,6 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 		loaded[i] = loadedTagger{
 			loadedSession: b.sessions[t.Name],
 			cfg:           t.TaggerInstance,
-			dispatch:      LoadDispatch(req.ModelPath, t.Name, req.CatIDs),
 		}
 	}
 	workers := b.workers
@@ -578,44 +575,6 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 		}
 		b.mu.Unlock()
 	}()
-
-	catNames := make(map[int64]string, len(req.CatIDs))
-	for name, cid := range req.CatIDs {
-		catNames[cid] = name
-	}
-	for i := range loaded {
-		lt := &loaded[i]
-		cands := make([]CandidateLabel, len(lt.labels))
-		for idx, label := range lt.labels {
-			if label.placeholder {
-				cands[idx].Placeholder = true
-				continue
-			}
-			res := resolveCategory(lt.profile, label, req.CatIDs, lt.dispatch)
-			if res.skip {
-				cands[idx].Placeholder = true
-				continue
-			}
-			catID := res.catID
-			name := label.name
-			if rule, ok := lt.dispatch.Lookup(label.name); ok && rule.Name != "" {
-				name = rule.Name
-			}
-			if !res.override &&
-				lt.profile.CategoryScheme == "single_general" &&
-				catID == req.GeneralCatID {
-				if inferred, ok := req.InferredCats[label.name]; ok {
-					catID = inferred
-				}
-			}
-			cands[idx] = CandidateLabel{
-				Name:    name,
-				CatID:   catID,
-				CatName: catNames[catID],
-			}
-		}
-		lt.candidates = cands
-	}
 
 	parallel := min(max(1, req.Parallel), workers, len(req.Images))
 
@@ -638,10 +597,8 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 			results[idx].Err = "no frames"
 			return
 		}
-		merged := map[TagKey]Scored{}
 		anyInferred := false
-		minHits := ResolveMinHits(req.MinHitFraction, len(im.FramePaths))
-		perFrame := make([][][]float32, len(loaded))
+		perFrame := make([][]SparseScores, len(loaded))
 		for fIdx, fp := range im.FramePaths {
 			if ctx.Err() != nil {
 				return
@@ -666,31 +623,16 @@ func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, e
 					continue
 				}
 				anyInferred = true
-				perFrame[tIdx] = append(perFrame[tIdx], scores)
+				perFrame[tIdx] = append(perFrame[tIdx], sparseScores(scores))
 			}
 		}
-		for tIdx, lt := range loaded {
-			cands := AggregateInferenceScores(perFrame[tIdx], lt.candidates, AggregateOpts{
-				MinHits:            minHits,
-				GlobalThreshold:    float32(lt.cfg.ConfidenceThreshold),
-				CategoryThresholds: lt.cfg.CategoryThresholds,
-				PerCategoryTopK:    lt.cfg.PerCategoryTopK,
-				DisabledCategories: lt.cfg.DisabledCategories,
-			})
-			for _, c := range cands {
-				mk := TagKey{Name: c.Name, CatID: c.CatID}
-				if prev, ok := merged[mk]; !ok || c.Score > prev.Score {
-					merged[mk] = Scored{Score: c.Score, TaggerName: lt.cfg.Name}
-				}
-			}
-		}
-		// An error, not an empty map: storing an empty result deletes the
-		// image's auto-tags.
+		// An error, not an empty result: storing one deletes the image's
+		// auto-tags.
 		if !anyInferred {
 			results[idx].Err = "all frames failed"
 			return
 		}
-		results[idx].Tags = merged
+		results[idx].Scores = perFrame
 	}
 
 	queue := make(chan int, parallel)
