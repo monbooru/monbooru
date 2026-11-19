@@ -99,7 +99,7 @@ The heavy features stay out of the main process. Auto-tagging runs in [monworker
 
 ## Related applications
 
-Monbooru works offline. These optional companions add the online features:
+Monbooru works offline. These optional companions add the online features and auto-tagging:
 
 ```mermaid
 ---
@@ -119,6 +119,8 @@ browser extension`"]
 downloader`"]
     booru(["`**monbooru**
 Your self-hosted booru`"])
+    worker["`**monworker**
+ML worker`"]
 
     web -->|browse| sender
     sender -->|send URL| loader
@@ -129,20 +131,21 @@ Your self-hosted booru`"])
     loader -.->|reverse lookup: md5 + similarity| web
     ptr <-.->|"`sync: sha256 tags + aliases + implications
 contribute back`"| loader
+    worker <-.->|handle auto-tagging| booru
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
     classDef tool fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
     classDef src  fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
 
     class booru hub;
-    class sender,loader tool;
+    class sender,loader,worker tool;
     class web,ptr src;
 ```
 
 - **monbooru**: this application; organizes, tags, and serves your collection.
 - **[monloader](https://github.com/monbooru/monloader)**: downloader. Fetches files and per-post metadata (via gallery-dl) from supported boorus and galleries and pushes them into a monbooru gallery over the REST API. It also answers monbooru's reverse lookups against boorus, IQDB, SauceNAO and the Hydrus Public Tag Repository, to backfill tags and sources; when a matched post has a better file than your local copy, one click replaces it in place. The PTR connection can also pull tag aliases and implications into your catalog, and send yours back.
 - **[monsender](https://github.com/monbooru/monsender)**: browser extension; sends the URL of the page you're browsing to monloader.
-- **[monworker](https://github.com/monbooru/monworker)**: the auto-tagger. Runs the ONNX models for monbooru, on the same machine or on another one with a GPU.
+- **[monworker](https://github.com/monbooru/monworker)**: Machine Learning worker; runs the auto-tagging models for monbooru, on the same machine or on another one.
 - **[monbooru-plugins](https://github.com/monbooru/monbooru-plugins)**: community registry of plugins, themes and extra taggers.
 
 ## Contributing
