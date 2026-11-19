@@ -438,10 +438,13 @@ var lightbox = (function () {
   }
   function onWheel(e) {
     e.preventDefault();
+    if (!e.deltaY) return;
     var sr = stage.getBoundingClientRect();
     var cx = e.clientX - (sr.left + sr.width / 2);
     var cy = e.clientY - (sr.top + sr.height / 2);
-    zoomAt(cx, cy, e.deltaY < 0 ? 1.2 : 1 / 1.2);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomAt(cx, cy, Math.exp(-dy * 0.0018));
   }
   function startPan(x, y) {
     panning = true;
