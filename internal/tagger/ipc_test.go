@@ -35,20 +35,18 @@ func TestFrameRoundtrip(t *testing.T) {
 			in:   ipcRequest{Method: ipcMethodReleaseIdle, IdleAfter: 600_000_000_000},
 		},
 		{
-			name: "run_with_images",
+			name: "run_with_frames",
 			in: ipcRequest{
+				ID:     7,
 				Method: ipcMethodRun,
 				Run: &RunRequest{
-					ModelPath:          "/models",
-					DataPath:           "/data",
-					SessionParallel:    4,
-					IdleReleaseMinutes: 15,
-					Provider:           "cpu",
-					Parallel:           2,
-					Images: []BackendImageRequest{
-						{ID: 1, FramePaths: []string{"/tmp/a.png"}},
-						{ID: 2, FramePaths: []string{"/tmp/b.png"}, MangaProgress: true},
-					},
+					ModelPath:       "/models",
+					DataPath:        "/data",
+					SessionParallel: 4,
+					Provider:        "cpu",
+					Models:          []string{"wd-swinv2", "animetimm-eva02"},
+					Size:            2,
+					Frames:          [][]byte{bytes.Repeat([]byte{9}, 12)},
 				},
 			},
 		},
@@ -66,23 +64,15 @@ func TestFrameRoundtrip(t *testing.T) {
 			if got.Method != c.in.Method {
 				t.Fatalf("method: got %d, want %d", got.Method, c.in.Method)
 			}
+			if got.ID != c.in.ID {
+				t.Fatalf("ID: got %d, want %d", got.ID, c.in.ID)
+			}
 			if c.in.Run != nil {
 				if got.Run == nil {
 					t.Fatalf("Run round-trip lost the payload")
 				}
-				if got.Run.Parallel != c.in.Run.Parallel ||
-					got.Run.ModelPath != c.in.Run.ModelPath || got.Run.DataPath != c.in.Run.DataPath ||
-					got.Run.SessionParallel != c.in.Run.SessionParallel ||
-					got.Run.IdleReleaseMinutes != c.in.Run.IdleReleaseMinutes {
-					t.Fatalf("scalar mismatch: got %+v, want %+v", got.Run, c.in.Run)
-				}
-				if len(got.Run.Images) != len(c.in.Run.Images) {
-					t.Fatalf("Images: got %d, want %d", len(got.Run.Images), len(c.in.Run.Images))
-				}
-				for i, im := range c.in.Run.Images {
-					if got.Run.Images[i].ID != im.ID || got.Run.Images[i].MangaProgress != im.MangaProgress {
-						t.Errorf("Images[%d]: got %+v, want %+v", i, got.Run.Images[i], im)
-					}
+				if fmt.Sprint(*got.Run) != fmt.Sprint(*c.in.Run) {
+					t.Fatalf("Run: got %+v, want %+v", got.Run, c.in.Run)
 				}
 			}
 		})
@@ -201,83 +191,95 @@ func TestWorkerGreetsWithTheEnvironmentToken(t *testing.T) {
 	}
 }
 
-func TestRunCancelDuringInFlight(t *testing.T) {
+func TestRunCancelTellsTheChild(t *testing.T) {
 	server, client := net.Pipe()
 	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
-
-	b := &ipcBackend{
-		cmd:  &exec.Cmd{},
-		conn: client,
-	}
+	b := &ipcBackend{cmd: &exec.Cmd{}, conn: newIPCConn(client)}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
+	seen := make(chan ipcRequest, 2)
 	go func() {
 
-		var req ipcRequest
-		_ = readFrame(server, &req)
-		<-ctx.Done()
-	}()
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
+		for {
+			var req ipcRequest
+			if err := readFrame(server, &req); err != nil {
+				return
+			}
+			seen <- req
+			if req.Method == ipcMethodRun {
+				cancel()
+			}
+		}
 	}()
 
 	start := time.Now()
-	_, err := b.Run(ctx, RunRequest{Images: []BackendImageRequest{{ID: 1, FramePaths: []string{"/tmp/x.png"}}}})
-	elapsed := time.Since(start)
+	_, err := b.Run(ctx, RunRequest{Models: []string{"m"}})
 	if err != context.Canceled {
 		t.Fatalf("Run err: got %v, want context.Canceled", err)
 	}
-	if elapsed > time.Second {
+	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("Run blocked for %v after cancel; expected sub-second", elapsed)
+	}
+	run, stop := <-seen, <-seen
+	if stop.Method != ipcMethodCancel || stop.ID != run.ID {
+		t.Errorf("after the cancel the child got %+v, want a cancel of call %d", stop, run.ID)
+	}
+	if b.conn == nil {
+		t.Error("a cancelled call took the child down")
 	}
 }
 
-func TestRunAtZeroIdleShutsTheWorkerDown(t *testing.T) {
-	for _, tc := range []struct {
-		idle int
-		want []ipcMethod
-	}{
-		{0, []ipcMethod{ipcMethodRun, ipcMethodShutdown}},
-		{15, []ipcMethod{ipcMethodRun}},
-	} {
-		server, client := net.Pipe()
-		b := &ipcBackend{cmd: &exec.Cmd{}, conn: client}
+func TestCallsInFlightGetTheirOwnReplies(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
+	b := &ipcBackend{cmd: &exec.Cmd{}, conn: newIPCConn(client)}
 
-		got := make(chan []ipcMethod, 1)
-		go func() {
-			var methods []ipcMethod
-			for {
-				var req ipcRequest
-				if err := readFrame(server, &req); err != nil {
-					got <- methods
-					return
-				}
-				methods = append(methods, req.Method)
-				reply := ipcResponse{}
-				if req.Method == ipcMethodRun {
-					reply.Run = &RunResponse{}
-				}
-				_ = writeFrame(server, reply)
-				if req.Method == ipcMethodShutdown {
-					_ = server.Close()
-				}
+	go func() {
+
+		var reqs []ipcRequest
+		for len(reqs) < 2 {
+			var req ipcRequest
+			if err := readFrame(server, &req); err != nil {
+				return
 			}
-		}()
+			reqs = append(reqs, req)
+		}
+		for _, req := range slices.Backward(reqs) {
+			_ = writeFrame(server, ipcResponse{ID: req.ID, Run: &RunResponse{Results: [][]FrameScores{{{Err: fmt.Sprint(req.Run.Size)}}}}})
+		}
+	}()
 
-		if _, err := b.Run(context.Background(), RunRequest{IdleReleaseMinutes: tc.idle}); err != nil {
-			t.Fatalf("idle %d: Run: %v", tc.idle, err)
+	errs := make(chan error, 2)
+	for _, size := range []int{1, 2} {
+		go func() {
+			resp, err := b.Run(context.Background(), RunRequest{Size: size})
+			if err == nil && resp.Results[0][0].Err != fmt.Sprint(size) {
+				err = fmt.Errorf("call of size %d got the reply %q", size, resp.Results[0][0].Err)
+			}
+			errs <- err
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Error(err)
 		}
-		if live := b.conn != nil; live != (tc.idle > 0) {
-			t.Errorf("idle %d: worker connection kept = %v", tc.idle, live)
-		}
-		_ = client.Close()
-		if methods := <-got; !slices.Equal(methods, tc.want) {
-			t.Errorf("idle %d: child saw %v, want %v", tc.idle, methods, tc.want)
-		}
+	}
+}
+
+func TestAChildGoneFailsTheCallAndIsDropped(t *testing.T) {
+	server, client := net.Pipe()
+	b := &ipcBackend{cmd: &exec.Cmd{}, conn: newIPCConn(client)}
+	go func() {
+		var req ipcRequest
+		_ = readFrame(server, &req)
+		_ = server.Close()
+	}()
+	if _, err := b.Run(context.Background(), RunRequest{}); err == nil {
+		t.Fatal("Run: want an error once the child is gone")
+	}
+	if b.conn != nil {
+		t.Error("the dead child's connection was kept")
 	}
 }
 
@@ -287,7 +289,7 @@ func TestStatusReportsInFlightProvider(t *testing.T) {
 
 	b := &ipcBackend{
 		cmd:  &exec.Cmd{},
-		conn: client,
+		conn: newIPCConn(client),
 	}
 
 	stale := CacheStatus{Loaded: true, Provider: "cpu", Sessions: []string{"wd-swinv2"}}
@@ -312,27 +314,28 @@ func TestStatusReportsInFlightProvider(t *testing.T) {
 func TestReleaseAllLeavesARunInFlightAlone(t *testing.T) {
 	server, client := net.Pipe()
 	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
-	b := &ipcBackend{cmd: &exec.Cmd{}, conn: client}
+	b := &ipcBackend{cmd: &exec.Cmd{}, conn: newIPCConn(client)}
 
 	b.inFlight.Add(1)
-	b.mu.Lock()
+	b.mu.RLock()
 	defer func() {
-		b.mu.Unlock()
+		b.mu.RUnlock()
 		b.inFlight.Add(-1)
 	}()
 
 	done := make(chan struct{})
 	go func() {
 		b.ReleaseAll()
+		b.ReleaseIdle(0)
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("ReleaseAll waited on the run in flight")
+		t.Fatal("a release waited on the call in flight")
 	}
 	if b.conn == nil {
-		t.Error("ReleaseAll dropped the connection of the run in flight")
+		t.Error("a release dropped the connection of the call in flight")
 	}
 }
 
@@ -341,9 +344,9 @@ func TestResponseRoundtrip(t *testing.T) {
 		name string
 		in   ipcResponse
 	}{
-		{"run_ok", ipcResponse{Run: &RunResponse{Results: []BackendImageResult{{ID: 7, Scores: [][]SparseScores{
-			{{I: []int32{3, 17}, S: []float32{0.91, 0.4}}},
-		}}}}}},
+		{"run_ok", ipcResponse{ID: 3, Run: &RunResponse{Results: [][]FrameScores{
+			{{SparseScores: SparseScores{I: []int32{3, 17}, S: []float32{0.91, 0.4}}}, {Err: "refused"}},
+		}}}},
 		{"status_loaded", ipcResponse{Status: &CacheStatus{Loaded: true, Provider: "cpu", InUse: false, Sessions: []string{"wd-swinv2"}}}},
 		{"release_idle_true", ipcResponse{Released: true}},
 		{"error", ipcResponse{Err: "model.onnx missing"}},

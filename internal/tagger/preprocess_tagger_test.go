@@ -27,9 +27,9 @@ func makeTestImage(w, h int) image.Image {
 func TestBuildTensor_WD14_BitIdentical(t *testing.T) {
 	const size = 16
 	src := makeTestImage(20, 12)
-	processed := padAndResize(src, size, wd14Profile)
+	processed := padAndResize(src, size, padFill(wd14Profile))
 	got := make([]float32, 3*size*size)
-	shape, err := buildTensor(processed, got, size, wd14Profile)
+	shape, err := buildTensor(rgb8(processed), got, size, wd14Profile)
 	if err != nil {
 		t.Fatalf("buildTensor: %v", err)
 	}
@@ -70,9 +70,9 @@ func TestBuildTensor_NCHWPresetsAreBitIdentical(t *testing.T) {
 		{"joytag", joytagProfile, clipMean, clipStd},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			processed := padAndResize(makeTestImage(20, 12), size, tc.prof)
+			processed := padAndResize(makeTestImage(20, 12), size, padFill(tc.prof))
 			got := make([]float32, 3*size*size)
-			shape, err := buildTensor(processed, got, size, tc.prof)
+			shape, err := buildTensor(rgb8(processed), got, size, tc.prof)
 			if err != nil {
 				t.Fatalf("buildTensor: %v", err)
 			}
@@ -113,9 +113,9 @@ func TestBuildTensor_MeanStd(t *testing.T) {
 	half := &[3]float32{0.5, 0.5, 0.5}
 	for _, layout := range []string{"nchw", "nhwc"} {
 		prof := Profile{Layout: layout, Channels: "rgb", Normalize: "mean_std", NormScale: 255, NormMean: half, NormStd: half, Pad: "white_square"}
-		processed := padAndResize(makeTestImage(10, 6), size, prof)
+		processed := padAndResize(makeTestImage(10, 6), size, padFill(prof))
 		got := make([]float32, 3*size*size)
-		if _, err := buildTensor(processed, got, size, prof); err != nil {
+		if _, err := buildTensor(rgb8(processed), got, size, prof); err != nil {
 			t.Fatalf("%s: %v", layout, err)
 		}
 		px := processed.Pix[0:3]
@@ -136,9 +136,9 @@ func TestBuildTensor_MeanStd(t *testing.T) {
 func TestBuildTensor_NHWCWithAPreset(t *testing.T) {
 	const size = 8
 	prof := Profile{Layout: "nhwc", Channels: "bgr", Normalize: "div255", Pad: "white_square"}
-	processed := padAndResize(makeTestImage(10, 6), size, prof)
+	processed := padAndResize(makeTestImage(10, 6), size, padFill(prof))
 	got := make([]float32, 3*size*size)
-	if _, err := buildTensor(processed, got, size, prof); err != nil {
+	if _, err := buildTensor(rgb8(processed), got, size, prof); err != nil {
 		t.Fatalf("buildTensor: %v", err)
 	}
 	px := processed.Pix
@@ -147,136 +147,16 @@ func TestBuildTensor_NHWCWithAPreset(t *testing.T) {
 	}
 }
 
-func TestPadAndResize_WhiteSquare_AlphaForced(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
-
-	dst := padAndResize(src, 8, wd14Profile)
-	for i := 0; i+3 < len(dst.Pix); i += 4 {
-		if dst.Pix[i] != 0xff || dst.Pix[i+1] != 0xff || dst.Pix[i+2] != 0xff || dst.Pix[i+3] != 0xff {
-			t.Fatalf("pix %d not forced to opaque white: %v", i, dst.Pix[i:i+4])
-		}
-	}
-}
-
-func TestPadAndResize_WhiteSquare_BlendsHalfTransparentOverWhite(t *testing.T) {
-	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
-	for i := 0; i < len(src.Pix); i += 4 {
-		src.Pix[i], src.Pix[i+1], src.Pix[i+2], src.Pix[i+3] = 0xff, 0xff, 0xff, 0x80
-	}
-	dst := padAndResize(src, 8, wd14Profile)
-	for i := 0; i < len(dst.Pix); i += 4 {
-		if dst.Pix[i] < 250 || dst.Pix[i+1] < 250 || dst.Pix[i+2] < 250 || dst.Pix[i+3] != 0xff {
-			t.Fatalf("pix %d = %v, want half-transparent white over white", i, dst.Pix[i:i+4])
-		}
-	}
-}
-
-func TestPadAndResize_MeanColorAspect_TransparentTakesTheFill(t *testing.T) {
-	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
-	dst := padAndResize(src, 8, Profile{Pad: "mean_color_aspect"})
-	for i := 0; i < len(dst.Pix); i += 4 {
-		if dst.Pix[i] != camieDefaultFill[0] || dst.Pix[i+1] != camieDefaultFill[1] || dst.Pix[i+2] != camieDefaultFill[2] || dst.Pix[i+3] != 0xff {
-			t.Fatalf("pix %d = %v, want the fill %v", i, dst.Pix[i:i+4], camieDefaultFill)
-		}
-	}
-}
-
-func TestPadAndResize_Antialiases(t *testing.T) {
-	const srcEdge, size = 449, 64
-	src := image.NewRGBA(image.Rect(0, 0, srcEdge, srcEdge))
-	for y := 0; y < srcEdge; y++ {
-		for x := 0; x < srcEdge; x++ {
-			v := uint8(0)
-			if (x+y)%2 == 0 {
-				v = 0xff
-			}
-			i := src.PixOffset(x, y)
-			src.Pix[i], src.Pix[i+1], src.Pix[i+2], src.Pix[i+3] = v, v, v, 0xff
-		}
-	}
-
-	dst := padAndResize(src, size, wd14Profile)
-	lo, hi := uint8(0xff), uint8(0)
-	for i := 0; i < len(dst.Pix); i += 4 {
-		lo, hi = min(lo, dst.Pix[i]), max(hi, dst.Pix[i])
-	}
-	if hi-lo > 8 {
-		t.Fatalf("output spans %d..%d: the reduction is sampling the source, not averaging it", lo, hi)
-	}
-}
-
-func TestPadAndResize_MeanColorAspect(t *testing.T) {
-
-	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	for i := 0; i+3 < len(src.Pix); i += 4 {
-		src.Pix[i+0] = 0xff
-		src.Pix[i+1] = 0x00
-		src.Pix[i+2] = 0x00
-		src.Pix[i+3] = 0xff
-	}
-	prof := Profile{Pad: "mean_color_aspect"}
-	dst := padAndResize(src, 64, prof)
-	if dst.Bounds().Dx() != 64 || dst.Bounds().Dy() != 64 {
-		t.Fatalf("size = %v, want 64x64", dst.Bounds())
-	}
-	stride := dst.Stride
-	off := func(x, y int) int { return y*stride + x*4 }
-	if dst.Pix[off(0, 0)+0] != camieDefaultFill[0] ||
-		dst.Pix[off(0, 0)+1] != camieDefaultFill[1] ||
-		dst.Pix[off(0, 0)+2] != camieDefaultFill[2] {
-		t.Errorf("top-left = (%d,%d,%d), want camie default %v",
-			dst.Pix[off(0, 0)], dst.Pix[off(0, 0)+1], dst.Pix[off(0, 0)+2], camieDefaultFill)
-	}
-	if dst.Pix[off(32, 32)+0] != 0xff ||
-		dst.Pix[off(32, 32)+1] != 0x00 ||
-		dst.Pix[off(32, 32)+2] != 0x00 {
-		t.Errorf("centre = (%d,%d,%d), want red",
-			dst.Pix[off(32, 32)], dst.Pix[off(32, 32)+1], dst.Pix[off(32, 32)+2])
-	}
-}
-
-func TestPadAndResize_MeanColorAspect_FillColorOverride(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	for i := 0; i+3 < len(src.Pix); i += 4 {
-		src.Pix[i+0] = 0xff
-		src.Pix[i+3] = 0xff
-	}
-	prof := Profile{Pad: "mean_color_aspect", FillColor: &[3]uint8{10, 20, 30}}
-	dst := padAndResize(src, 64, prof)
-
-	off := dst.Stride*0 + 0
-	if dst.Pix[off] != 10 || dst.Pix[off+1] != 20 || dst.Pix[off+2] != 30 {
-		t.Errorf("override fill = (%d,%d,%d), want (10,20,30)",
-			dst.Pix[off], dst.Pix[off+1], dst.Pix[off+2])
-	}
-}
-
-func TestPadAndResize_MeanColorAspect_BlackFillIsKept(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	dst := padAndResize(src, 64, Profile{Pad: "mean_color_aspect", FillColor: &[3]uint8{0, 0, 0}})
-	if p := dst.Pix[0:3]; p[0] != 0 || p[1] != 0 || p[2] != 0 {
-		t.Errorf("black fill = %v, want (0,0,0)", p)
-	}
-}
-
-func TestPadAndResize_FillTakesTheProfileColour(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	dst := padAndResize(src, 64, Profile{Pad: "fill", FillColor: &[3]uint8{0, 0, 0}})
-	if p := dst.Pix[0:3]; p[0] != 0 || p[1] != 0 || p[2] != 0 {
-		t.Errorf("fill = %v, want (0,0,0)", p)
-	}
-}
-
 func TestBuildTensor_PoolReuse_NoStaleData(t *testing.T) {
 	const size = 16
 	src := makeTestImage(20, 12)
-	processed := padAndResize(src, size, wd14Profile)
+	processed := padAndResize(src, size, padFill(wd14Profile))
 
 	buf := make([]float32, 3*size*size)
 	for i := range buf {
 		buf[i] = -777
 	}
-	if _, err := buildTensor(processed, buf, size, wd14Profile); err != nil {
+	if _, err := buildTensor(rgb8(processed), buf, size, wd14Profile); err != nil {
 		t.Fatalf("buildTensor: %v", err)
 	}
 	for i, v := range buf {
@@ -286,39 +166,17 @@ func TestBuildTensor_PoolReuse_NoStaleData(t *testing.T) {
 	}
 
 	prof := Profile{Layout: "nchw", Channels: "rgb", Normalize: "imagenet", Pad: "white_square"}
-	processed = padAndResize(src, size, prof)
+	processed = padAndResize(src, size, padFill(prof))
 	for i := range buf {
 		buf[i] = -777
 	}
-	if _, err := buildTensor(processed, buf, size, prof); err != nil {
+	if _, err := buildTensor(rgb8(processed), buf, size, prof); err != nil {
 		t.Fatalf("buildTensor (nchw): %v", err)
 	}
 	for i, v := range buf {
 		if v == -777 {
 			t.Fatalf("nchw tensor[%d] left at sentinel", i)
 		}
-	}
-}
-
-func TestInferInputSize_ReadsFromONNXShape(t *testing.T) {
-	cases := []struct {
-		name   string
-		layout string
-		dims   []int64
-		want   int
-	}{
-		{"NHWC standard 448", "nhwc", []int64{1, 448, 448, 3}, 448},
-		{"NCHW standard 448", "nchw", []int64{1, 3, 448, 448}, 448},
-		{"NCHW Camie 512", "nchw", []int64{1, 3, 512, 512}, 512},
-		{"dynamic axis", "nchw", []int64{-1, 3, -1, -1}, 0},
-		{"unexpected rank", "nhwc", []int64{448, 448, 3}, 0},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := inferInputSize(c.dims, c.layout); got != c.want {
-				t.Errorf("inferInputSize(%v, %q) = %d, want %d", c.dims, c.layout, got, c.want)
-			}
-		})
 	}
 }
 

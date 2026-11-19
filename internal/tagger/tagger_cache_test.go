@@ -170,7 +170,7 @@ func TestReleaseAll_Cold(t *testing.T) {
 }
 
 func TestReleaseAll_KeepsTheSessionsOfARunningInference(t *testing.T) {
-	c := &inprocBackend{initialized: true, inUse: true, provider: "cpu"}
+	c := &inprocBackend{initialized: true, inUse: 1, provider: "cpu"}
 	c.ReleaseAll()
 	if !c.initialized {
 		t.Error("ReleaseAll tore the sessions down under a running inference")

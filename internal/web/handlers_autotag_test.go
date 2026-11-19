@@ -28,18 +28,18 @@ type fakeBackend struct {
 func (b *fakeBackend) Run(_ context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
 	b.runs++
 	b.providers = append(b.providers, req.Provider)
-	frame := tagger.SparseScores{}
+	frame := tagger.FrameScores{}
 	for i := range b.labels {
 		frame.I = append(frame.I, int32(i))
 		frame.S = append(frame.S, 0.9)
 	}
 	resp := tagger.RunResponse{}
-	for _, img := range req.Images {
-		scores := make([][]tagger.SparseScores, len(req.Taggers))
-		for i := range scores {
-			scores[i] = []tagger.SparseScores{frame}
+	for range req.Models {
+		frames := make([]tagger.FrameScores, len(req.Frames))
+		for i := range frames {
+			frames[i] = frame
 		}
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Scores: scores})
+		resp.Results = append(resp.Results, frames)
 	}
 	return resp, nil
 }
@@ -187,8 +187,8 @@ type skipBackend struct{ fakeBackend }
 
 func (skipBackend) Run(_ context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
 	resp := tagger.RunResponse{}
-	for _, img := range req.Images {
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Err: "unreadable"})
+	for range req.Models {
+		resp.Results = append(resp.Results, []tagger.FrameScores{{Err: "unreadable"}})
 	}
 	return resp, nil
 }

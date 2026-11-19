@@ -91,10 +91,6 @@ func ReleaseAll() {
 	}
 }
 
-// A chunk's frames all sit on disk until its backend call returns, so a
-// whole-library scope runs in chunks of this many images or frames.
-const autotagChunkSize = 200
-
 // RunWithTaggers takes only enabled, available taggers and returns how many
 // ids were left untagged. provider overrides the configured one; a handle with
 // no thumbnails path extracts pages under the system temp directory.
@@ -161,11 +157,18 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 		}
 	}
 
-	cands := make([][]CandidateLabel, len(taggers))
+	plan := make([]plannedTagger, len(taggers))
 	for i, t := range taggers {
-		if cands[i], err = taggerCandidates(cfg.Paths.ModelPath, t, catIDs, generalCatID, inferredCats); err != nil {
+		if plan[i], err = planTagger(cfg.Paths.ModelPath, t, catIDs, generalCatID, inferredCats); err != nil {
 			return 0, err
 		}
+	}
+	base := RunRequest{
+		ModelPath:       cfg.Paths.ModelPath,
+		DataPath:        cfg.Paths.DataPath,
+		SessionParallel: cfg.Tagger.Parallel,
+		Taggers:         taggers,
+		Provider:        provider,
 	}
 
 	parallel := min(max(1, cfg.Tagger.Parallel), len(ids))
@@ -203,101 +206,159 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 	}
 
 	var skipped atomic.Int64
-	var requests []BackendImageRequest
-	var cleanups []func()
-	frames := 0
-	runChunk := func() error {
-		defer func() {
-			for _, c := range cleanups {
-				c()
-			}
-			requests, cleanups, frames = nil, nil, 0
-		}()
-		resp, err := backend.Run(ctx, RunRequest{
-			ModelPath:          cfg.Paths.ModelPath,
-			DataPath:           cfg.Paths.DataPath,
-			SessionParallel:    cfg.Tagger.Parallel,
-			IdleReleaseMinutes: cfg.Tagger.IdleReleaseAfterMinutes,
-			Taggers:            taggers,
-			Provider:           provider,
-			Parallel:           parallel,
-			Images:             requests,
-			OnProgress: func(workerIdx int, msg string) {
-				if msg == "" {
-					completed.Add(1)
-				}
-				emitStatus(workerIdx, msg)
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		for i, r := range resp.Results {
-			if r.Err != "" {
-				skipped.Add(1)
-				continue
-			}
-			if r.Scores == nil || i >= len(requests) {
-				// Cancelled mid-image - skip writing partial state.
-				continue
-			}
-			minHits := ResolveMinHits(cfg.Tagger.Aggregation.MinHitFraction, len(requests[i].FramePaths))
-			merged := mergeTaggers(taggers, cands, r.Scores, minHits)
-			if storeErr := h.TagSvc.ApplyTaggerResults(ctx, r.ID, taggerHits(merged), taggerNames); storeErr != nil {
-				logx.Warnf("tagger: store results for image %d: %v", r.ID, storeErr)
-				skipped.Add(1)
-			}
-		}
-		return nil
-	}
-
-	for i, imageID := range ids {
-		if ctx.Err() != nil {
-			break
-		}
-		// Extraction can take minutes on a video-heavy scope, so it
-		// reports progress too.
-		mgr.Update(int(completed.Load()), total, fmt.Sprintf("preparing %d/%d", i+1, total))
+	tagOne := func(ctx context.Context, workerIdx int, imageID int64) error {
 		var canonPath, fileType string
 		if err := database.Read.QueryRowContext(ctx,
 			`SELECT canonical_path, file_type FROM images WHERE id = ?`, imageID,
 		).Scan(&canonPath, &fileType); err != nil {
 			logx.Warnf("tagger: skip image %d: lookup failed: %v", imageID, err)
 			skipped.Add(1)
-			continue
+			return nil
 		}
 		framePaths, cleanup := framesForTagging(canonPath, fileType, mangaCacheDir, imageID)
+		defer cleanup()
 		if len(framePaths) == 0 {
 			logx.Warnf("tagger: skip image %d: no frames available (missing file, archive, or ffmpeg)", imageID)
 			skipped.Add(1)
-			cleanup()
+			return nil
+		}
+		var onPage func(int)
+		if fileType == models.FileTypeCBZ && len(framePaths) > 1 {
+			onPage = func(i int) {
+				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
+			}
+		}
+		scores, inferred, err := inferFrames(ctx, backend, base, plan, imageID, framePaths, fileType, onPage)
+		if err != nil {
+			return err
+		}
+		// An image without a single inferred frame is skipped, not stored:
+		// an empty result deletes its auto-tags.
+		if !inferred {
+			skipped.Add(1)
+			return nil
+		}
+		minHits := ResolveMinHits(cfg.Tagger.Aggregation.MinHitFraction, len(framePaths))
+		merged := mergeTaggers(taggers, plan, scores, minHits)
+		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), taggerNames); err != nil {
+			logx.Warnf("tagger: store results for image %d: %v", imageID, err)
+			skipped.Add(1)
+		}
+		return nil
+	}
+
+	// Each worker prepares an image's frames and waits on the backend, so
+	// at most parallel images sit decoded or extracted at once.
+	runCtx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	queue := make(chan int64)
+	var wg sync.WaitGroup
+	for workerIdx := range parallel {
+		wg.Go(func() {
+			for id := range queue {
+				if runCtx.Err() != nil {
+					continue
+				}
+				if err := tagOne(runCtx, workerIdx, id); err != nil {
+					stop(err)
+					continue
+				}
+				if runCtx.Err() == nil {
+					completed.Add(1)
+				}
+				emitStatus(workerIdx, "")
+			}
+		})
+	}
+feed:
+	for _, id := range ids {
+		select {
+		case queue <- id:
+		case <-runCtx.Done():
+			break feed
+		}
+	}
+	close(queue)
+	wg.Wait()
+
+	if cfg.Tagger.IdleReleaseAfterMinutes <= 0 {
+		backend.ReleaseAll()
+	}
+	if err := ctx.Err(); err != nil {
+		return int(skipped.Load()), err
+	}
+	if err := context.Cause(runCtx); err != nil {
+		return int(skipped.Load()), err
+	}
+	mgr.Update(int(completed.Load()), total, "tagging images")
+	return int(skipped.Load()), nil
+}
+
+// inferFrames runs every frame through every tagger, one backend call per
+// frame and input, and reports whether any frame was inferred. A frame
+// that fails to read or that a model refuses is logged and left out.
+func inferFrames(ctx context.Context, backend Backend, base RunRequest, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
+	type group struct {
+		input   inputKey
+		models  []string
+		taggers []int
+	}
+	var groups []group
+	for tIdx, p := range plan {
+		g := slices.IndexFunc(groups, func(g group) bool { return g.input == p.input })
+		if g < 0 {
+			groups = append(groups, group{input: p.input})
+			g = len(groups) - 1
+		}
+		groups[g].models = append(groups[g].models, base.Taggers[tIdx].Name)
+		groups[g].taggers = append(groups[g].taggers, tIdx)
+	}
+	inputs := make([]inputKey, len(groups))
+	for i, g := range groups {
+		inputs[i] = g.input
+	}
+
+	scores := make([][]SparseScores, len(plan))
+	inferred := false
+	for fIdx, fp := range framePaths {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		if onPage != nil {
+			onPage(fIdx)
+		}
+		frames, err := prepareFrame(fp, fileType, inputs)
+		if err != nil {
+			logx.Warnf("tagger: read frame failed: image %d frame %d/%d (%s): %v",
+				imageID, fIdx+1, len(framePaths), fp, err)
 			continue
 		}
-		requests = append(requests, BackendImageRequest{
-			ID:            imageID,
-			FramePaths:    framePaths,
-			MangaProgress: fileType == models.FileTypeCBZ && len(framePaths) > 1,
-			FileType:      fileType,
-		})
-		cleanups = append(cleanups, cleanup)
-		frames += len(framePaths)
-		// An image is the unit of parallelism, so a chunk of long
-		// archives still holds one per worker.
-		if len(requests) >= autotagChunkSize || (frames >= autotagChunkSize && len(requests) >= parallel) {
-			if err := runChunk(); err != nil {
-				return int(skipped.Load()), err
+		for g, grp := range groups {
+			req := base
+			req.Models, req.Size, req.Frames = grp.models, grp.input.size, [][]byte{frames[g]}
+			resp, err := backend.Run(ctx, req)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(resp.Results) != len(grp.models) {
+				return nil, false, fmt.Errorf("tagger backend answered %d models, want %d", len(resp.Results), len(grp.models))
+			}
+			for m, tIdx := range grp.taggers {
+				if len(resp.Results[m]) != 1 {
+					return nil, false, fmt.Errorf("tagger backend answered %d frames, want 1", len(resp.Results[m]))
+				}
+				fr := resp.Results[m][0]
+				if fr.Err != "" {
+					logx.Warnf("tagger: inference failed: image %d via %q frame %d/%d (%s): %s",
+						imageID, grp.models[m], fIdx+1, len(framePaths), fp, fr.Err)
+					continue
+				}
+				inferred = true
+				scores[tIdx] = append(scores[tIdx], fr.SparseScores)
 			}
 		}
 	}
-	if len(requests) > 0 {
-		if err := runChunk(); err != nil {
-			return int(skipped.Load()), err
-		}
-	}
-
-	mgr.Update(int(completed.Load()), total, "tagging images")
-	return int(skipped.Load()), ctx.Err()
+	return scores, inferred, nil
 }
 
 func framesForTagging(canonPath, fileType, mangaCacheDir string, imageID int64) ([]string, func()) {

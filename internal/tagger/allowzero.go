@@ -9,7 +9,6 @@ package tagger
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -214,74 +213,6 @@ func int64Constant(r io.ReaderAt, t pbField) (string, []int64, error) {
 		return name, nil, nil
 	}
 	return name, ints, nil
-}
-
-// pbField is one protobuf field: a varint's value, or the byte range of a
-// length-delimited payload (for a varint, the range of the value itself).
-type pbField struct {
-	num, wire  int
-	val        uint64
-	start, end int64
-}
-
-var errBadProto = errors.New("malformed onnx protobuf")
-
-func eachField(r io.ReaderAt, start, end int64, fn func(pbField) error) error {
-	for off := start; off < end; {
-		key, next, err := readVarint(r, off)
-		if err != nil {
-			return err
-		}
-		f := pbField{num: int(key >> 3), wire: int(key & 7), start: next}
-		switch f.wire {
-		case 0:
-			f.val, f.end, err = readVarint(r, next)
-		case 1:
-			f.end = next + 8
-		case 2:
-			var n uint64
-			n, f.start, err = readVarint(r, next)
-			f.end = f.start + int64(n)
-		case 5:
-			f.end = next + 4
-		default:
-			return errBadProto
-		}
-		if err != nil {
-			return err
-		}
-		if f.end > end || f.end < f.start {
-			return errBadProto
-		}
-		if err := fn(f); err != nil {
-			return err
-		}
-		off = f.end
-	}
-	return nil
-}
-
-func readVarint(r io.ReaderAt, off int64) (uint64, int64, error) {
-	var buf [binary.MaxVarintLen64]byte
-	n, _ := r.ReadAt(buf[:], off)
-	v, k := binary.Uvarint(buf[:n])
-	if k <= 0 {
-		return 0, 0, errBadProto
-	}
-	return v, off + int64(k), nil
-}
-
-func readPayload(r io.ReaderAt, f pbField) ([]byte, error) {
-	b := make([]byte, f.end-f.start)
-	if n, err := r.ReadAt(b, f.start); n < len(b) {
-		return nil, err
-	}
-	return b, nil
-}
-
-func readString(r io.ReaderAt, f pbField) (string, error) {
-	b, err := readPayload(r, f)
-	return string(b), err
 }
 
 func unpackVarints(b []byte) ([]int64, error) {

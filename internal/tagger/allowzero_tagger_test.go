@@ -14,29 +14,6 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-type pb []byte
-
-func (b pb) varint(num int, v int64) pb {
-	b = binary.AppendUvarint(b, uint64(num)<<3)
-	return binary.AppendUvarint(b, uint64(v))
-}
-
-func (b pb) bytes(num int, p []byte) pb {
-	b = binary.AppendUvarint(b, uint64(num)<<3|2)
-	b = binary.AppendUvarint(b, uint64(len(p)))
-	return append(b, p...)
-}
-
-func (b pb) str(num int, s string) pb { return b.bytes(num, []byte(s)) }
-
-func valueInfo(name string, dims ...int64) pb {
-	var shape pb
-	for _, d := range dims {
-		shape = shape.bytes(1, pb{}.varint(1, d))
-	}
-	return pb{}.str(1, name).bytes(2, pb{}.bytes(1, pb{}.varint(1, 1).bytes(2, shape)))
-}
-
 func int64Tensor(name string, vals []int64, packed bool) pb {
 	t := pb{}.varint(1, int64(len(vals))).varint(2, 7).str(8, name)
 	if packed {

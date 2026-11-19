@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"image"
 	"maps"
 	"math"
 	"os"
@@ -17,23 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/monbooru/monbooru/internal/config"
-	"github.com/monbooru/monbooru/internal/gallery"
-	"github.com/monbooru/monbooru/internal/metadata"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	ort "github.com/yalue/onnxruntime_go"
 )
-
-// loadedTagger joins a cached session with this run's config, so
-// threshold edits apply without a session rebuild.
-type loadedTagger struct {
-	*loadedSession
-	cfg config.TaggerInstance
-}
 
 type loadedSession struct {
 	modelFile  string
@@ -64,15 +52,23 @@ func stampOf(path string) (fileStamp, bool) {
 func (a fileStamp) same(b fileStamp) bool { return a.size == b.size && a.modTime.Equal(b.modTime) }
 
 type inprocBackend struct {
-	mu          sync.Mutex
-	inUse       bool
+	mu sync.Mutex
+	// idle is signalled when inUse drops to 0.
+	idle        *sync.Cond
+	inUse       int
 	initialized bool
 	provider    string
 	workers     int
+	// slots holds one token per call inferring; it has workers tokens.
+	slots       chan struct{}
 	sessionOpts *ort.SessionOptions
 	epCleanup   func()
 	sessions    map[string]*loadedSession
 	lastUsed    time.Time
+	sinceTrim   int
+	trimTimer   *time.Timer
+	// warm is set once a burst of calls has logged its cache reuse.
+	warm bool
 }
 
 var defaultBackend = &inprocBackend{}
@@ -131,7 +127,10 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 	// Before the signature check, so "" matches a warm "cpu" cache.
 	provider := cmp.Or(req.Provider, "cpu")
 	if b.satisfies(req.ModelPath, taggers, provider, req.SessionParallel) {
-		logx.Infof("tagger: reusing warm cache (%d %s)", len(b.sessions), models.Plural(len(b.sessions), "session", "sessions"))
+		if !b.warm {
+			logx.Infof("tagger: reusing warm cache (%d %s)", len(b.sessions), models.Plural(len(b.sessions), "session", "sessions"))
+			b.warm = true
+		}
 		return nil
 	}
 	if b.initialized {
@@ -237,6 +236,8 @@ func (b *inprocBackend) ensure(req RunRequest) (err error) {
 		logx.Infof("tagger: a %d px input runs %d %s", maxInput, parallel, models.Plural(parallel, "worker", "workers"))
 	}
 	b.workers = parallel
+	b.slots = make(chan struct{}, parallel)
+	b.warm = true
 	intra := max(1, runtime.NumCPU()/parallel)
 	if err := opts.SetIntraOpNumThreads(intra); err != nil {
 		return fmt.Errorf("set intra-op threads: %w", err)
@@ -456,25 +457,6 @@ func sessionWorkers(provider string, parallel, inputSize int) int {
 	return max(1, parallel*refSize*refSize/(inputSize*inputSize))
 }
 
-func inferInputSize(dims ort.Shape, layout string) int {
-	if len(dims) != 4 {
-		return 0
-	}
-	var d int64
-	switch layout {
-	case "nhwc":
-		d = dims[1]
-	case "nchw":
-		d = dims[2]
-	default:
-		return 0
-	}
-	if d <= 0 {
-		return 0
-	}
-	return int(d)
-}
-
 func checkLabelWidth(dims ort.Shape, n int) error {
 	if len(dims) == 0 {
 		return nil
@@ -509,7 +491,7 @@ func (b *inprocBackend) teardownLocked() {
 func (b *inprocBackend) ReleaseIdle(after time.Duration) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.inUse || !b.initialized {
+	if b.inUse > 0 || !b.initialized {
 		return false
 	}
 	if time.Since(b.lastUsed) < after {
@@ -523,7 +505,7 @@ func (b *inprocBackend) ReleaseIdle(after time.Duration) bool {
 func (b *inprocBackend) ReleaseAll() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.initialized && !b.inUse {
+	if b.initialized && b.inUse == 0 {
 		b.teardownLocked()
 	}
 }
@@ -537,196 +519,125 @@ func (b *inprocBackend) Status() CacheStatus {
 	return CacheStatus{
 		Loaded:   true,
 		Provider: b.provider,
-		InUse:    b.inUse,
+		InUse:    b.inUse > 0,
 		LastUsed: b.lastUsed,
 		Sessions: slices.Sorted(maps.Keys(b.sessions)),
 	}
 }
 
+// Without a periodic trim a long run grows glibc's arena until the next
+// idle release; trimIdle gives a burst's heap back once it ends.
+const (
+	trimInterval = 256
+	trimIdle     = 2 * time.Second
+)
+
+// Run infers each frame through each model, holding one of the slots
+// ensure sized; calls beyond them wait.
 func (b *inprocBackend) Run(ctx context.Context, req RunRequest) (RunResponse, error) {
 	if len(req.Taggers) == 0 {
 		return RunResponse{}, fmt.Errorf("no tagger is enabled or available")
 	}
 
 	b.mu.Lock()
+	if b.idle == nil {
+		b.idle = sync.NewCond(&b.mu)
+	}
+	// A reload would destroy sessions under the calls in flight.
+	for b.inUse > 0 && !b.satisfies(req.ModelPath, req.Taggers, cmp.Or(req.Provider, "cpu"), req.SessionParallel) {
+		b.idle.Wait()
+	}
 	if err := b.ensure(req); err != nil {
 		b.mu.Unlock()
 		return RunResponse{}, err
 	}
-	loaded := make([]loadedTagger, len(req.Taggers))
-	for i, t := range req.Taggers {
-		loaded[i] = loadedTagger{
-			loadedSession: b.sessions[t.Name],
-			cfg:           t.TaggerInstance,
+	run := make([]*loadedSession, len(req.Models))
+	for i, name := range req.Models {
+		s := b.sessions[name]
+		if s == nil {
+			b.mu.Unlock()
+			return RunResponse{}, fmt.Errorf("model %q is not loaded", name)
 		}
+		if s.inputSize != req.Size {
+			b.mu.Unlock()
+			return RunResponse{}, fmt.Errorf("model %q takes %d px frames, not %d", name, s.inputSize, req.Size)
+		}
+		run[i] = s
 	}
-	workers := b.workers
-	b.inUse = true
+	slots := b.slots
+	b.inUse++
+	if b.trimTimer != nil {
+		b.trimTimer.Stop()
+	}
 	b.mu.Unlock()
+	defer b.release()
 
-	defer func() {
-		b.mu.Lock()
-		b.inUse = false
-		b.lastUsed = time.Now()
-		if req.IdleReleaseMinutes <= 0 {
-			b.teardownLocked()
-		} else {
-			mallocTrim()
-		}
-		b.mu.Unlock()
-	}()
-
-	parallel := min(max(1, req.Parallel), workers, len(req.Images))
-
-	results := make([]BackendImageResult, len(req.Images))
-	for i, im := range req.Images {
-		results[i].ID = im.ID
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return RunResponse{}, ctx.Err()
 	}
+	defer func() { <-slots }()
 
-	// Without a periodic trim a long run grows glibc's arena until the
-	// next idle release.
-	const trimInterval = 256
-	var sinceTrim atomic.Int64
-
-	processOne := func(idx int, workerIdx int) {
-		if ctx.Err() != nil {
-			return
-		}
-		im := req.Images[idx]
-		if len(im.FramePaths) == 0 {
-			results[idx].Err = "no frames"
-			return
-		}
-		anyInferred := false
-		perFrame := make([][]SparseScores, len(loaded))
-		for fIdx, fp := range im.FramePaths {
+	resp := RunResponse{Results: make([][]FrameScores, len(run))}
+	for m, s := range run {
+		resp.Results[m] = make([]FrameScores, len(req.Frames))
+		for f, frame := range req.Frames {
 			if ctx.Err() != nil {
-				return
+				return RunResponse{}, ctx.Err()
 			}
-			if im.MangaProgress && req.OnProgress != nil {
-				req.OnProgress(workerIdx, fmt.Sprintf("image %d: page %d/%d", im.ID, fIdx+1, len(im.FramePaths)))
-			}
-			inputs, err := prepareInputs(fp, im.FileType, loaded)
+			scores, err := inferImage(s, frame)
 			if err != nil {
-				logx.Warnf("tagger: read frame failed: image %d frame %d/%d (%s): %v",
-					im.ID, fIdx+1, len(im.FramePaths), fp, err)
+				resp.Results[m][f].Err = err.Error()
 				continue
 			}
-			for tIdx, lt := range loaded {
-				if ctx.Err() != nil {
-					return
-				}
-				scores, err := inferImage(lt, inputs[tIdx])
-				if err != nil {
-					logx.Warnf("tagger: inference failed: image %d via %q frame %d/%d (%s): %v",
-						im.ID, lt.cfg.Name, fIdx+1, len(im.FramePaths), fp, err)
-					continue
-				}
-				anyInferred = true
-				perFrame[tIdx] = append(perFrame[tIdx], sparseScores(scores))
-			}
+			resp.Results[m][f].SparseScores = sparseScores(scores)
 		}
-		// An error, not an empty result: storing one deletes the image's
-		// auto-tags.
-		if !anyInferred {
-			results[idx].Err = "all frames failed"
-			return
-		}
-		results[idx].Scores = perFrame
 	}
-
-	queue := make(chan int, parallel)
-	var wg sync.WaitGroup
-	for workerIdx := range parallel {
-		wg.Go(func() {
-			for idx := range queue {
-				if ctx.Err() != nil {
-					continue
-				}
-				processOne(idx, workerIdx)
-				if sinceTrim.Add(1) >= trimInterval {
-					sinceTrim.Store(0)
-					mallocTrim()
-				}
-				if req.OnProgress != nil {
-					req.OnProgress(workerIdx, "")
-				}
-			}
-		})
-	}
-
-	for idx := range req.Images {
-		if ctx.Err() != nil {
-			break
-		}
-		queue <- idx
-	}
-	close(queue)
-	wg.Wait()
-
-	return RunResponse{Results: results}, ctx.Err()
+	return resp, nil
 }
 
-// prepareInputs decodes the frame once and pads it once per distinct
-// input shape; the decoded frame is dropped before any inference runs.
-func prepareInputs(path, fileType string, loaded []loadedTagger) ([]*image.RGBA, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func (b *inprocBackend) release() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.inUse--
+	b.lastUsed = time.Now()
+	if b.sinceTrim++; b.sinceTrim >= trimInterval {
+		b.sinceTrim = 0
+		mallocTrim()
 	}
-	defer func() { _ = f.Close() }()
-
-	img, err := gallery.DecodeImageWithCap(f)
-	if err != nil {
-		return nil, err
+	if b.inUse > 0 {
+		return
 	}
-	if img.Bounds().Empty() {
-		return nil, fmt.Errorf("image has no pixels (%dx%d)", img.Bounds().Dx(), img.Bounds().Dy())
-	}
-
-	// Turned after the padding: the square is centred, so it turns the
-	// same, and the full-size frame is never copied.
-	// A still image is read as the type sniffed at ingest, which can differ
-	// from its extension; an extracted frame or page has its own name.
-	switch fileType {
-	case "", models.FileTypeMP4, models.FileTypeWEBM, models.FileTypeAVIF, models.FileTypeJXL, models.FileTypeCBZ:
-		fileType = models.ExtFileType(path)
-	}
-	o, _ := metadata.EXIFOrientation(path, fileType)
-	type padKey struct {
-		size int
-		fill [3]uint8
-	}
-	padded := make(map[padKey]*image.RGBA, len(loaded))
-	inputs := make([]*image.RGBA, len(loaded))
-	for i, lt := range loaded {
-		k := padKey{lt.inputSize, padFill(lt.profile)}
-		if padded[k] == nil {
-			padded[k] = gallery.Orient(padAndResize(img, lt.inputSize, lt.profile), o).(*image.RGBA)
+	b.idle.Broadcast()
+	b.trimTimer = time.AfterFunc(trimIdle, func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.inUse == 0 && b.initialized {
+			b.warm = false
+			mallocTrim()
 		}
-		inputs[i] = padded[k]
-	}
-	return inputs, nil
+	})
 }
 
-func inferImage(lt loadedTagger, processed *image.RGBA) ([]float32, error) {
-	tensor := acquireTensor(lt.inputSize)
-	inputShape, err := buildTensor(processed, tensor, lt.inputSize, lt.profile)
+func inferImage(s *loadedSession, frame []byte) ([]float32, error) {
+	tensor := acquireTensor(s.inputSize)
+	inputShape, err := buildTensor(frame, tensor, s.inputSize, s.profile)
 	if err != nil {
-		releaseTensor(lt.inputSize, tensor)
+		releaseTensor(s.inputSize, tensor)
 		return nil, err
 	}
 	inputTensor, err := ort.NewTensor(inputShape, tensor)
 	if err != nil {
-		releaseTensor(lt.inputSize, tensor)
+		releaseTensor(s.inputSize, tensor)
 		return nil, err
 	}
 
 	// The pool gets the buffer back only after Destroy: the tensor aliases it.
 	outputs := []ort.Value{nil}
-	runErr := lt.session.Run([]ort.Value{inputTensor}, outputs)
+	runErr := s.session.Run([]ort.Value{inputTensor}, outputs)
 	_ = inputTensor.Destroy()
-	releaseTensor(lt.inputSize, tensor)
+	releaseTensor(s.inputSize, tensor)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -740,7 +651,7 @@ func inferImage(lt loadedTagger, processed *image.RGBA) ([]float32, error) {
 	// is copied out.
 	data := outTensor.GetData()
 	out := make([]float32, len(data))
-	if lt.profile.Activation == "logits" {
+	if s.profile.Activation == "logits" {
 		for i, v := range data {
 			out[i] = float32(1 / (1 + math.Exp(-float64(v))))
 		}

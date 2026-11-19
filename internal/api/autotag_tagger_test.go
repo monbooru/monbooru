@@ -32,8 +32,8 @@ type skipBackend struct{}
 
 func (skipBackend) Run(_ context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
 	resp := tagger.RunResponse{}
-	for _, img := range req.Images {
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Err: "unreadable"})
+	for range req.Models {
+		resp.Results = append(resp.Results, []tagger.FrameScores{{Err: "unreadable"}})
 	}
 	return resp, nil
 }
@@ -48,6 +48,7 @@ func enableStubTagger(t *testing.T, env *testEnv, b tagger.Backend) {
 	mustMkdirAll(t, filepath.Join(modelRoot, "wd14"), 0o755)
 	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "model.onnx"), []byte("dummy"), 0o644)
 	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "tags.csv"), []byte("tag_id,name,category\n0,sample,0\n"), 0o644)
+	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "tagger.json"), []byte(`{"version": 1, "profile": {"input_size": 8}}`), 0o644)
 
 	lib := filepath.Join(modelRoot, "libonnxruntime.so")
 	mustWriteFile(t, lib, nil, 0o644)
@@ -148,10 +149,8 @@ func (b *countingBackend) Run(ctx context.Context, req tagger.RunRequest) (tagge
 		return tagger.RunResponse{}, ctx.Err()
 	}
 	resp := tagger.RunResponse{}
-	for _, img := range req.Images {
-		resp.Results = append(resp.Results, tagger.BackendImageResult{ID: img.ID, Scores: [][]tagger.SparseScores{
-			{{I: []int32{0}, S: []float32{0.9}}},
-		}})
+	for range req.Models {
+		resp.Results = append(resp.Results, []tagger.FrameScores{{SparseScores: tagger.SparseScores{I: []int32{0}, S: []float32{0.9}}}})
 	}
 	return resp, nil
 }
@@ -213,8 +212,9 @@ func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *
 	if st == nil || st.JobType != models.JobTypeAutotag || st.Summary != "auto-tagged 2 images" {
 		t.Errorf("job = %+v, want one autotag job over both uploads", st)
 	}
-	if got := b.runs.Load(); got != 1 {
-		t.Errorf("backend ran %d times, want 1", got)
+
+	if got := b.runs.Load(); got != 2 {
+		t.Errorf("backend ran %d times, want 2", got)
 	}
 	for _, id := range []int64{first, second} {
 		if n := autotagged(t, env, id); n != 1 {
@@ -307,8 +307,8 @@ func TestAutotagImages_RunsTheIDsAsOneJob(t *testing.T) {
 	wantIn(t, w.Body.String(), `"images":2`)
 	awaitQueueDrained(t, env)
 
-	if got := b.runs.Load(); got != 1 {
-		t.Errorf("backend ran %d times, want 1", got)
+	if got := b.runs.Load(); got != 2 {
+		t.Errorf("backend ran %d times, want 2", got)
 	}
 	if st := env.handler.jobs.Get(); st == nil || st.Summary != "auto-tagged 2 images" {
 		t.Errorf("job = %+v, want one autotag job over both images", st)

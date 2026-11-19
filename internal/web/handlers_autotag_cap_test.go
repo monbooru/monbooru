@@ -14,6 +14,8 @@ func stageDummyTagger(t *testing.T, srv *Server) {
 	modelRoot := filepath.Join(t.TempDir(), "models")
 	installTagger(t, modelRoot, "wd14", "tag_id,name,category\n0,sample,0\n")
 
+	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "tagger.json"), []byte(`{"version": 1, "profile": {"input_size": 8}}`), 0o644)
+
 	lib := filepath.Join(modelRoot, "libonnxruntime.so")
 	mustWriteFile(t, lib, nil, 0o644)
 	t.Setenv("ORT_LIB_PATH", lib)

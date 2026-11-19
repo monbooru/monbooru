@@ -48,44 +48,33 @@ type CacheStatus struct {
 	LastUsed time.Time
 }
 
-// RunRequest carries pre-extracted frames: the backend never reads the
-// gallery database or unpacks archives.
+// RunRequest is one call: Frames, each a Size x Size RGB8 square, through
+// each of Models, which share that input. Taggers is the run's whole set,
+// what the session cache holds; the backend never reads the gallery.
 type RunRequest struct {
 	ModelPath string
 	DataPath  string
 	// SessionParallel is the configured tagger.parallel, which sizes the
-	// sessions' intra-op threads; Parallel is this batch's worker count.
-	SessionParallel    int
-	IdleReleaseMinutes int
-	Taggers            []TaggerStatus
-	Provider           string
-	Parallel           int
-	Images             []BackendImageRequest
-	// OnProgress may be nil. An empty msg marks an image done; any other
-	// is page status.
-	OnProgress func(workerIdx int, msg string)
+	// sessions' intra-op threads and the calls inferring at once.
+	SessionParallel int
+	Taggers         []TaggerStatus
+	Provider        string
+	Models          []string
+	Size            int
+	Frames          [][]byte
 }
 
-// MangaProgress asks the backend to report each page through OnProgress.
-type BackendImageRequest struct {
-	ID            int64
-	FramePaths    []string
-	MangaProgress bool
-	FileType      string
+// FrameScores is one frame through one model; a frame the model refused
+// carries Err, a string because gob cannot encode an error interface.
+type FrameScores struct {
+	SparseScores
+	Err string
 }
 
-// RunResponse.Results mirrors RunRequest.Images in order.
+// RunResponse.Results follows RunRequest.Models, each with one entry per
+// frame.
 type RunResponse struct {
-	Results []BackendImageResult
-}
-
-// Scores follows RunRequest.Taggers, each holding the frames that tagger
-// read; nil Scores without Err is an image the run never reached. Err is
-// a string because gob cannot encode an error interface over IPC.
-type BackendImageResult struct {
-	ID     int64
-	Scores [][]SparseScores
-	Err    string
+	Results [][]FrameScores
 }
 
 var (

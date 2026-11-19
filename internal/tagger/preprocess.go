@@ -5,11 +5,9 @@ package tagger
 import (
 	"cmp"
 	"fmt"
-	"image"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
-	"golang.org/x/image/draw"
 )
 
 var inputTensorPools sync.Map
@@ -44,54 +42,6 @@ var (
 	clipStd  = [3]float32{0.26862954, 0.26130258, 0.27577711}
 )
 
-// camieDefaultFill is the padding colour of Camie's onnx_inference.py.
-var camieDefaultFill = [3]uint8{124, 116, 104}
-
-func padFill(profile Profile) [3]uint8 {
-	switch {
-	case profile.Pad == "white_square":
-		return [3]uint8{0xff, 0xff, 0xff}
-	case profile.FillColor != nil:
-		return *profile.FillColor
-	}
-	return camieDefaultFill
-}
-
-func padAndResize(src image.Image, size int, profile Profile) *image.RGBA {
-	fill := padFill(profile)
-	scaled, offX, offY := resizeAspect(src, size)
-
-	dst := image.NewRGBA(image.Rect(0, 0, size, size))
-	for i := 0; i < len(dst.Pix); i += 4 {
-		dst.Pix[i+0] = fill[0]
-		dst.Pix[i+1] = fill[1]
-		dst.Pix[i+2] = fill[2]
-		dst.Pix[i+3] = 0xFF
-	}
-	// Over composites a (half-)transparent pixel onto the fill, as WD14's
-	// reference does onto white; buildTensor ignores alpha.
-	draw.Draw(dst, scaled.Bounds().Add(image.Pt(offX, offY)), scaled, image.Point{}, draw.Over)
-	return dst
-}
-
-// Resizing before padding bounds each transient buffer by size^2, which keeps
-// a parallel burst on huge sources inside small container memory caps.
-func resizeAspect(src image.Image, size int) (scaled *image.RGBA, offX, offY int) {
-	b := src.Bounds()
-	w, h := b.Max.X-b.Min.X, b.Max.Y-b.Min.Y
-	scaleW, scaleH := size, size
-	if w >= h {
-		scaleH = max(1, h*size/w)
-	} else {
-		scaleW = max(1, w*size/h)
-	}
-	scaled = image.NewRGBA(image.Rect(0, 0, scaleW, scaleH))
-	// Not ApproxBiLinear: it reads four source pixels at any ratio, and
-	// the aliasing it leaves gets tagged as pixel art.
-	draw.BiLinear.Scale(scaled, scaled.Bounds(), src, b, draw.Src, nil)
-	return scaled, (size - scaleW) / 2, (size - scaleH) / 2
-}
-
 var normalizePresets = map[string]struct {
 	scale     float32
 	mean, std [3]float32
@@ -122,9 +72,12 @@ func normalizeTable(profile Profile) *[3][256]float32 {
 }
 
 // buildTensor overwrites every element: pooled buffers are not zeroed.
-func buildTensor(img *image.RGBA, tensor []float32, size int, profile Profile) (ort.Shape, error) {
-	pix := img.Pix
-	stride := img.Stride
+// pix is a size x size RGB8 frame.
+func buildTensor(pix []byte, tensor []float32, size int, profile Profile) (ort.Shape, error) {
+	if len(pix) != 3*size*size {
+		return nil, fmt.Errorf("buildTensor: %d bytes for a %d px frame", len(pix), size)
+	}
+	stride := 3 * size
 	norm := normalizeTable(profile)
 	r, b := 0, 2
 	if profile.Channels == "bgr" {
@@ -136,7 +89,7 @@ func buildTensor(img *image.RGBA, tensor []float32, size int, profile Profile) (
 		for y := 0; y < size; y++ {
 			row := pix[y*stride:]
 			for x := 0; x < size; x++ {
-				src := x * 4
+				src := x * 3
 				dst := (y*size + x) * 3
 				tensor[dst+0] = norm[0][row[src+r]]
 				tensor[dst+1] = norm[1][row[src+1]]
@@ -150,7 +103,7 @@ func buildTensor(img *image.RGBA, tensor []float32, size int, profile Profile) (
 		for y := 0; y < size; y++ {
 			row := pix[y*stride:]
 			for x := 0; x < size; x++ {
-				src := x * 4
+				src := x * 3
 				off := y*size + x
 				tensor[0*plane+off] = norm[0][row[src+r]]
 				tensor[1*plane+off] = norm[1][row[src+1]]

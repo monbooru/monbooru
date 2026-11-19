@@ -32,9 +32,14 @@ const (
 	ipcMethodStatus
 	ipcMethodReleaseIdle
 	ipcMethodShutdown
+	// ipcMethodCancel stops the call whose ID it carries.
+	ipcMethodCancel
 )
 
+// Calls run concurrently over one connection; a reply carries its
+// request's ID.
 type ipcRequest struct {
+	ID        uint64
 	Method    ipcMethod
 	Run       *RunRequest
 	IdleAfter time.Duration
@@ -52,15 +57,12 @@ const ipcHandshakeTimeout = 5 * time.Second
 // cannot echo the spawn secret is dropped before it is sent frame paths.
 type ipcHello struct{ Token string }
 
-// A Stream frame is progress; the first frame without Stream is the reply.
 type ipcResponse struct {
-	Stream    bool
-	WorkerIdx int
-	Msg       string
-	Run       *RunResponse
-	Status    *CacheStatus
-	Released  bool
-	Err       string
+	ID       uint64
+	Run      *RunResponse
+	Status   *CacheStatus
+	Released bool
+	Err      string
 }
 
 func writeFrame(w io.Writer, payload any) error {
@@ -101,14 +103,99 @@ func readFrame(r io.Reader, dst any) error {
 	return gob.NewDecoder(bytes.NewReader(body)).Decode(dst)
 }
 
+// ipcConn carries the calls to one child and routes each reply to its
+// caller; once its reader stops, every call fails with err.
+type ipcConn struct {
+	net.Conn
+	writeMu sync.Mutex
+	mu      sync.Mutex
+	nextID  uint64
+	pending map[uint64]chan ipcResponse
+	err     error
+}
+
+func newIPCConn(c net.Conn) *ipcConn {
+	ic := &ipcConn{Conn: c, pending: map[uint64]chan ipcResponse{}}
+	go ic.readLoop()
+	return ic
+}
+
+func (c *ipcConn) readLoop() {
+	for {
+		var resp ipcResponse
+		if err := readFrame(c.Conn, &resp); err != nil {
+			c.mu.Lock()
+			c.err = fmt.Errorf("ipc read: %w", err)
+			for id, ch := range c.pending {
+				close(ch)
+				delete(c.pending, id)
+			}
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Lock()
+		ch := c.pending[resp.ID]
+		delete(c.pending, resp.ID)
+		c.mu.Unlock()
+		if ch != nil {
+			ch <- resp
+		}
+	}
+}
+
+func (c *ipcConn) send(req ipcRequest) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return writeFrame(c.Conn, req)
+}
+
+// call returns ctx's error on a cancel, which the child is told of, and
+// any other error when the connection is gone.
+func (c *ipcConn) call(ctx context.Context, req ipcRequest) (ipcResponse, error) {
+	ch := make(chan ipcResponse, 1)
+	c.mu.Lock()
+	if c.err != nil {
+		c.mu.Unlock()
+		return ipcResponse{}, c.err
+	}
+	c.nextID++
+	req.ID = c.nextID
+	c.pending[req.ID] = ch
+	c.mu.Unlock()
+	forget := func() {
+		c.mu.Lock()
+		delete(c.pending, req.ID)
+		c.mu.Unlock()
+	}
+	if err := c.send(req); err != nil {
+		forget()
+		_ = c.Close()
+		return ipcResponse{}, fmt.Errorf("ipc write: %w", err)
+	}
+	select {
+	case resp, ok := <-ch:
+		if !ok {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			return ipcResponse{}, c.err
+		}
+		return resp, nil
+	case <-ctx.Done():
+		forget()
+		_ = c.send(ipcRequest{ID: req.ID, Method: ipcMethodCancel})
+		return ipcResponse{}, ctx.Err()
+	}
+}
+
 // ipcBackend runs inference in a child monbooru process: only the child's
 // exit gives back the CUDA libraries and primary context it loaded.
 type ipcBackend struct {
-	mu       sync.Mutex
+	// A call holds mu for reading; starting and stopping the child hold it
+	// for writing.
+	mu       sync.RWMutex
 	cmd      *exec.Cmd
-	conn     net.Conn
+	conn     *ipcConn
 	inFlight atomic.Int32
-	// Readable without b.mu, which Run holds for the whole batch.
 	childPID atomic.Int32
 	// Overrides the cached snapshot's provider mid-batch: the snapshot
 	// may predate a provider switch.
@@ -162,7 +249,7 @@ func (b *ipcBackend) ensureRunning() error {
 			return fmt.Errorf("accept tagger-worker connection: %w", res.err)
 		}
 		b.cmd = cmd
-		b.conn = res.conn
+		b.conn = newIPCConn(res.conn)
 		b.childPID.Store(int32(cmd.Process.Pid))
 		return nil
 	case <-time.After(15 * time.Second):
@@ -259,83 +346,38 @@ func (b *ipcBackend) reapLocked(dropConnFirst bool, verb string) {
 	logx.Infof("tagger-worker: %s pid=%d", verb, pid)
 }
 
-// Caller must hold b.mu.
-func (b *ipcBackend) call(ctx context.Context, req ipcRequest, onProgress func(int, string)) (ipcResponse, error) {
-	// The watcher gets its own copy: terminate, also under b.mu, sets
-	// b.conn to nil.
-	conn := b.conn
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-ctx.Done():
-			if conn != nil {
-				_ = conn.Close()
-			}
-		case <-done:
-		}
-	}()
-
-	if err := writeFrame(conn, req); err != nil {
-		b.terminate()
-		if ctx.Err() != nil {
-			return ipcResponse{}, ctx.Err()
-		}
-		return ipcResponse{}, fmt.Errorf("ipc write: %w", err)
-	}
-	for {
-		var resp ipcResponse
-		if err := readFrame(conn, &resp); err != nil {
-			b.terminate()
-			if ctx.Err() != nil {
-				return ipcResponse{}, ctx.Err()
-			}
-			return ipcResponse{}, fmt.Errorf("ipc read: %w", err)
-		}
-		if resp.Stream {
-			if onProgress != nil {
-				onProgress(resp.WorkerIdx, resp.Msg)
-			}
-			continue
-		}
-		return resp, nil
-	}
-}
-
 // Well above a teardown with mallocTrim (a few seconds), short enough
 // that a wedged worker can't stall the reclaim ticker or shutdown.
 const shortCallTimeout = 30 * time.Second
 
-// Caller must hold b.mu.
+// Caller must hold b.mu. A failed short call takes the child down.
 func (b *ipcBackend) shortCall(req ipcRequest) (ipcResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), shortCallTimeout)
 	defer cancel()
-	return b.call(ctx, req, nil)
+	resp, err := b.conn.call(ctx, req)
+	if err != nil {
+		b.terminate()
+	}
+	return resp, err
 }
 
 func (b *ipcBackend) Run(ctx context.Context, req RunRequest) (RunResponse, error) {
-	// gob cannot encode a func; progress comes back over the response
-	// stream instead.
-	wire := req
-	wire.OnProgress = nil
 	b.inFlight.Add(1)
-	b.runProvider.Store(req.Provider)
 	defer b.inFlight.Add(-1)
+	b.runProvider.Store(req.Provider)
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if err := b.ensureRunning(); err != nil {
-		return RunResponse{}, err
-	}
-
-	resp, err := b.call(ctx, ipcRequest{Method: ipcMethodRun, Run: &wire}, req.OnProgress)
+	conn, err := b.acquire()
 	if err != nil {
 		return RunResponse{}, err
 	}
-	// The child's own teardown at 0 frees the sessions but not the GPU
-	// libraries, which only its exit gives back.
-	if req.IdleReleaseMinutes <= 0 {
-		b.shutdownLocked()
+	resp, err := conn.call(ctx, ipcRequest{Method: ipcMethodRun, Run: &req})
+	b.mu.RUnlock()
+	if err != nil {
+		if ctx.Err() != nil {
+			return RunResponse{}, ctx.Err()
+		}
+		b.drop(conn)
+		return RunResponse{}, err
 	}
 	if resp.Err != "" {
 		return RunResponse{}, errors.New(resp.Err)
@@ -346,8 +388,36 @@ func (b *ipcBackend) Run(ctx context.Context, req RunRequest) (RunResponse, erro
 	return *resp.Run, nil
 }
 
-// A Run holds b.mu for the whole batch, so while one is in flight Status
-// answers from the last snapshot instead of queueing behind it.
+// acquire returns the live connection with b.mu held for reading,
+// starting the child first when there is none.
+func (b *ipcBackend) acquire() (*ipcConn, error) {
+	for {
+		b.mu.RLock()
+		if b.conn != nil {
+			return b.conn, nil
+		}
+		b.mu.RUnlock()
+		b.mu.Lock()
+		err := b.ensureRunning()
+		b.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// drop takes down a child whose connection failed, unless another call
+// already replaced it.
+func (b *ipcBackend) drop(conn *ipcConn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == conn {
+		b.terminate()
+	}
+}
+
+// While a call is in flight Status answers from the last snapshot
+// instead of asking the busy child.
 func (b *ipcBackend) Status() CacheStatus {
 	if b.inFlight.Load() > 0 {
 		provider, _ := b.runProvider.Load().(string)
@@ -366,10 +436,7 @@ func (b *ipcBackend) Status() CacheStatus {
 		return CacheStatus{}
 	}
 	resp, err := b.shortCall(ipcRequest{Method: ipcMethodStatus})
-	if err != nil {
-		return CacheStatus{}
-	}
-	if resp.Status == nil {
+	if err != nil || resp.Status == nil {
 		return CacheStatus{}
 	}
 	snap := *resp.Status
@@ -378,6 +445,9 @@ func (b *ipcBackend) Status() CacheStatus {
 }
 
 func (b *ipcBackend) ReleaseIdle(after time.Duration) bool {
+	if b.inFlight.Load() > 0 {
+		return false
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.conn == nil {
@@ -393,9 +463,9 @@ func (b *ipcBackend) ReleaseIdle(after time.Duration) bool {
 	return resp.Released
 }
 
-// A run in flight holds b.mu and keeps its child: waiting would hang the
-// caller for the batch and then kill the worker the next chunk needs. Idle
-// release takes the child once the run ends.
+// A call in flight keeps its child: waiting would hang the caller and then
+// kill the worker the next call needs. Idle release takes the child once
+// the run ends.
 func (b *ipcBackend) ReleaseAll() {
 	if b.inFlight.Load() > 0 {
 		return
