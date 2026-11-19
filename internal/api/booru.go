@@ -27,7 +27,7 @@ import (
 // images or notes, so the key in the path is the only auth.
 
 const (
-	booruPrefix = "/booru/"
+	BooruPrefix = "/booru/"
 	// Danbooru's own page sizes.
 	booruPageLimit = 20
 	booruMaxLimit  = 200
@@ -49,17 +49,29 @@ func BooruKey(tokenHash string) string {
 // to an app, not to a person adding a booru.
 func BooruToken(t apitoken.Token) bool { return t.Paired == "" && t.HasScope(config.ScopeRead) }
 
-func BooruPath(gallery, key string) string { return booruPrefix + gallery + "/" + key }
+func BooruPath(gallery, key string) string { return BooruPrefix + gallery + "/" + key }
+
+// IsBooruPath: the layer checks its own key, ahead of any login.
+func IsBooruPath(path string) bool { return strings.HasPrefix(path, BooruPrefix) }
+
+// IsBooruFile: an app's grid loads a thumbnail per post, as noisy as the
+// web UI's own.
+func IsBooruFile(path string) bool {
+	if !IsBooruPath(path) {
+		return false
+	}
+	return strings.Contains(path, "/thumb/") || strings.Contains(path, "/file/") || strings.Contains(path, "/sample/")
+}
 
 // RedactBooruPath keeps the key out of the request log.
 func RedactBooruPath(path string) string {
-	rest, ok := strings.CutPrefix(path, booruPrefix)
+	rest, ok := strings.CutPrefix(path, BooruPrefix)
 	if !ok {
 		return path
 	}
 	name, rest, _ := strings.Cut(rest, "/")
 	_, rest, _ = strings.Cut(rest, "/")
-	return booruPrefix + name + "/<key>/" + rest
+	return BooruPrefix + name + "/<key>/" + rest
 }
 
 func booruKeyValid(tokens apitoken.List, key string) bool {
@@ -74,7 +86,7 @@ func booruKeyValid(tokens apitoken.List, key string) bool {
 type booruHandler func(http.ResponseWriter, *http.Request, *library.Gallery)
 
 func (h *Handler) mountBooru(mux *http.ServeMux) {
-	const at = "GET " + booruPrefix + "{gallery}/{key}/"
+	const at = "GET " + BooruPrefix + "{gallery}/{key}/"
 	mux.HandleFunc(at+"posts.json", h.booru(h.booruPosts))
 	mux.HandleFunc(at+"posts/{post}", h.booru(h.booruPost))
 	mux.HandleFunc(at+"counts/posts.json", h.booru(h.booruCount))

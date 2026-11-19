@@ -674,6 +674,8 @@ func (s *Server) registerRoutes(rt *routes) {
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		rt.read(method+" /api/v1/", apiHandler)
 	}
+	// Read-only and keyed by its path, so no peer to note.
+	rt.read("GET "+api.BooruPrefix, apiMux.ServeHTTP)
 }
 
 func (s *Server) allContexts() []*library.Gallery {
@@ -694,7 +696,7 @@ func isNoisyPath(path string) bool {
 	case "/internal/job/status", "/internal/monloader-status", "/health":
 		return true
 	}
-	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/")
+	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/") || api.IsBooruFile(path)
 }
 
 // Stamped by the outermost middleware so the footer's load time covers
@@ -711,10 +713,11 @@ func requestStartFromContext(ctx context.Context) time.Time {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(context.WithValue(r.Context(), requestStartKey{}, time.Now()))
+		path := api.RedactBooruPath(r.URL.Path)
 		if isNoisyPath(r.URL.Path) {
-			logx.Debugf("%s %s", r.Method, r.URL.Path)
+			logx.Debugf("%s %s", r.Method, path)
 		} else {
-			logx.Infof("%s %s", r.Method, r.URL.Path)
+			logx.Infof("%s %s", r.Method, path)
 		}
 		next.ServeHTTP(w, r)
 	})
