@@ -1,27 +1,33 @@
 {{define "partials/booru_endpoints.html"}}
 <div id="booru-endpoints"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  {{if .Endpoints}}
+  {{if .View.Options}}
+  <form hx-post="/settings/auth/booru-token" hx-target="#flash-auth" hx-swap="innerHTML" hx-trigger="change">
+    <label for="booru-token">Token</label>
+    <select id="booru-token" name="token_id">
+      <option value="">(none, the endpoint is off)</option>
+      {{range .View.Options}}<option value="{{.ID}}"{{if .Chosen}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </form>
+  {{with .View.Addresses}}
   <div class="table-scroll">
   <table class="data-table stack-table">
-    <thead><tr><th>Token</th><th>Gallery</th><th>Address</th></tr></thead>
+    <thead><tr><th>Gallery</th><th>Address</th></tr></thead>
     <tbody>
-      {{range .Endpoints}}{{$token := .Token}}
-      {{range .Addresses}}
+      {{range .}}
       <tr>
-        <td class="stack-head"><strong>{{$token}}</strong></td>
-        <td data-label="Gallery">{{.Gallery}}</td>
+        <td class="stack-head"><strong>{{.Gallery}}</strong></td>
         <td data-label="Address">
           <button type="button" class="mono-small sha-copyable" data-copy="{{.URL}}" title="Click to copy">{{.URL}}</button>
           <span class="copy-flash" hidden>copied</span>
         </td>
       </tr>
       {{end}}
-      {{end}}
     </tbody>
   </table>
   </div>
+  {{end}}
   {{else}}
-  <p class="field-hint">No address yet. Create a token with the read privilege to get one.</p>
+  <p class="field-hint">Create a token with the read privilege to pick it here.</p>
   {{end}}
 </div>
 {{end}}

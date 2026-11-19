@@ -56,7 +56,7 @@ type settingsData struct {
 	Desktop            desktop.Integration
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
-	BooruEndpoints     []booruEndpoint
+	BooruEndpoints     booruEndpointsView
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {

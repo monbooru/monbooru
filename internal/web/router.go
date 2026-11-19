@@ -507,6 +507,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("DELETE /settings/auth/tokens/{id}", s.settingsTokenRevoke)
 	rt.free("GET /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesGet)
 	rt.free("POST /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesPost)
+	rt.free("POST /settings/auth/booru-token", s.settingsBooruTokenPost)
 	rt.read("PATCH /settings/categories/{id}", s.updateCategoryPatch)
 	rt.free("POST /settings/schedule", s.settingsSchedulePost)
 	rt.free("POST /settings/schedule/run", s.settingsScheduleRunPost)
