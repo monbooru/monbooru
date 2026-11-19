@@ -118,6 +118,7 @@ func TestBooruObjectRoute(t *testing.T) {
 func booruEnv(t *testing.T) (*testEnv, string, int64) {
 	t.Helper()
 	env := newTestEnv(t)
+	env.cfg.Auth.BooruTokenID = env.cfg.Auth.Tokens[0].ID
 	id := env.createTestImage(t, "booru.png", 40, 30)
 	body, _ := json.Marshal(map[string]any{"tags": []string{"blue_sky", "artist:user_a", "character:char_a", "rating:explicit"}})
 	mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", id), body), http.StatusOK)
@@ -146,10 +147,46 @@ func TestBooruAuth(t *testing.T) {
 		t.Errorf("a write answered %d, want 405", w.Code)
 	}
 
-	// Revoking the token turns its address off.
+	// Unpicking the token, or taking its read away, turns its address off.
+	env.cfg.Auth.BooruTokenID = ""
+	if w := env.do("GET", base+"/posts.json"); w.Code != http.StatusUnauthorized {
+		t.Errorf("no token picked: %d, want 401", w.Code)
+	}
+	env.cfg.Auth.BooruTokenID = env.cfg.Auth.Tokens[0].ID
 	env.cfg.Auth.Tokens[0].Scopes = []string{config.ScopeWrite}
 	if w := env.do("GET", base+"/posts.json"); w.Code != http.StatusUnauthorized {
 		t.Errorf("a token without read: %d, want 401", w.Code)
+	}
+}
+
+func TestChosenBooruToken(t *testing.T) {
+	reader := apitoken.Token{ID: "reader", TokenHash: apitoken.Hash("secret_a"), Scopes: []string{config.ScopeRead}}
+	other := apitoken.Token{ID: "other", TokenHash: apitoken.Hash("secret_b"), Scopes: []string{config.ScopeRead}}
+	writer := apitoken.Token{ID: "writer", Scopes: []string{config.ScopeWrite}}
+	paired := apitoken.Token{ID: "paired", Scopes: config.AllScopes, Paired: "monloader"}
+	tokens := apitoken.List{reader, other, writer, paired}
+	cases := []struct {
+		name, picked, want string
+	}{
+		{"none picked", "", ""},
+		{"the picked one only", "other", "other"},
+		{"one without read", "writer", ""},
+		{"a paired one", "paired", ""},
+		{"one revoked since", "gone", ""},
+	}
+	for _, tc := range cases {
+		got := ChosenBooruToken(config.AuthConfig{Tokens: tokens, BooruTokenID: tc.picked})
+		if id := ""; got != nil {
+			id = got.ID
+			if id != tc.want {
+				t.Errorf("%s: chose %q, want %q", tc.name, id, tc.want)
+			}
+		} else if tc.want != "" {
+			t.Errorf("%s: chose none, want %q", tc.name, tc.want)
+		}
+	}
+	if booruKeyValid(config.AuthConfig{Tokens: tokens, BooruTokenID: "other"}, BooruKey(reader.TokenHash)) {
+		t.Error("a read token that is not the picked one opened the layer")
 	}
 }
 
