@@ -205,6 +205,8 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/relations", h.auth(h.addRelation))
 	mux.HandleFunc("DELETE /api/v1/relations", h.auth(h.removeRelation))
 
+	h.mountBooru(mux)
+
 	mux.HandleFunc("GET /api/v1/openapi.json", h.openAPIJSON)
 	mux.HandleFunc("GET /api/v1/docs", h.openAPIDocs)
 
