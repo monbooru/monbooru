@@ -583,36 +583,96 @@ func wantBooruURL(srv *Server, tok apitoken.Token) string {
 	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 }
 
+func pickBooruToken(srv *Server, id string) {
+	srv.cfgMu.Lock()
+	srv.cfg.Auth.BooruTokenID = id
+	srv.cfgMu.Unlock()
+}
+
 func TestBooruEndpointsInSettings(t *testing.T) {
 	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
+	other, _ := apitoken.New("other", []string{config.ScopeRead})
 	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
 	paired, _ := apitoken.New("monloader (paired)", config.AllScopes)
 	paired.Paired = "monloader"
+	all := []apitoken.Token{reader, other, writer, paired}
 	cases := []struct {
-		name   string
-		tokens []apitoken.Token
-		listed []apitoken.Token
+		name    string
+		tokens  []apitoken.Token
+		picked  string
+		offered []apitoken.Token
+		shown   *apitoken.Token
 	}{
-		{"none without a token", nil, nil},
-		{"a read token has one", []apitoken.Token{reader}, []apitoken.Token{reader}},
-		{"not without read, nor paired", []apitoken.Token{reader, writer, paired}, []apitoken.Token{reader}},
+		{"nothing to pick without a token", nil, "", nil, nil},
+		{"read tokens offered, none picked", all, "", []apitoken.Token{reader, other}, nil},
+		{"the picked one's addresses only", all, other.ID, []apitoken.Token{reader, other}, &other},
+		{"a picked token since revoked", []apitoken.Token{reader}, other.ID, []apitoken.Token{reader}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)
 			setTokens(srv, tc.tokens)
+			pickBooruToken(srv, tc.picked)
 			w := do(srv, "GET", "/settings")
 			mustCode(t, w, http.StatusOK)
 			body := w.Body.String()
 			wantIn(t, body, "Danbooru compatible endpoint")
-			for _, tok := range tc.tokens {
-				listed := slices.ContainsFunc(tc.listed, func(l apitoken.Token) bool { return l.ID == tok.ID })
-				if got := strings.Contains(body, wantBooruURL(srv, tok)); got != listed {
-					t.Errorf("%s's address shown = %v, want %v", tok.Name, got, listed)
+			for _, tok := range all {
+				offered := slices.ContainsFunc(tc.offered, func(o apitoken.Token) bool { return o.ID == tok.ID })
+				if got := strings.Contains(body, `<option value="`+tok.ID+`"`); got != offered {
+					t.Errorf("%s offered = %v, want %v", tok.Name, got, offered)
+				}
+				shown := tc.shown != nil && tc.shown.ID == tok.ID
+				if got := strings.Contains(body, wantBooruURL(srv, tok)); got != shown {
+					t.Errorf("%s's address shown = %v, want %v", tok.Name, got, shown)
 				}
 			}
-			if len(tc.listed) == 0 {
-				wantIn(t, body, "No address yet")
+			if tc.shown != nil {
+				wantIn(t, body, `<option value="`+tc.shown.ID+`" selected>`)
+			}
+			if len(tc.offered) == 0 {
+				wantIn(t, body, "Create a token with the read privilege")
+			}
+		})
+	}
+}
+
+func postBooruToken(srv *Server, id string) string {
+	form := url.Values{"token_id": {id}}
+	req := httptest.NewRequest("POST", "/settings/auth/booru-token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	srv.settingsBooruTokenPost(w, req)
+	return w.Body.String()
+}
+
+func TestPickingTheBooruToken(t *testing.T) {
+	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
+	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
+	paired, _ := apitoken.New("monloader (paired)", config.AllScopes)
+	paired.Paired = "monloader"
+	cases := []struct {
+		name, id, saved, flash string
+	}{
+		{"a read token", reader.ID, reader.ID, "token saved"},
+		{"none turns it off", "", "", "turned off"},
+		{"not one without read", writer.ID, "kept", "Could not save"},
+		{"not a paired one", paired.ID, "kept", "Could not save"},
+		{"not an unknown id", "nope", "kept", "Could not save"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, []apitoken.Token{reader, writer, paired})
+			pickBooruToken(srv, "kept")
+			body := postBooruToken(srv, tc.id)
+			wantIn(t, body, tc.flash)
+			if got := srv.cfg.Auth.BooruTokenID; got != tc.saved {
+				t.Errorf("picked %q, want %q", got, tc.saved)
+			}
+			if tc.saved == reader.ID {
+				wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+				wantIn(t, body, wantBooruURL(srv, reader))
 			}
 		})
 	}
@@ -622,6 +682,7 @@ func TestBooruEndpointsFollowTheTokens(t *testing.T) {
 	srv := newTestServer(t)
 	tok, _ := apitoken.New("reader", config.AllScopes)
 	setTokens(srv, []apitoken.Token{tok})
+	pickBooruToken(srv, tok.ID)
 
 	form := url.Values{"scope": {config.ScopeWrite}}
 	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+tok.ID+"/privileges", strings.NewReader(form.Encode()))
@@ -645,6 +706,7 @@ func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	setTestPassword(t, srv, "s3cret")
 	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
 	setTokens(srv, []apitoken.Token{tok})
+	pickBooruToken(srv, tok.ID)
 	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 	cases := []struct {
 		name, path string
