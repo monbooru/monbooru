@@ -199,6 +199,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	go s.sched.Run()
 
 	go s.runPluginProbes()
+	tagger.MoveDispatchOverlays(cfg.Paths.ModelPath, cfg.Paths.DataPath)
 	s.seedThemesDir()
 	plugins.EnsureDir(s.pluginsDir())
 	s.peers.StartManaged(s.effectivePlugins())
@@ -938,6 +939,12 @@ func (s *Server) modelPath() string {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg.Paths.ModelPath
+}
+
+func (s *Server) dataPath() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.Paths.DataPath
 }
 
 func (s *Server) authEnabled() bool {

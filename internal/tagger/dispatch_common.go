@@ -27,10 +27,10 @@ type DispatchEntry struct {
 	Name     string `json:"name,omitempty"`
 }
 
-func DispatchTargetCategories(modelPath, taggerName string) []string {
+func DispatchTargetCategories(modelPath, dataPath, taggerName string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, e := range allDispatchRules(modelPath, taggerName) {
+	for _, e := range allDispatchRules(modelPath, dataPath, taggerName) {
 		if e.Category == "" || seen[e.Category] {
 			continue
 		}
@@ -41,8 +41,8 @@ func DispatchTargetCategories(modelPath, taggerName string) []string {
 }
 
 // Overlay rules come last, so a map keyed on Source keeps them.
-func allDispatchRules(modelPath, taggerName string) []DispatchEntry {
-	return slices.Concat(DefaultDispatchRules(modelPath, taggerName), OverlayDispatchRules(modelPath, taggerName))
+func allDispatchRules(modelPath, dataPath, taggerName string) []DispatchEntry {
+	return slices.Concat(DefaultDispatchRules(modelPath, taggerName), OverlayDispatchRules(dataPath, taggerName))
 }
 
 // DefaultDispatchRules are the rules a tagger ships with: monbooru's own for
@@ -61,10 +61,16 @@ func DefaultDispatchRules(modelPath, taggerName string) []DispatchEntry {
 	return rules
 }
 
-func OverlayDispatchRules(modelPath, taggerName string) []DispatchEntry {
-	rules, err := ReadDispatchOverlay(modelPath, taggerName)
+// OverlayPath is where a tagger's mappings live: in the data folder, since
+// they are about this library's tags, not about the model.
+func OverlayPath(dataPath, taggerName string) string {
+	return filepath.Join(dataPath, taggerName+".dispatch.json")
+}
+
+func OverlayDispatchRules(dataPath, taggerName string) []DispatchEntry {
+	rules, err := ReadDispatchOverlay(dataPath, taggerName)
 	if err != nil {
-		logx.Warnf("tagger: %s: %v", filepath.Join(modelPath, taggerName, "dispatch.json"), err)
+		logx.Warnf("tagger: %s: %v", OverlayPath(dataPath, taggerName), err)
 		return nil
 	}
 	return rules
@@ -72,8 +78,8 @@ func OverlayDispatchRules(modelPath, taggerName string) []DispatchEntry {
 
 // ReadDispatchOverlay is the strict read for edits: a missing file is no
 // rules, any other failure is an error.
-func ReadDispatchOverlay(modelPath, taggerName string) ([]DispatchEntry, error) {
-	data, err := os.ReadFile(filepath.Join(modelPath, taggerName, "dispatch.json"))
+func ReadDispatchOverlay(dataPath, taggerName string) ([]DispatchEntry, error) {
+	data, err := os.ReadFile(OverlayPath(dataPath, taggerName))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

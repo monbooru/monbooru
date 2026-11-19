@@ -45,7 +45,7 @@ type taggerRow struct {
 }
 
 func (s *Server) installedTaggerRow(t tagger.TaggerStatus, totalGalleries int, modelPath string, entry *tagger.CatalogEntry) taggerRow {
-	ruleCount := len(tagger.OverlayDispatchRules(modelPath, t.Name))
+	ruleCount := len(tagger.OverlayDispatchRules(s.dataPath(), t.Name))
 	return taggerRow{
 		Name:                t.Name,
 		Available:           t.Available,
@@ -54,7 +54,7 @@ func (s *Server) installedTaggerRow(t tagger.TaggerStatus, totalGalleries int, m
 		Enabled:             t.Enabled,
 		ConfidenceThreshold: t.ConfidenceThreshold,
 		ConfigSummary:       taggerConfigSummary(t.TaggerInstance, totalGalleries, ruleCount),
-		Differs:             taggerDiffersFromStock(t.TaggerInstance, modelPath, entry),
+		Differs:             taggerDiffersFromStock(t.TaggerInstance, s.dataPath(), entry),
 		Installed:           true,
 	}
 }
@@ -77,7 +77,7 @@ func taggerConfigSummary(inst config.TaggerInstance, totalGalleries, ruleCount i
 	return out
 }
 
-func taggerDiffersFromStock(inst config.TaggerInstance, modelPath string, entry *tagger.CatalogEntry) bool {
+func taggerDiffersFromStock(inst config.TaggerInstance, dataPath string, entry *tagger.CatalogEntry) bool {
 	seed := tagger.SeedTaggerInstance(inst.Name, inst.Enabled, entry)
 	if inst.ConfidenceThreshold != seed.ConfidenceThreshold {
 		return true
@@ -95,7 +95,7 @@ func taggerDiffersFromStock(inst config.TaggerInstance, modelPath string, entry 
 		return true
 	}
 	// An overlay that cannot be read differs too: Reset is how it goes.
-	_, err := os.Stat(filepath.Join(modelPath, inst.Name, "dispatch.json"))
+	_, err := os.Stat(tagger.OverlayPath(dataPath, inst.Name))
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
@@ -235,11 +235,11 @@ func (s *Server) settingsTaggerConfigGet(w http.ResponseWriter, r *http.Request)
 	modelPath := s.modelPath()
 	catIDs, catList := s.categoryChoices()
 	labelCount := 0
-	if views, err := tagger.BrowseLabels(modelPath, name, taggerTagsFile(inst), catIDs); err == nil {
+	if views, err := tagger.BrowseLabels(modelPath, s.dataPath(), name, taggerTagsFile(inst), catIDs); err == nil {
 		labelCount = len(views)
 	}
 
-	export, overlayErr := taggerExport(modelPath, name, inst)
+	export, overlayErr := taggerExport(modelPath, s.dataPath(), name, inst)
 	data := map[string]any{
 		"Name":       name,
 		"Global":     global,
@@ -254,10 +254,10 @@ func (s *Server) settingsTaggerConfigGet(w http.ResponseWriter, r *http.Request)
 	s.renderTemplate(w, "partials/tagger_config_dialog.html", data)
 }
 
-func taggerExport(modelPath, name string, inst config.TaggerInstance) (map[string]any, error) {
+func taggerExport(modelPath, dataPath, name string, inst config.TaggerInstance) (map[string]any, error) {
 	embedded := tagger.DefaultDispatchRules(modelPath, name)
-	overlay, overlayErr := tagger.ReadDispatchOverlay(modelPath, name)
-	merged := tagger.MergedDispatchRules(modelPath, name)
+	overlay, overlayErr := tagger.ReadDispatchOverlay(dataPath, name)
+	merged := tagger.MergedDispatchRules(modelPath, dataPath, name)
 	exportJSON := ""
 	if b, err := tagger.MarshalDispatchDoc(merged); err == nil {
 		exportJSON = string(b) + "\n"
@@ -376,8 +376,8 @@ func (s *Server) renderTaggerLabels(w http.ResponseWriter, r *http.Request, inst
 	modelPath := s.modelPath()
 	catIDs, _ := s.categoryChoices()
 	colors := s.categoryColors()
-	views, err := tagger.BrowseLabels(modelPath, name, taggerTagsFile(inst), catIDs)
-	custom := len(tagger.OverlayDispatchRules(modelPath, name))
+	views, err := tagger.BrowseLabels(modelPath, s.dataPath(), name, taggerTagsFile(inst), catIDs)
+	custom := len(tagger.OverlayDispatchRules(s.dataPath(), name))
 	if err != nil {
 		s.renderTemplate(w, "partials/tagger_labels_rows.html", map[string]any{
 			"Name":        name,
@@ -529,12 +529,12 @@ func (s *Server) settingsTaggerMappingPost(w http.ResponseWriter, r *http.Reques
 	}
 	writeFlashOOB(w, "flash-tagger-config-"+name, "", "")
 	s.renderTaggerLabels(w, r, inst)
-	export, _ := taggerExport(modelPath, name, inst)
+	export, _ := taggerExport(modelPath, s.dataPath(), name, inst)
 	export["OOB"] = true
 	s.renderTemplate(w, "tagger_export_panel", export)
-	summary := taggerConfigSummary(inst, len(s.galleries()), len(tagger.OverlayDispatchRules(modelPath, name)))
+	summary := taggerConfigSummary(inst, len(s.galleries()), len(tagger.OverlayDispatchRules(s.dataPath(), name)))
 	_, _ = fmt.Fprintf(w, `<span id="tagger-config-summary-%s" class="field-hint" hx-swap-oob="true">%s</span>`, name, html.EscapeString(summary))
-	s.renderTemplate(w, "tagger_reset_button", map[string]any{"Name": name, "Differs": taggerDiffersFromStock(inst, modelPath, catalogEntryByName(modelPath, inst.Name)), "OOB": true})
+	s.renderTemplate(w, "tagger_reset_button", map[string]any{"Name": name, "Differs": taggerDiffersFromStock(inst, s.dataPath(), catalogEntryByName(modelPath, inst.Name)), "OOB": true})
 }
 
 func (s *Server) applyMappingRule(name, modelPath string, r *http.Request) (errMsg string) {
@@ -566,7 +566,7 @@ func (s *Server) applyMappingRule(name, modelPath string, r *http.Request) (errM
 		}
 		entry = tagger.DispatchEntry{Source: source, Category: category, Name: rename}
 	}
-	if err := tagger.UpdateDispatchOverlay(modelPath, name, func(overlay map[string]tagger.DispatchEntry) error {
+	if err := tagger.UpdateDispatchOverlay(modelPath, s.dataPath(), name, func(overlay map[string]tagger.DispatchEntry) error {
 		if reset {
 			delete(overlay, source)
 		} else {
@@ -631,7 +631,7 @@ func (s *Server) settingsTaggerResetPost(w http.ResponseWriter, r *http.Request)
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
 		return
 	}
-	overlay := filepath.Join(s.modelPath(), name, "dispatch.json")
+	overlay := tagger.OverlayPath(s.dataPath(), name)
 	if err := os.Remove(overlay); err != nil && !os.IsNotExist(err) {
 		logx.Warnf("reset tagger %q: remove %q: %v", name, overlay, err)
 		writeInlineFlash(w, "err", "Reset saved but could not delete dispatch.json: "+err.Error())
@@ -693,7 +693,7 @@ func (s *Server) thresholdDialogData(inst config.TaggerInstance) (rows []thresho
 	}
 	appendSorted(emit, false)
 	var dispatchTargets []string
-	for _, cat := range tagger.DispatchTargetCategories(modelPath, name) {
+	for _, cat := range tagger.DispatchTargetCategories(modelPath, s.dataPath(), name) {
 		if _, ok := colors[cat]; ok {
 			dispatchTargets = append(dispatchTargets, cat)
 		}

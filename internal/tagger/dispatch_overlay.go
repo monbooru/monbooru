@@ -10,11 +10,12 @@ import (
 	"sync"
 
 	"github.com/monbooru/monbooru/internal/shared/fsx"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
-func MergedDispatchRules(modelPath, taggerName string) []DispatchEntry {
+func MergedDispatchRules(modelPath, dataPath, taggerName string) []DispatchEntry {
 	merged := map[string]DispatchEntry{}
-	for _, e := range allDispatchRules(modelPath, taggerName) {
+	for _, e := range allDispatchRules(modelPath, dataPath, taggerName) {
 		merged[e.Source] = e
 	}
 	out := slices.Collect(maps.Values(merged))
@@ -30,10 +31,10 @@ func MarshalDispatchDoc(rules []DispatchEntry) ([]byte, error) {
 // same snapshot.
 var overlayMu sync.Mutex
 
-func UpdateDispatchOverlay(modelPath, taggerName string, mutate func(map[string]DispatchEntry) error) error {
+func UpdateDispatchOverlay(modelPath, dataPath, taggerName string, mutate func(map[string]DispatchEntry) error) error {
 	overlayMu.Lock()
 	defer overlayMu.Unlock()
-	current, err := ReadDispatchOverlay(modelPath, taggerName)
+	current, err := ReadDispatchOverlay(dataPath, taggerName)
 	if err != nil {
 		return err
 	}
@@ -44,12 +45,12 @@ func UpdateDispatchOverlay(modelPath, taggerName string, mutate func(map[string]
 	if err := mutate(overlay); err != nil {
 		return err
 	}
-	return SaveDispatchOverlay(modelPath, taggerName, slices.Collect(maps.Values(overlay)))
+	return SaveDispatchOverlay(modelPath, dataPath, taggerName, slices.Collect(maps.Values(overlay)))
 }
 
 // The overlay stays a pure delta against stock, and an empty one is
 // deleted: the file existing is what "differs from stock" means.
-func SaveDispatchOverlay(modelPath, taggerName string, rules []DispatchEntry) error {
+func SaveDispatchOverlay(modelPath, dataPath, taggerName string, rules []DispatchEntry) error {
 	embedded := map[string]DispatchEntry{}
 	for _, e := range DefaultDispatchRules(modelPath, taggerName) {
 		embedded[e.Source] = e
@@ -63,7 +64,7 @@ func SaveDispatchOverlay(modelPath, taggerName string, rules []DispatchEntry) er
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Source < kept[j].Source })
 
-	path := filepath.Join(modelPath, taggerName, "dispatch.json")
+	path := OverlayPath(dataPath, taggerName)
 	if len(kept) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
@@ -76,4 +77,42 @@ func SaveDispatchOverlay(modelPath, taggerName string, rules []DispatchEntry) er
 	}
 	data = append(data, '\n')
 	return fsx.WriteFile(path, data)
+}
+
+// dispatchMoved, in the data folder, records that the model folders'
+// mappings were copied there, so a mapping reset since is not copied back.
+const dispatchMoved = ".dispatch-moved"
+
+// MoveDispatchOverlays copies each model folder's dispatch.json to the
+// data folder, once; the old file is left where it is. A copy that fails
+// is tried again at the next start.
+func MoveDispatchOverlays(modelPath, dataPath string) {
+	marker := filepath.Join(dataPath, dispatchMoved)
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	dirs, _ := os.ReadDir(modelPath)
+	for _, d := range dirs {
+		name := d.Name()
+		if ValidateTaggerName(name) != nil {
+			continue
+		}
+		src := filepath.Join(modelPath, name, "dispatch.json")
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		dst := OverlayPath(dataPath, name)
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := fsx.WriteFile(dst, data); err != nil {
+			logx.Warnf("tagger: copy %s to %s: %v", src, dst, err)
+			return
+		}
+		logx.Infof("tagger: mappings of %s copied to %s", name, dst)
+	}
+	if err := fsx.WriteFile(marker, nil); err != nil {
+		logx.Warnf("tagger: %s: %v", marker, err)
+	}
 }

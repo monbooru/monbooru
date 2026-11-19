@@ -14,7 +14,7 @@ type plannedTagger struct {
 	cands []CandidateLabel
 }
 
-func planTagger(modelPath string, t TaggerStatus, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) (plannedTagger, error) {
+func planTagger(modelPath, dataPath string, t TaggerStatus, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) (plannedTagger, error) {
 	profile, err := ResolveProfile(modelPath, t.Name, t.TagsFile)
 	if err != nil {
 		return plannedTagger{}, fmt.Errorf("resolve profile for %q: %w", t.Name, err)
@@ -29,7 +29,7 @@ func planTagger(modelPath string, t TaggerStatus, catIDs map[string]int64, gener
 			return plannedTagger{}, fmt.Errorf("onnx model for %q: cannot infer input size from dimensions %v", t.Name, dims)
 		}
 	}
-	cands, err := taggerCandidates(modelPath, t, profile, catIDs, generalCatID, inferredCats)
+	cands, err := taggerCandidates(modelPath, dataPath, t, profile, catIDs, generalCatID, inferredCats)
 	if err != nil {
 		return plannedTagger{}, err
 	}
@@ -39,12 +39,12 @@ func planTagger(modelPath string, t TaggerStatus, catIDs map[string]int64, gener
 // taggerCandidates gives a tagger's output channels the tag each one
 // becomes in this gallery: its category, its mapping, and for a
 // single_general model the category the gallery already files the name in.
-func taggerCandidates(modelPath string, t TaggerStatus, profile Profile, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) ([]CandidateLabel, error) {
+func taggerCandidates(modelPath, dataPath string, t TaggerStatus, profile Profile, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) ([]CandidateLabel, error) {
 	labels, err := loadLabels(filepath.Join(modelPath, t.Name, t.TagsFile), profile)
 	if err != nil {
 		return nil, fmt.Errorf("load labels for %q: %w", t.Name, err)
 	}
-	dispatch := LoadDispatch(modelPath, t.Name, catIDs)
+	dispatch := LoadDispatch(modelPath, dataPath, t.Name, catIDs)
 	catNames := make(map[int64]string, len(catIDs))
 	for name, cid := range catIDs {
 		catNames[cid] = name

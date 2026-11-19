@@ -159,7 +159,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 
 	plan := make([]plannedTagger, len(taggers))
 	for i, t := range taggers {
-		if plan[i], err = planTagger(cfg.Paths.ModelPath, t, catIDs, generalCatID, inferredCats); err != nil {
+		if plan[i], err = planTagger(cfg.Paths.ModelPath, cfg.Paths.DataPath, t, catIDs, generalCatID, inferredCats); err != nil {
 			return 0, err
 		}
 	}

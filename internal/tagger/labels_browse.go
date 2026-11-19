@@ -20,7 +20,7 @@ type LabelView struct {
 
 // The single_general inferred-category lift needs a job's database, so
 // those labels show their static routing.
-func BrowseLabels(modelPath, taggerName, tagsFile string, catIDs map[string]int64) ([]LabelView, error) {
+func BrowseLabels(modelPath, dataPath, taggerName, tagsFile string, catIDs map[string]int64) ([]LabelView, error) {
 	profile, err := ResolveProfile(modelPath, taggerName, tagsFile)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func BrowseLabels(modelPath, taggerName, tagsFile string, catIDs map[string]int6
 		return nil, err
 	}
 	embedded := compileEntries(DefaultDispatchRules(modelPath, taggerName), catIDs)
-	overlay := compileEntries(OverlayDispatchRules(modelPath, taggerName), catIDs)
+	overlay := compileEntries(OverlayDispatchRules(dataPath, taggerName), catIDs)
 	empty := &DispatchTable{}
 
 	out := make([]LabelView, 0, len(labels))

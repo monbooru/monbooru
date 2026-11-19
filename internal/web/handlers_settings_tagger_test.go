@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 func TestSettingsTaggerPost_SavesTheAcceptedFormAndRefusesABadProvider(t *testing.T) {
@@ -90,7 +91,7 @@ func TestSettingsTaggerDeletePost_RemovesTheFolderAndTheEntry(t *testing.T) {
 func TestSettingsTaggerMappingPost_RefusesANonLevelRatingTarget(t *testing.T) {
 	srv, modelPath := newModelServer(t)
 	mustMkdirAll(t, filepath.Join(modelPath, "camie"), 0o755)
-	dispatch := filepath.Join(modelPath, "camie", "dispatch.json")
+	dispatch := tagger.OverlayPath(srv.dataPath(), "camie")
 	rule := func(name string) *httptest.ResponseRecorder {
 		return postForm(t, srv, "/settings/tagger/camie/mapping", url.Values{
 			"rule_source": {"rating_safe"}, "rule_category": {"rating"}, "rule_name": {name},
@@ -112,9 +113,9 @@ func TestSettingsTaggerMappingPost_RefusesANonLevelRatingTarget(t *testing.T) {
 
 func TestSettingsTaggerMappingPost_RefusesOverABrokenDispatchFile(t *testing.T) {
 	srv, modelPath := newModelServer(t)
-	dir := installTagger(t, modelPath, "wd-swinv2", "tag_id,name,category\n1,engrish,0\n")
+	installTagger(t, modelPath, "wd-swinv2", "tag_id,name,category\n1,engrish,0\n")
 	broken := `{"version":1,"rules":[{"source":"engrish","category":""},]}`
-	dispatch := filepath.Join(dir, "dispatch.json")
+	dispatch := tagger.OverlayPath(srv.dataPath(), "wd-swinv2")
 	mustWriteFile(t, dispatch, []byte(broken), 0o644)
 
 	w := postForm(t, srv, "/settings/tagger/wd-swinv2/mapping", url.Values{

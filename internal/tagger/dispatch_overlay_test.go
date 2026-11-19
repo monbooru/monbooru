@@ -11,7 +11,7 @@ import (
 
 func readOverlayDoc(t *testing.T, modelPath, taggerName string) dispatchDoc {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(modelPath, taggerName, "dispatch.json"))
+	data, err := os.ReadFile(OverlayPath(modelPath, taggerName))
 	if err != nil {
 		t.Fatalf("read overlay: %v", err)
 	}
@@ -25,7 +25,7 @@ func readOverlayDoc(t *testing.T, modelPath, taggerName string) dispatchDoc {
 func TestSaveDispatchOverlay_WritesSortedRules(t *testing.T) {
 	modelPath := t.TempDir()
 	mustMkdirAll(t, filepath.Join(modelPath, "wd-swinv2"), 0o755)
-	err := SaveDispatchOverlay(modelPath, "wd-swinv2", []DispatchEntry{
+	err := SaveDispatchOverlay(modelPath, modelPath, "wd-swinv2", []DispatchEntry{
 		{Source: "zzz", Category: "meta"},
 		{Source: "aaa", Category: ""},
 	})
@@ -49,7 +49,7 @@ func TestSaveDispatchOverlay_DropsRulesIdenticalToEmbedded(t *testing.T) {
 		t.Fatal("wd-swinv2 has no embedded rules; test needs one")
 	}
 
-	err := SaveDispatchOverlay(modelPath, "wd-swinv2", []DispatchEntry{
+	err := SaveDispatchOverlay(modelPath, modelPath, "wd-swinv2", []DispatchEntry{
 		embedded[0],
 		{Source: "engrish", Category: ""},
 	})
@@ -66,19 +66,19 @@ func TestSaveDispatchOverlay_EmptyDeletesFile(t *testing.T) {
 	modelPath := t.TempDir()
 	dir := filepath.Join(modelPath, "wd-swinv2")
 	mustMkdirAll(t, dir, 0o755)
-	if err := SaveDispatchOverlay(modelPath, "wd-swinv2", []DispatchEntry{{Source: "engrish", Category: ""}}); err != nil {
+	if err := SaveDispatchOverlay(modelPath, modelPath, "wd-swinv2", []DispatchEntry{{Source: "engrish", Category: ""}}); err != nil {
 		t.Fatalf("seed overlay: %v", err)
 	}
 	embedded := DefaultDispatchRules("", "wd-swinv2")
 
-	if err := SaveDispatchOverlay(modelPath, "wd-swinv2", []DispatchEntry{embedded[0]}); err != nil {
+	if err := SaveDispatchOverlay(modelPath, modelPath, "wd-swinv2", []DispatchEntry{embedded[0]}); err != nil {
 		t.Fatalf("SaveDispatchOverlay: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "dispatch.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(OverlayPath(modelPath, "wd-swinv2")); !os.IsNotExist(err) {
 		t.Fatalf("overlay should be deleted, stat err = %v", err)
 	}
 
-	if err := SaveDispatchOverlay(modelPath, "wd-swinv2", nil); err != nil {
+	if err := SaveDispatchOverlay(modelPath, modelPath, "wd-swinv2", nil); err != nil {
 		t.Fatalf("SaveDispatchOverlay on empty: %v", err)
 	}
 }
@@ -91,14 +91,14 @@ func TestUpdateDispatchOverlay_RefusesAnUnreadableFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			modelPath := t.TempDir()
 			writeOverlay(t, modelPath, "wd-swinv2", tc.body)
-			err := UpdateDispatchOverlay(modelPath, "wd-swinv2", func(overlay map[string]DispatchEntry) error {
+			err := UpdateDispatchOverlay(modelPath, modelPath, "wd-swinv2", func(overlay map[string]DispatchEntry) error {
 				overlay["monochrome"] = DispatchEntry{Source: "monochrome", Category: "meta"}
 				return nil
 			})
 			if err == nil {
 				t.Fatal("UpdateDispatchOverlay over a broken file: err = nil, want an error")
 			}
-			got, _ := os.ReadFile(filepath.Join(modelPath, "wd-swinv2", "dispatch.json"))
+			got, _ := os.ReadFile(OverlayPath(modelPath, "wd-swinv2"))
 			if string(got) != tc.body {
 				t.Errorf("dispatch.json = %q, want it untouched", got)
 			}
@@ -118,7 +118,7 @@ func TestBrowseLabels_ResolvesRulesAndScheme(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, "tags.csv"), []byte(csv), 0o644)
 	writeOverlay(t, modelPath, "wd-swinv2", `{"version":1,"rules":[{"source":"engrish","category":""}]}`)
 
-	views, err := BrowseLabels(modelPath, "wd-swinv2", "tags.csv", canonicalCatIDs)
+	views, err := BrowseLabels(modelPath, modelPath, "wd-swinv2", "tags.csv", canonicalCatIDs)
 	if err != nil {
 		t.Fatalf("BrowseLabels: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestBrowseLabels_SeesALabelFileOverwrittenInPlace(t *testing.T) {
 	mustWriteFile(t, tags, []byte("tag_id,name,category\n1,1girl,0\n"), 0o644)
 	names := func() []string {
 		t.Helper()
-		views, err := BrowseLabels(modelPath, "wd-swinv2", "tags.csv", canonicalCatIDs)
+		views, err := BrowseLabels(modelPath, modelPath, "wd-swinv2", "tags.csv", canonicalCatIDs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,10 +187,10 @@ func TestAFoldersDispatchDefaultIsStock(t *testing.T) {
 	if _, labels := listTaggerFiles(dir); len(labels) != 1 || labels[0] != "tags.csv" {
 		t.Errorf("label pool = %v, want tags.csv alone", labels)
 	}
-	if rule, ok := LoadDispatch(tmp, "registry-tagger", canonicalCatIDs).Lookup("1koma"); !ok || !rule.Drop {
+	if rule, ok := LoadDispatch(tmp, tmp, "registry-tagger", canonicalCatIDs).Lookup("1koma"); !ok || !rule.Drop {
 		t.Errorf("the folder's default rule was not applied: %+v %v", rule, ok)
 	}
-	views, err := BrowseLabels(tmp, "registry-tagger", "tags.csv", canonicalCatIDs)
+	views, err := BrowseLabels(tmp, tmp, "registry-tagger", "tags.csv", canonicalCatIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,16 +200,50 @@ func TestAFoldersDispatchDefaultIsStock(t *testing.T) {
 		}
 	}
 
-	if err := SaveDispatchOverlay(tmp, "registry-tagger", []DispatchEntry{{Source: "1koma", Category: ""}}); err != nil {
+	if err := SaveDispatchOverlay(tmp, tmp, "registry-tagger", []DispatchEntry{{Source: "1koma", Category: ""}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "dispatch.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(OverlayPath(tmp, "registry-tagger")); !os.IsNotExist(err) {
 		t.Errorf("a rule identical to the folder's default was written to the overlay: %v", err)
 	}
-	if err := SaveDispatchOverlay(tmp, "registry-tagger", []DispatchEntry{{Source: "1koma", Category: "meta"}}); err != nil {
+	if err := SaveDispatchOverlay(tmp, tmp, "registry-tagger", []DispatchEntry{{Source: "1koma", Category: "meta"}}); err != nil {
 		t.Fatal(err)
 	}
-	if rule, _ := LoadDispatch(tmp, "registry-tagger", canonicalCatIDs).Lookup("1koma"); rule.CatName != "meta" {
+	if rule, _ := LoadDispatch(tmp, tmp, "registry-tagger", canonicalCatIDs).Lookup("1koma"); rule.CatName != "meta" {
 		t.Errorf("the overlay did not win over the folder's default: %+v", rule)
+	}
+}
+
+func TestMoveDispatchOverlays_CopiesOnceAndLeavesTheOld(t *testing.T) {
+	modelPath, dataPath := t.TempDir(), t.TempDir()
+	body := `{"version":1,"rules":[{"source":"1koma","category":""}]}`
+	writeOverlayIn := func(name string) string {
+		dir := filepath.Join(modelPath, name)
+		mustMkdirAll(t, dir, 0o755)
+		p := filepath.Join(dir, "dispatch.json")
+		mustWriteFile(t, p, []byte(body), 0o644)
+		return p
+	}
+	old := writeOverlayIn("wd-swinv2")
+	writeOverlayIn("kept")
+	mustWriteFile(t, OverlayPath(dataPath, "kept"), []byte("newer"), 0o644)
+
+	MoveDispatchOverlays(modelPath, dataPath)
+	if got, _ := os.ReadFile(OverlayPath(dataPath, "wd-swinv2")); string(got) != body {
+		t.Errorf("copy = %q, want the model folder's file", got)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("the old file is gone: %v", err)
+	}
+	if got, _ := os.ReadFile(OverlayPath(dataPath, "kept")); string(got) != "newer" {
+		t.Errorf("an existing copy was overwritten: %q", got)
+	}
+
+	if err := os.Remove(OverlayPath(dataPath, "wd-swinv2")); err != nil {
+		t.Fatal(err)
+	}
+	MoveDispatchOverlays(modelPath, dataPath)
+	if _, err := os.Stat(OverlayPath(dataPath, "wd-swinv2")); !os.IsNotExist(err) {
+		t.Errorf("a reset mapping came back: %v", err)
 	}
 }

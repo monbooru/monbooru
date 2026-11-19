@@ -23,7 +23,7 @@ var switchCatsB = map[string]int64{
 
 func dispatchTargets(modelPath string, cats map[string]int64) map[string]int64 {
 	out := map[string]int64{}
-	for source, rule := range LoadDispatch(modelPath, "wd-swinv2", cats).rules {
+	for source, rule := range LoadDispatch(modelPath, modelPath, "wd-swinv2", cats).rules {
 		if rule.Drop {
 			continue
 		}

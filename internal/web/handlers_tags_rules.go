@@ -664,7 +664,7 @@ func (s *Server) taggerLanes(tag *models.Tag, aliases []models.Tag, catColor fun
 		if t.Malformed {
 			continue
 		}
-		views, err := tagger.BrowseLabels(modelPath, t.Name, taggerTagsFile(t.TaggerInstance), catIDs)
+		views, err := tagger.BrowseLabels(modelPath, s.dataPath(), t.Name, taggerTagsFile(t.TaggerInstance), catIDs)
 		if err != nil {
 			continue
 		}

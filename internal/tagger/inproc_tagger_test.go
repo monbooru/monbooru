@@ -187,7 +187,7 @@ func runOne(t *testing.T, b Backend, modelPath string, taggers []TaggerStatus, c
 	plan := make([]plannedTagger, len(taggers))
 	for i, tg := range taggers {
 		var err error
-		if plan[i], err = planTagger(modelPath, tg, cats, cats["general"], nil); err != nil {
+		if plan[i], err = planTagger(modelPath, t.TempDir(), tg, cats, cats["general"], nil); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -21,12 +21,12 @@ func writeOverlay(t *testing.T, modelPath, taggerName, body string) {
 	t.Helper()
 	dir := filepath.Join(modelPath, taggerName)
 	mustMkdirAll(t, dir, 0o755)
-	mustWriteFile(t, filepath.Join(dir, "dispatch.json"), []byte(body), 0o644)
+	mustWriteFile(t, OverlayPath(modelPath, taggerName), []byte(body), 0o644)
 }
 
 func TestLoadDispatch_EmbeddedDefaults(t *testing.T) {
 	tmp := t.TempDir()
-	d := LoadDispatch(tmp, "wd-swinv2", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "wd-swinv2", canonicalCatIDs)
 	if rule, ok := d.Lookup("monochrome"); !ok || rule.Drop || rule.CatID != canonicalCatIDs["medium"] || rule.Name != "" {
 		t.Errorf("monochrome rule = %+v ok=%v, want CatID=medium, Name='', Drop=false", rule, ok)
 	}
@@ -42,7 +42,7 @@ func TestLoadDispatch_OverlayReplaceAndAppend(t *testing.T) {
 		]
 	}`)
 
-	d := LoadDispatch(tmp, "wd-swinv2", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "wd-swinv2", canonicalCatIDs)
 
 	if rule, ok := d.Lookup("monochrome"); !ok || rule.CatID != canonicalCatIDs["meta"] {
 		t.Errorf("overlay did not replace monochrome: %+v ok=%v", rule, ok)
@@ -64,7 +64,7 @@ func TestLoadDispatch_ARefusedOverlayKeepsTheEmbeddedRule(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tmp := t.TempDir()
 			writeOverlay(t, tmp, "wd-swinv2", tc.overlay)
-			d := LoadDispatch(tmp, "wd-swinv2", canonicalCatIDs)
+			d := LoadDispatch(tmp, tmp, "wd-swinv2", canonicalCatIDs)
 			if rule, ok := d.Lookup("monochrome"); !ok || rule.CatID != canonicalCatIDs["medium"] {
 				t.Errorf("the refused overlay touched the embedded monochrome rule: %+v ok=%v", rule, ok)
 			}
@@ -81,7 +81,7 @@ func TestLoadDispatch_EmptyCategoryDrops(t *testing.T) {
 		]
 	}`)
 
-	d := LoadDispatch(tmp, "custom", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "custom", canonicalCatIDs)
 	rule, ok := d.Lookup("annoying_label")
 	if !ok {
 		t.Fatalf("empty-category rule should still produce a Lookup hit (Drop=true)")
@@ -94,7 +94,7 @@ func TestLoadDispatch_EmptyCategoryDrops(t *testing.T) {
 func TestLoadDispatch_CamieRatingAndYearStripped(t *testing.T) {
 	tmp := t.TempDir()
 	installRegistryTagger(t, tmp, "camie-v2")
-	d := LoadDispatch(tmp, "camie-v2", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "camie-v2", canonicalCatIDs)
 	cases := []struct {
 		source, wantName string
 		wantCat          string
@@ -133,7 +133,7 @@ func TestLoadDispatch_OverlayMissingNameKeepsSource(t *testing.T) {
 		]
 	}`)
 
-	d := LoadDispatch(tmp, "custom", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "custom", canonicalCatIDs)
 	rule, _ := d.Lookup("kept_as_is")
 	if rule.Name != "" {
 		t.Errorf("missing name must stay empty so caller keeps the source label, got %q", rule.Name)
@@ -142,7 +142,7 @@ func TestLoadDispatch_OverlayMissingNameKeepsSource(t *testing.T) {
 
 func TestLoadDispatch_NoConfigReturnsEmptyTable(t *testing.T) {
 	tmp := t.TempDir()
-	d := LoadDispatch(tmp, "no-such-tagger", canonicalCatIDs)
+	d := LoadDispatch(tmp, tmp, "no-such-tagger", canonicalCatIDs)
 	if d == nil {
 		t.Fatal("LoadDispatch must never return nil")
 	}
@@ -174,7 +174,7 @@ func TestLoadDispatch_GoldenShippedMappings(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.tagger+"/"+c.source, func(t *testing.T) {
-			d := LoadDispatch(tmp, c.tagger, canonicalCatIDs)
+			d := LoadDispatch(tmp, tmp, c.tagger, canonicalCatIDs)
 			rule, ok := d.Lookup(c.source)
 			if !ok {
 				t.Fatalf("missing dispatch rule for %s/%s", c.tagger, c.source)

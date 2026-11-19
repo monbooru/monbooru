@@ -46,7 +46,7 @@ func TestConformance_MatchesTheReferenceScores(t *testing.T) {
 		}
 		tagger.ConfidenceThreshold = 0.3
 		tagger.PerCategoryTopK = uncapped
-		dispatch := LoadDispatch(modelPath, name, cats)
+		dispatch := LoadDispatch(modelPath, t.TempDir(), name, cats)
 		t.Run(name, func(t *testing.T) {
 			b := &inprocBackend{}
 			defer b.ReleaseAll()
