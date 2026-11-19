@@ -1,0 +1,27 @@
+{{define "partials/booru_endpoints.html"}}
+<div id="booru-endpoints"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{if .Endpoints}}
+  <div class="table-scroll">
+  <table class="data-table stack-table">
+    <thead><tr><th>Token</th><th>Gallery</th><th>Address</th></tr></thead>
+    <tbody>
+      {{range .Endpoints}}{{$token := .Token}}
+      {{range .Addresses}}
+      <tr>
+        <td class="stack-head"><strong>{{$token}}</strong></td>
+        <td data-label="Gallery">{{.Gallery}}</td>
+        <td data-label="Address">
+          <button type="button" class="mono-small sha-copyable" data-copy="{{.URL}}" title="Click to copy">{{.URL}}</button>
+          <span class="copy-flash" hidden>copied</span>
+        </td>
+      </tr>
+      {{end}}
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}
+  <p class="field-hint">No address yet. Create a token with the read privilege to get one.</p>
+  {{end}}
+</div>
+{{end}}

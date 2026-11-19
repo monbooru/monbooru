@@ -899,6 +899,11 @@
           <button type="submit">Create token</button>
         </form>
       </div>
+      <div class="settings-sub">
+        <h4>Danbooru compatible endpoint</h4>
+        <p class="field-hint">For booru client apps such as LoliSnatcher or Boorusama: add the address as a Danbooru site, one per gallery. Login and API key can stay empty. Revoking the token turns its addresses off.</p>
+        {{template "partials/booru_endpoints.html" (dict "Endpoints" .BooruEndpoints)}}
+      </div>
     </div>
   </section>
 

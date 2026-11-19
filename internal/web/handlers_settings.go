@@ -56,6 +56,7 @@ type settingsData struct {
 	Desktop            desktop.Integration
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
+	BooruEndpoints     []booruEndpoint
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +131,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Desktop:            s.desktopIntegration(),
 		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
+		BooruEndpoints:     s.booruEndpoints(r),
 	})
 }
 
@@ -553,6 +555,7 @@ func (s *Server) renderAuthTokensOOB(w http.ResponseWriter, r *http.Request) {
 		"Tokens": tokens,
 		"OOB":    true,
 	})
+	s.renderBooruEndpointsOOB(w, r)
 }
 
 func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Request) {
@@ -607,6 +610,7 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 	logx.Infof("settings: API token %s privileges updated from %s", id, session.ClientIP(r))
 	setDialogSavedTrigger(w, "token-saved", "token-cfg-"+id)
 	s.renderTemplate(w, "webui/token_scopes_saved", map[string]string{"ID": id, "Scopes": strings.Join(scopes, " ")})
+	s.renderBooruEndpointsOOB(w, r)
 }
 
 func (s *Server) settingsRemovePasswordPost(w http.ResponseWriter, r *http.Request) {
