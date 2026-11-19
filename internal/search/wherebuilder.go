@@ -831,6 +831,13 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"upgrade":    (*whereBuilder).buildUpgradeFilter,
 }
 
+// IsFilterKey says whether key: is one of the filters; any other key: reads
+// as a category or a tag.
+func IsFilterKey(key string) bool {
+	_, ok := filterBuilders[key]
+	return ok
+}
+
 func comp(sqlTemplate string, parseVal func(string) (any, bool)) func(*whereBuilder, FilterExpr) string {
 	return func(b *whereBuilder, e FilterExpr) string {
 		return b.buildCompFilter(sqlTemplate, e.Val, parseVal)
