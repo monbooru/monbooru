@@ -19,6 +19,10 @@ func (h *Handler) serveImageFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	serveFileOf(w, r, g, id)
+}
+
+func serveFileOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok || !canonicalOnDisk(w, canonPath) {
 		return
@@ -35,6 +39,10 @@ func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	serveStillOf(w, r, g, id)
+}
+
+func serveStillOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok || !canonicalOnDisk(w, canonPath) {
 		return
@@ -85,6 +93,10 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	serveThumbnailOf(w, r, g, id)
+}
+
+func serveThumbnailOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
 	thumbPath := filepath.Join(g.ThumbnailsPath, strconv.FormatInt(id, 10)+".jpg")
 	if _, err := os.Stat(thumbPath); err != nil {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "thumbnail not found")
