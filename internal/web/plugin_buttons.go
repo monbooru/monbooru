@@ -56,9 +56,11 @@ func (s *Server) pluginSlot(r *http.Request, slot string, imageID int64, fileTyp
 	return view
 }
 
+func (s *Server) pageURL(r *http.Request) string { return s.browserOrigin(r) + r.URL.RequestURI() }
+
 // The host is the one the browser reached: base_url defaults to
 // localhost, which sends a LAN browser nowhere.
-func (s *Server) pageURL(r *http.Request) string {
+func (s *Server) browserOrigin(r *http.Request) string {
 	scheme := "http"
 	s.cfgMu.RLock()
 	configured := s.cfg.Server.BaseURL
@@ -66,5 +68,5 @@ func (s *Server) pageURL(r *http.Request) string {
 	if strings.HasPrefix(configured, "https://") {
 		scheme = "https"
 	}
-	return scheme + "://" + r.Host + r.URL.RequestURI()
+	return scheme + "://" + r.Host
 }
