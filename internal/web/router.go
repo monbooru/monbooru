@@ -664,7 +664,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	api.New(s.cfgSnapshot, s.jobs, s.apiResolver, Version).WithGalleryLock(func() func() {
 		s.set.RLock()
 		return s.set.RUnlock
-	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).Mount(apiMux)
+	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).WithFavicon(func() string {
+		return themeFaviconURL(s.activeTheme())
+	}).Mount(apiMux)
 	// The exact pairing routes above answer ahead of this subtree, so
 	// they skip notePeerAddress: none of them may move a peer.
 	apiHandler := s.notePeerAddress(apiMux.ServeHTTP)

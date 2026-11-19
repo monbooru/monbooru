@@ -32,6 +32,7 @@ type Handler struct {
 	fetchStatus func(galleryName string, imageID int64, state, message string)
 	memoryMark  func() func(scope string)
 	done        <-chan struct{}
+	favicon     func() string
 
 	autotagMu       sync.Mutex
 	autotagQueue    []queuedAutotag
@@ -69,6 +70,13 @@ func (h *Handler) WithMemoryMark(mark func() func(scope string)) *Handler {
 // closes.
 func (h *Handler) WithDone(done <-chan struct{}) *Handler {
 	h.done = done
+	return h
+}
+
+// WithFavicon gives the booru layer the web UI's icon URL, which the theme
+// in use decides.
+func (h *Handler) WithFavicon(url func() string) *Handler {
+	h.favicon = url
 	return h
 }
 

@@ -96,14 +96,18 @@ func (h *Handler) mountBooru(mux *http.ServeMux) {
 	mux.HandleFunc(at+"file/{name}", h.booru(booruFile(serveFileOf)))
 	mux.HandleFunc(at+"sample/{name}", h.booru(booruFile(serveSampleOf)))
 	mux.HandleFunc(at+"thumb/{name}", h.booru(booruFile(serveThumbnailOf)))
-	mux.HandleFunc(at+"favicon.ico", h.booru(booruFavicon))
+	mux.HandleFunc(at+"favicon.ico", h.booru(h.booruFavicon))
 	mux.HandleFunc(at+"{rest...}", h.booru(booruEmpty))
 }
 
-// An app looks for the site's icon beside its address; monbooru's own,
-// in the current theme, is at the root.
-func booruFavicon(w http.ResponseWriter, r *http.Request, _ *library.Gallery) {
-	http.Redirect(w, r, "/theme.favicon", http.StatusFound)
+// An app looks for the site's icon beside its address; it gets the one the
+// web UI shows, which the theme picks.
+func (h *Handler) booruFavicon(w http.ResponseWriter, r *http.Request, _ *library.Gallery) {
+	if h.favicon == nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, h.favicon(), http.StatusFound)
 }
 
 // The key is checked before the gallery, so a wrong key learns nothing
