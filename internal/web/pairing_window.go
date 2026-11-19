@@ -123,8 +123,8 @@ func forwardedHop(r *http.Request) bool {
 // Behind a proxy every source reads as the proxy's, so a forwarded offer
 // waits on a card. A re-pair does too: the window adds a monloader, it
 // does not replace the one already paired.
-func (s *Server) windowApproves(r *http.Request, app string, repair bool) bool {
-	if !companionApp(app) || repair || s.win.closesAt().IsZero() || forwardedHop(r) {
+func (s *Server) windowApproves(r *http.Request, repair bool) bool {
+	if repair || s.win.closesAt().IsZero() || forwardedHop(r) {
 		return false
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -135,10 +135,12 @@ func (s *Server) windowApproves(r *http.Request, app string, repair bool) bool {
 	return ip != nil && (ip.IsPrivate() || ip.IsLoopback())
 }
 
+// On a desktop an offer from this machine is approved at any time: a
+// process on the same account can read the config and its tokens anyway.
 // As the approval does, the peer must answer at the address monbooru will
 // call, or it would pair dead.
 func (s *Server) autoApproves(r *http.Request, req peer.Req) bool {
-	if !s.windowApproves(r, req.App, req.Repair) {
+	if !companionApp(req.App) || !s.desktopLocal(r) && !s.windowApproves(r, req.Repair) {
 		return false
 	}
 	base := cmp.Or(s.peerOverrideURL(req.App), peer.CallbackURL(req.URL, req.Source))

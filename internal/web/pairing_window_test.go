@@ -32,6 +32,10 @@ func offerFrom(t *testing.T, srv *Server, remote, body string, headers ...[2]str
 	req := httptest.NewRequest("POST", "/api/v1/pair/request", strings.NewReader(body))
 	req.RemoteAddr = remote
 	for _, h := range headers {
+		if h[0] == "Host" {
+			req.Host = h[1]
+			continue
+		}
 		req.Header.Set(h[0], h[1])
 	}
 	rr := httptest.NewRecorder()
@@ -240,5 +244,52 @@ func TestPairWindowOpensByItselfOnANewInstall(t *testing.T) {
 	}
 	if !newTestServer(t).win.closesAt().IsZero() {
 		t.Error("a library that already existed opened the window")
+	}
+}
+
+func TestDesktopApprovesAnOfferFromThisMachineAtAnyTime(t *testing.T) {
+	local := [2]string{"Host", "127.0.0.1:8455"}
+	cases := []struct {
+		name    string
+		app     string
+		desktop bool
+		repair  bool
+		headers [][2]string
+		want    pairing.State
+	}{
+		{"monloader", "monloader", true, false, [][2]string{local}, pairing.Approved},
+		{"a worker", "monworker", true, false, [][2]string{local}, pairing.Approved},
+		{"a re-pair of monloader", "monloader", true, true, [][2]string{local}, pairing.Approved},
+		{"a plugin", "monedit", true, false, [][2]string{local}, pairing.Pending},
+		{"a server", "monloader", false, false, [][2]string{local}, pairing.Pending},
+		{"a proxied hop", "monloader", true, false, [][2]string{local, {"Via", "1.1 proxy"}}, pairing.Pending},
+		{"a LAN Host", "monloader", true, false, [][2]string{{"Host", "192.168.1.5:8455"}}, pairing.Pending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := healthPeer(t)
+			srv := newTestServerWith(t, false, func(c *config.Config) {
+				c.SetupDone = true
+
+				c.Server.BaseURL = "http://192.168.1.5:8455"
+			})
+			srv.desktop = tc.desktop
+			if tc.repair {
+				pairPeer(srv, tc.app)
+			}
+			id, st := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"`+tc.app+`","url":"`+p.URL+`","peer_token":"sek"}`, tc.headers...)
+			if st != tc.want {
+				t.Fatalf("state = %q, want %q", st, tc.want)
+			}
+			if tc.want != pairing.Approved {
+				return
+			}
+			claim := httptest.NewRequest("GET", "/api/v1/pair/status?id="+id, nil)
+			claim.Host = "127.0.0.1:8455"
+			srv.Handler().ServeHTTP(httptest.NewRecorder(), claim)
+			if made := srv.win.list(); len(made) != 1 || made[0].App != tc.app {
+				t.Errorf("trace = %+v, want the %s pairing listed", made, tc.app)
+			}
+		})
 	}
 }
