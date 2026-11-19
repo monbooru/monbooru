@@ -38,8 +38,7 @@ type settingsData struct {
 	Stats              statsData
 	ExecutionProviders []struct{ Name, Label string }
 	ScheduleModes      []scheduleModeRow
-	PluginPending      []pendingOffer
-	PluginPaired       int
+	PluginPairing      map[string]any
 	PluginRows         []pluginRowView
 	PluginsDir         string
 	Themes             themeCluster
@@ -52,7 +51,12 @@ type settingsData struct {
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
+	// The page carries the Plugins section, whose table lists what the
+	// notice announces.
+	s.win.markSeen()
 	base := s.base(r, "settings", "Settings - "+s.booruName())
+	panel := s.pairViewData()
+	delete(panel, "Notice")
 	modelPath := s.modelPath()
 	catalog := tagger.LoadCatalog(modelPath)
 	s.reconcileTaggers(catalog)
@@ -102,8 +106,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Stats:              s.gatherStats(),
 		ExecutionProviders: config.ExecutionProviders,
 		ScheduleModes:      scheduleModeRows(),
-		PluginPending:      s.pendingOffers(),
-		PluginPaired:       s.pairedPeerCount(),
+		PluginPairing:      panel,
 		PluginRows:         s.pluginRows(),
 		PluginsDir:         s.pluginsDir(),
 		Themes:             s.themeCluster(),

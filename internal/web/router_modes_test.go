@@ -97,6 +97,7 @@ var wantFreeRoutes = []string{
 	"POST /upload",
 	"POST /api/v1/images",
 	"POST /api/v1/images/{id}/file",
+	"POST /settings/plugins/pair/window",
 	"POST /settings/plugins/pair/{id}/approve",
 	"POST /settings/plugins/pair/{id}/deny",
 	"POST /settings/plugins/theme",

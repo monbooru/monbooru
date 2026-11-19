@@ -61,17 +61,22 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	// A re-pair is not a conflict: a replaced plugin comes back with no
 	// credentials. It still queues for approval.
-	repair := s.pairedWith(body.App)
-	accepted, f := s.pairs.Offer(peer.Req{
+	req := peer.Req{
 		Request:   pairing.Request{App: body.App, Source: session.ClientIP(r), Scopes: peer.GrantedScopes(body.RequestedScopes)},
 		URL:       body.URL,
-		PeerToken: body.PeerToken, Version: body.Version, Buttons: body.Buttons, Repair: repair,
-	})
+		PeerToken: body.PeerToken, Version: body.Version, Buttons: body.Buttons, Repair: s.pairedWith(body.App),
+	}
+	req.Auto = s.autoApproves(r, req)
+	accepted, f := s.pairs.Offer(req)
 	if f != nil {
 		pairRefuse(w, f)
 		return
 	}
 	logx.Infof("pairing: request from %s (%s)", body.App, body.URL)
+	if req.Auto {
+		s.pairs.SetState(accepted.RequestID, pairing.Approved)
+		logx.Infof("pairing: approved request %s from %s without a click", accepted.RequestID, req.Source)
+	}
 	contract.WriteJSON(w, http.StatusOK, accepted)
 }
 
@@ -155,6 +160,11 @@ func (s *Server) mintPairedToken(req peer.Req) (string, error) {
 	}); err != nil {
 		return "", err
 	}
+	if req.Auto {
+		s.win.record(req)
+	} else {
+		s.win.forget(req.App)
+	}
 	logx.Infof("pairing: issued token to %s", req.App)
 	return secret, nil
 }
@@ -232,8 +242,12 @@ func (s *Server) teardownMonloaderPairing(r *http.Request) (saveErr, notifyErr e
 }
 
 func (s *Server) removePairing(app string) error {
-	return s.withConfig(func(c *config.Config) error {
+	err := s.withConfig(func(c *config.Config) error {
 		peer.Revoke(c, app)
 		return nil
 	})
+	if err == nil {
+		s.win.forget(app)
+	}
+	return err
 }

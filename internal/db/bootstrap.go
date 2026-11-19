@@ -28,6 +28,7 @@ func Bootstrap(db *DB) error {
 	} else {
 		// A fresh library left at marker 0 by a later failure would be refused as too old.
 		b.execTx("bootstrapping schema", schemaSQL+fmt.Sprintf(";\nPRAGMA user_version = %d", MinUpgradeUserVersion))
+		db.Created = b.err == nil
 	}
 	b.exec("create idx_images_inbox_visible", `CREATE INDEX IF NOT EXISTS idx_images_inbox_visible ON images(is_inbox) WHERE is_missing = 0`)
 	if marker < 15 {

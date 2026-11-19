@@ -23,13 +23,14 @@
       <a href="/relations" class="nav-relations{{if eq .ActiveNav "relations"}} active{{end}}">Relations</a>
       <a href="/settings" class="nav-settings{{if eq .ActiveNav "settings"}} active{{end}}">Settings</a>
       {{template "webui/pair_notice" .PairNotice}}
+      {{template "partials/auto_pair_notice.html" .AutoPairNotice}}
     </nav>
     <div id="topbar-right">
       <div id="job-status"
            hx-get="/internal/job/status"
            hx-trigger="load, every 2s"
            hx-swap="outerHTML"
-           hx-vals='{"pair":"{{.PairNotice.Key}}"}'></div>
+           hx-vals='{"pair":"{{.PairNotice.Key}}{{.AutoPairNotice.Key}}"}'></div>
       {{if not .Degraded}}
       <span id="sync-flash"></span>
       <form id="sync-form" hx-post="/internal/sync" hx-swap="none"

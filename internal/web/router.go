@@ -111,6 +111,8 @@ type Server struct {
 
 	peers *plugins.Peers
 
+	win pairWindow
+
 	downloads downloadList
 }
 
@@ -203,6 +205,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	s.seedThemesDir()
 	plugins.EnsureDir(s.pluginsDir())
 	s.peers.StartManaged(s.effectivePlugins())
+	s.openWindowOnNewInstall()
 
 	return s, nil
 }
@@ -637,6 +640,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("GET /internal/plugins/pairing", s.pluginPairingFragment)
 	rt.free("POST /settings/plugins/pair/{id}/approve", s.pluginPairApprove)
 	rt.free("POST /settings/plugins/pair/{id}/deny", s.pluginPairDeny)
+	rt.free("POST /settings/plugins/pair/window", s.pairWindowPost)
 	rt.free("POST /settings/plugins/{name}/remove", s.pluginPairRemove)
 	rt.free("POST /settings/plugins/{name}/pause", s.pluginPause)
 	rt.free("POST /settings/plugins/{name}/start", s.pluginStart)
@@ -790,6 +794,7 @@ type baseData struct {
 	// unreachable link reports no PTR, so it counts as present.
 	MonloaderPTRPresent bool
 	PairNotice          webui.PairNotice
+	AutoPairNotice      autoPairNotice
 }
 
 // main.js writes it; the name and the "collapsed" value must match.
@@ -884,6 +889,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		ActiveRating:        active,
 		RequestStart:        requestStartFromContext(r.Context()),
 		PairNotice:          s.pairNotice(),
+		AutoPairNotice:      s.autoPairNotice(),
 	}
 }
 

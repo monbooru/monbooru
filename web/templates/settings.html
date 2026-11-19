@@ -39,8 +39,6 @@
 {{$cfg  := .Config}}
 {{$galleries := .Galleries}}
 {{$active := .ActiveGallery}}
-{{$pluginPending := .PluginPending}}
-{{$pluginPaired := .PluginPaired}}
 {{$pluginRows := .PluginRows}}
 
 <div id="settings-page">
@@ -499,8 +497,7 @@
     {{template "webui/settings_section_header" dict "Title" "Plugins"}}
     <div id="flash-plugins"></div>
     <div class="settings-sub">
-      <h4>Pairing requests</h4>
-      {{template "partials/plugin_pairing.html" (dict "Pending" $pluginPending "Paired" $pluginPaired "PairKey" .PairNotice.Key)}}
+      {{template "partials/plugin_pairing.html" .PluginPairing}}
     </div>
     <div class="settings-sub">
       <div class="settings-sub-head">
@@ -517,6 +514,17 @@
       <p class="field-hint">To add a theme, put its folder in <code>{{.ThemesDir}}</code>.</p>
     </div>
   </section>
+  <script>
+  // Counted from the seconds the server sent, not its clock, which the
+  // browser's may not match. The panel's poll renders it afresh every 3 s.
+  setInterval(function() {
+    document.querySelectorAll('#plugin-pairing [data-left]').forEach(function(el) {
+      if (!el.closesAt) el.closesAt = Date.now() + Number(el.dataset.left) * 1000;
+      var left = Math.max(0, Math.round((el.closesAt - Date.now()) / 1000));
+      el.textContent = 'Closes in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    });
+  }, 1000);
+  </script>
 
   <section id="tagger" class="settings-section">
     <div class="settings-section-header">

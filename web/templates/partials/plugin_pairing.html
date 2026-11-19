@@ -1,5 +1,46 @@
 {{define "partials/plugin_pairing.html"}}
-<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  <div class="settings-sub-head">
+    <h4>Pairing requests</h4>
+    {{if .WindowLeft}}
+    <span class="status-badge status-warn">open</span>
+    <p class="field-hint" data-left="{{.WindowSecs}}">Closes in {{.WindowLeft}}</p>
+    <form class="pair-window-toggle" hx-post="/settings/plugins/pair/window" hx-target="#plugin-pairing" hx-swap="outerHTML">
+      <input type="hidden" name="open" value="0">
+      <button type="submit" class="btn-sm">Close</button>
+    </form>
+    {{else}}
+    <p class="field-hint">Approves monloader and workers without a click.</p>
+    <form class="pair-window-toggle" hx-post="/settings/plugins/pair/window" hx-target="#plugin-pairing" hx-swap="outerHTML">
+      <input type="hidden" name="open" value="1">
+      <button type="submit" class="btn-sm">Accept pairings for 10 minutes</button>
+    </form>
+    {{end}}
+  </div>
+  {{if .AutoPaired}}
+  <div class="table-scroll">
+  <table class="data-table stack-table auto-paired">
+    <thead><tr><th>Paired without a click</th><th>Source</th><th>When</th><th>Scopes</th><th class="cell-action">Revoke</th></tr></thead>
+    <tbody>
+      {{range .AutoPaired}}
+      <tr>
+        <td class="stack-head"><strong>{{.App}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}</td>
+        <td data-label="Source">{{.Source}}</td>
+        <td data-label="When">{{.At.Format "15:04"}}</td>
+        <td data-label="Scopes">{{range $i, $s := .Scopes}}{{if $i}} {{end}}{{$s}}{{else}}<span class="status-dim">none</span>{{end}}</td>
+        <td class="cell-action">
+          <form hx-post="/settings/plugins/{{.App}}/remove" hx-target="#plugin-rows" hx-swap="outerHTML"
+                hx-confirm="Revoke the {{.App}} pairing?" data-confirm-ok="Revoke"
+                data-confirm-danger="{{.App}} must pair again before it can call monbooru." style="display:inline">
+            <button type="submit" class="btn-sm btn-danger">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{end}}
   {{if .Pending}}
   <div class="pairing-pending">
   <p class="pairing-pending-msg">An app wants to pair. A <strong>re-pair</strong> replaces the credentials the app already holds here.</p>
@@ -35,7 +76,7 @@
   </table>
   </div>
   </div>
-  {{else}}
+  {{else if not .AutoPaired}}
   <p class="field-hint">No pending requests. When an app or plugin asks to connect, approve it here.</p>
   {{end}}
 </div>

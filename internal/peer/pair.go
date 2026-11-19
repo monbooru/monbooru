@@ -24,6 +24,8 @@ type Req struct {
 	Version   string
 	Buttons   []config.PluginButton
 	Repair    bool
+	// Auto is an offer approved on arrival, with no click.
+	Auto bool
 }
 
 // An open button's page runs on monbooru's origin with the operator's

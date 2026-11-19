@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/monloader"
@@ -162,12 +163,18 @@ func (s *Server) pairedPeerCount() int {
 func (s *Server) pairViewData() map[string]any {
 	n := s.pairNotice()
 	n.OOB = true
-	return map[string]any{
-		"Pending": s.pendingOffers(),
-		"Paired":  s.pairedPeerCount(),
-		"Notice":  n,
-		"PairKey": n.Key(),
+	data := map[string]any{
+		"Pending":    s.pendingOffers(),
+		"Paired":     s.pairedPeerCount(),
+		"Notice":     n,
+		"PairKey":    n.Key(),
+		"AutoPaired": s.win.list(),
 	}
+	if closes := s.win.closesAt(); !closes.IsZero() {
+		data["WindowSecs"] = int(time.Until(closes).Round(time.Second).Seconds())
+		data["WindowLeft"] = countdown(closes)
+	}
+	return data
 }
 
 func (s *Server) pairNotice() webui.PairNotice {
@@ -233,6 +240,9 @@ func (s *Server) pluginPairRemove(w http.ResponseWriter, r *http.Request) {
 	saveErr, notifyErr := s.removePeerPairing(r, name)
 	s.renderPluginRows(w, r, false)
 	s.renderAuthTokensOOB(w, r)
+	panel := s.pairViewData()
+	panel["OOB"] = true
+	s.renderTemplate(w, "partials/plugin_pairing.html", panel)
 	if saveErr != nil {
 		writeFlashOOB(w, "flash-plugins", "err", "Could not save: "+saveErr.Error())
 	} else if notifyErr != nil {
