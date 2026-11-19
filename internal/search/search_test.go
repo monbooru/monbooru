@@ -127,6 +127,17 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestIsFilterKey(t *testing.T) {
+	for key, want := range map[string]bool{
+		"width": true, "rating": true, "id": true, "mime": true, "sourceurl": true,
+		"artist": false, "score": false, "re": false, "": false,
+	} {
+		if got := IsFilterKey(key); got != want {
+			t.Errorf("IsFilterKey(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func TestUnreadable_Grouping(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
