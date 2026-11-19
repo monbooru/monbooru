@@ -2698,8 +2698,6 @@ label.ptr-row:hover { background: var(--bg-input); }
 .tagger-get-steps > li { margin-bottom: 6px; }
 .tagger-get-files { list-style: none; margin: 4px 0; padding: 0; }
 .pair-window-toggle { margin-left: auto; }
-/* Stacked, the table loses its header, and with it the one word that says
-   what these rows are. */
 @media (max-width: 600px) {
   .stack-table.auto-paired thead { display: block; }
   .stack-table.auto-paired thead tr { border: 0; padding: 0; margin: 0 0 4px; }

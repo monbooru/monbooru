@@ -31,7 +31,6 @@ type autoPairing struct {
 	seen                 bool
 }
 
-// Worker is the worker's name when the pairing is a worker's.
 func (a autoPairing) Worker() string {
 	name, _ := peer.WorkerLabel(a.App)
 	return name
@@ -143,8 +142,7 @@ func (s *Server) windowApproves(r *http.Request, repair bool) bool {
 
 // On a desktop an offer from this machine is approved at any time: a
 // process on the same account can read the config and its tokens anyway.
-// As the approval does, the peer must answer at the address monbooru will
-// call, or it would pair dead.
+// The peer must still answer at the address monbooru will call.
 func (s *Server) autoApproves(r *http.Request, req peer.Req) bool {
 	if !companionApp(req.App) || !s.desktopLocal(r) && !s.windowApproves(r, req.Repair) {
 		return false

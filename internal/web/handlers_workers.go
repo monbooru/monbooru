@@ -39,8 +39,7 @@ type workersData struct {
 	OOB        bool
 }
 
-// None is no worker to tag with, running or not: the page then shows the
-// Workers block alone.
+// None is no worker to tag with, running or not.
 func (d workersData) None() bool {
 	return !slices.ContainsFunc(d.Rows, func(r workerRow) bool { return !r.Disabled })
 }
@@ -182,8 +181,6 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// workerPairDecided answers an approve or a deny of a worker's request
-// with the Workers block, where its card was.
 func (s *Server) workerPairDecided(w http.ResponseWriter, state pairing.State, msg string) {
 	s.renderWorkers(w, false)
 	if state == pairing.Approved {

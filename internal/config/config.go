@@ -44,7 +44,6 @@ type Config struct {
 	// Omitted when empty: TOML refuses a hand-added [[plugin]] block once
 	// `plugin = []` is written.
 	Plugins []PluginConfig `toml:"plugin,omitempty"`
-	// Workers are the monworkers paired with this monbooru.
 	Workers []WorkerConfig `toml:"worker,omitempty"`
 
 	// Unexported so the encoder never writes them.
@@ -260,8 +259,7 @@ type TaggerConfig struct {
 	// Read only to migrate old configs, and never written back.
 	UseCUDA           bool   `toml:"use_cuda,omitempty"`
 	ExecutionProvider string `toml:"execution_provider"`
-	// LocalWorker runs the monworker found beside monbooru or on PATH,
-	// started and stopped with it; off unless set.
+	// LocalWorker runs the monworker found beside monbooru or on PATH.
 	LocalWorker bool `toml:"local_worker"`
 	Parallel    int  `toml:"parallel"`
 	// CPUThreads bounds the threads the local worker's models use, and
@@ -304,8 +302,6 @@ func ExecutionProviderLabel(name string) string {
 	return name
 }
 
-// WorkerConfig is a monworker monbooru calls: its name from the pairing,
-// its address, and the token it answers.
 type WorkerConfig struct {
 	Name   string `toml:"name"`
 	URL    string `toml:"url"`

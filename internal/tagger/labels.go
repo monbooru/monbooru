@@ -36,8 +36,6 @@ var converted = struct {
 	byETag map[string][]tagLabel
 }{byETag: map[string][]tagLabel{}}
 
-// toTagLabels turns a worker's labels, named as the label file has them,
-// into tag names.
 func toTagLabels(l worker.Labels) []tagLabel {
 	if l.ETag != "" {
 		converted.Lock()

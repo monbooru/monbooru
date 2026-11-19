@@ -64,13 +64,10 @@ func newLocalWorker() *localWorker {
 
 func (w *localWorker) url() string { return "http://" + w.addr }
 
-// def is the pool's entry for the worker, when it runs.
 func (w *localWorker) def() tagger.WorkerDef {
 	return tagger.WorkerDef{Name: tagger.LocalWorker, Local: true, URL: w.url(), Token: w.token}
 }
 
-// envFor is the worker's environment for cfg: the models folder, the data
-// folder for its provider caches, and the [tagger] settings.
 func (w *localWorker) envFor(cfg *config.Config) []string {
 	env := []string{
 		"MONWORKER_LISTEN=" + w.addr,
@@ -85,7 +82,6 @@ func (w *localWorker) envFor(cfg *config.Config) []string {
 		"MONWORKER_IDLE_MINUTES=" + strconv.Itoa(max(0, cfg.Tagger.IdleReleaseAfterMinutes)),
 		"MONWORKER_EXIT_ON_STDIN_EOF=1",
 	}
-	// The variables of the in-process tagger keep working.
 	level := cfg.Log.Level
 	if v := os.Getenv("MONBOORU_TAGGER_WORKER_LOG"); v != "" {
 		level = v
@@ -99,8 +95,6 @@ func (w *localWorker) envFor(cfg *config.Config) []string {
 	return env
 }
 
-// apply starts, restarts or stops the worker to match cfg, and returns
-// whether it runs.
 func (w *localWorker) apply(sup *plugins.Supervisor, cfg *config.Config) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -142,7 +136,6 @@ func listening(addr string, within time.Duration) bool {
 	return false
 }
 
-// running is whether the worker was started and not stopped since.
 func (w *localWorker) running() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()

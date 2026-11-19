@@ -26,9 +26,8 @@ type TaggerStatus struct {
 	Differs bool
 }
 
-// DiscoverTaggers is one list of every tagger a worker holds, then every
-// configured one no worker holds: a tagger is monbooru's settings by name,
-// run on whichever worker holds its model.
+// DiscoverTaggers lists every tagger a worker holds, then every configured
+// one no worker holds.
 func DiscoverTaggers(cfg *config.Config) []TaggerStatus {
 	p := currentPool()
 	p.mu.Lock()

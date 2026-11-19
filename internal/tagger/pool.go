@@ -22,7 +22,6 @@ import (
 // LocalWorker names the worker monbooru runs itself.
 const LocalWorker = "local"
 
-// WorkerDef is a worker as the config names it.
 type WorkerDef struct {
 	Name   string
 	URL    string
@@ -95,7 +94,6 @@ func currentPool() *Pool {
 	return activePool
 }
 
-// CurrentPool is the pool the tagger runs on.
 func CurrentPool() *Pool { return currentPool() }
 
 func (p *Pool) cachePath(name string) string {
@@ -178,7 +176,7 @@ func (p *Pool) saveCache(name string, c workerCache) {
 	}
 }
 
-// Forget drops a worker's kept descriptions, for one that was removed.
+// Forget drops a worker's kept descriptions.
 func (p *Pool) Forget(name string) {
 	if path := p.cachePath(name); path != "" {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -279,7 +277,6 @@ func describe(ctx context.Context, c worker.Client, prev workerCache) (workerCac
 	return next, nil
 }
 
-// WorkerView is what Settings shows of a worker.
 type WorkerView struct {
 	Name      string
 	URL       string
@@ -386,8 +383,7 @@ func (p *Pool) Catalog() []worker.CatalogEntry {
 	return out
 }
 
-// HasWorker is false while no worker is enabled or paired: the taggers
-// list hides then.
+// HasWorker is false while no worker is enabled or paired.
 func (p *Pool) HasWorker() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -565,7 +561,7 @@ func (p *Pool) reading() bool {
 	return false
 }
 
-// LocalStatus is what the local worker says it has loaded, for the stats.
+// LocalStatus is what the local worker says it has loaded.
 func (p *Pool) LocalStatus() CacheStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()

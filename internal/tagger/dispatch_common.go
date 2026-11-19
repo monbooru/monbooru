@@ -46,9 +46,8 @@ func allDispatchRules(dataPath, taggerName string) []DispatchEntry {
 	return slices.Concat(DefaultDispatchRules(taggerName), OverlayDispatchRules(dataPath, taggerName))
 }
 
-// DefaultDispatchRules are the rules a tagger ships with, its
-// dispatch_default.json, as the worker that holds it sends them. They are
-// stock; this library's own rules are the overlay.
+// DefaultDispatchRules are a tagger's dispatch_default.json, as its worker
+// sends them.
 func DefaultDispatchRules(taggerName string) []DispatchEntry {
 	h, ok := currentPool().heldModel(taggerName)
 	if !ok {

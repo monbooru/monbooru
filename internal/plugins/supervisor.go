@@ -293,7 +293,6 @@ func (s *Supervisor) State(name string) string {
 	}
 }
 
-// PID is the running process's, 0 when there is none.
 func (s *Supervisor) PID(name string) int {
 	s.mu.Lock()
 	m := s.managed[name]

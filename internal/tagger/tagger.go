@@ -48,7 +48,7 @@ func reasonFrom(taggers []TaggerStatus) string {
 
 func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTaggers(cfg) }
 
-// Status is the local worker's, for the stats.
+// Status is the local worker's.
 func Status() CacheStatus { return currentPool().LocalStatus() }
 
 // RunWithTaggers takes only enabled, available taggers and returns how many

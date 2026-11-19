@@ -43,8 +43,7 @@ type taggerRow struct {
 	// no-outbound-request promise.
 	Files     []worker.CatalogFile
 	TargetDir string
-	// LocalFolder is a folder of this name under model_path, which Delete
-	// removes.
+	// LocalFolder is a folder of this name under model_path.
 	LocalFolder bool
 }
 

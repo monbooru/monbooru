@@ -103,7 +103,6 @@ func (w *Worker) Refuse(err string) {
 	w.fake.Mu.Unlock()
 }
 
-// Calls is how many tag calls the worker received.
 func (w *Worker) Calls() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()

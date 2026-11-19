@@ -6,8 +6,6 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
-// plannedTagger is what the parent knows of a tagger for a run: the frame
-// it takes and the tag each output channel becomes.
 type plannedTagger struct {
 	input inputKey
 	cands []CandidateLabel
@@ -25,9 +23,6 @@ func planTagger(dataPath string, t TaggerStatus, catIDs map[string]int64, genera
 	return plannedTagger{input: inputKey{h.model.Input.Size, h.model.Input.Fill}, cands: cands}, nil
 }
 
-// taggerCandidates gives a tagger's output channels the tag each one
-// becomes in this gallery: its category, its mapping, and for a
-// single_general model the category the gallery already files the name in.
 func taggerCandidates(l worker.Labels, dispatch *DispatchTable, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) []CandidateLabel {
 	profile := profileOf(l)
 	labels := toTagLabels(l)
@@ -61,9 +56,7 @@ func taggerCandidates(l worker.Labels, dispatch *DispatchTable, catIDs map[strin
 	return cands
 }
 
-// mergeTaggers aggregates each tagger's frames and keeps a tag's best
-// score; on a tie the earlier tagger keeps it. scores and plan follow
-// taggers' order.
+// On a tie the earlier tagger keeps the tag.
 func mergeTaggers(taggers []TaggerStatus, plan []plannedTagger, scores [][]SparseScores, minHits int) map[TagKey]Scored {
 	merged := map[TagKey]Scored{}
 	for tIdx, t := range taggers {

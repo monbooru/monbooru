@@ -17,9 +17,8 @@ type inputKey struct {
 	fill [3]uint8
 }
 
-// prepareFrame decodes a frame file once and returns it as RGB8, padded,
-// resized and turned, once per input; the decoded frame is dropped before
-// any inference runs.
+// prepareFrame decodes a frame file once and returns it as RGB8, once per
+// input.
 func prepareFrame(path, fileType string, inputs []inputKey) ([][]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -35,8 +34,6 @@ func prepareFrame(path, fileType string, inputs []inputKey) ([][]byte, error) {
 		return nil, fmt.Errorf("image has no pixels (%dx%d)", img.Bounds().Dx(), img.Bounds().Dy())
 	}
 
-	// Turned after the padding: the square is centred, so it turns the
-	// same, and the full-size frame is never copied.
 	// A still image is read as the type sniffed at ingest, which can differ
 	// from its extension; an extracted frame or page has its own name.
 	switch fileType {
@@ -45,13 +42,14 @@ func prepareFrame(path, fileType string, inputs []inputKey) ([][]byte, error) {
 	}
 	o, _ := metadata.EXIFOrientation(path, fileType)
 	out := make([][]byte, len(inputs))
+	// Turned after the padding: the square is centred, so it turns the
+	// same, and the full-size frame is never copied.
 	for i, in := range inputs {
 		out[i] = rgb8(gallery.Orient(padAndResize(img, in.size, in.fill), o).(*image.RGBA))
 	}
 	return out, nil
 }
 
-// rgb8 drops the alpha of an opaque square, row by row.
 func rgb8(img *image.RGBA) []byte {
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
 	out := make([]byte, 0, w*h*3)

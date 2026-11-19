@@ -83,15 +83,14 @@ type Server struct {
 	cfgMu      sync.RWMutex // guards cfg reads/writes and config.Save calls
 	jobs       *jobs.Manager
 	pairs      *peer.Store
-	// pool is every worker the config names, the local one first.
-	pool     *tagger.Pool
-	local    *localWorker
-	sessions *session.Store
-	loginRL  *session.Backoff
-	tmpl     *template.Template
-	staticFS fs.FS
-	lightFS  fs.FS
-	done     chan struct{}
+	pool       *tagger.Pool
+	local      *localWorker
+	sessions   *session.Store
+	loginRL    *session.Backoff
+	tmpl       *template.Template
+	staticFS   fs.FS
+	lightFS    fs.FS
+	done       chan struct{}
 
 	desktop bool
 	// A field so a test can run the handler without an opener popping a window.
@@ -223,7 +222,6 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	return s, nil
 }
 
-// How often each worker is asked what it holds.
 const workerRefresh = 30 * time.Second
 
 // Long enough that a paused browse skips the rebuild, short enough that a
@@ -1348,8 +1346,6 @@ func (s *Server) withConfig(fn func(*config.Config) error) error {
 	return nil
 }
 
-// syncWorkers runs the local worker as cfg says and gives the pool every
-// worker that runs or is paired.
 func (s *Server) syncWorkers(cfg *config.Config) {
 	if s.pool == nil {
 		return

@@ -1,8 +1,7 @@
 #!/bin/sh
-# Downloads the bundled tools for one target: ffmpeg into tools/, which
-# every shape ships, and the monworker archive into worker/, which the
-# bundled shape adds. MONWORKER_ARCHIVE names a local archive to take
-# instead of the pinned release, for a worker built from its checkout.
+# Downloads ffmpeg into tools/ and the monworker archive into worker/ for
+# one target. MONWORKER_ARCHIVE names a local archive to take instead of
+# the pinned release.
 set -eu
 
 case "${GOOS}/${GOARCH}" in

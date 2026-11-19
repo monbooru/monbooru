@@ -14,7 +14,6 @@ import (
 // the worker remove its own pairing and nothing else.
 func WorkerKey(label string) string { return contract.AppMonworker + ":" + label }
 
-// WorkerLabel is the name a token paired under WorkerKey belongs to.
 func WorkerLabel(paired string) (string, bool) {
 	name, ok := strings.CutPrefix(paired, contract.AppMonworker+":")
 	if !ok {
@@ -23,8 +22,6 @@ func WorkerLabel(paired string) (string, bool) {
 	return name, true
 }
 
-// Paired is the name a request's token is paired under: the app, or a
-// worker's key.
 func (r Req) Paired() string {
 	if r.App == contract.AppMonworker {
 		return WorkerKey(r.WorkerName())
@@ -32,7 +29,6 @@ func (r Req) Paired() string {
 	return r.App
 }
 
-// WorkerName is the name a worker offered, monworker when it gave none.
 func (r Req) WorkerName() string { return cmp.Or(r.Label, contract.AppMonworker) }
 
 func grantWorker(c *config.Config, req Req, url string) {
