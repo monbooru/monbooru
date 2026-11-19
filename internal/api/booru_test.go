@@ -345,9 +345,13 @@ func TestBooruLookups(t *testing.T) {
 
 func TestBooruFavicon(t *testing.T) {
 	env, base, _ := booruEnv(t)
+	if w := env.do("GET", base+"/favicon.ico"); w.Code != http.StatusNotFound {
+		t.Errorf("favicon.ico with no icon given: %d, want 404", w.Code)
+	}
+	env.handler.WithFavicon(func() string { return "/static/favicon.png?v=1" })
 	w := env.do("GET", base+"/favicon.ico")
-	if w.Code != http.StatusFound || w.Header().Get("Location") != "/theme.favicon" {
-		t.Errorf("favicon.ico: %d to %q, want 302 to /theme.favicon", w.Code, w.Header().Get("Location"))
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/static/favicon.png?v=1" {
+		t.Errorf("favicon.ico: %d to %q, want 302 to the web UI's icon", w.Code, w.Header().Get("Location"))
 	}
 	wrong := BooruPath(env.cfg.DefaultGallery, strings.Repeat("0", 32)) + "/favicon.ico"
 	if w := env.do("GET", wrong); w.Code != http.StatusUnauthorized {
