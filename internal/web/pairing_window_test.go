@@ -12,7 +12,9 @@ import (
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/jobs"
+	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 )
 
@@ -66,11 +68,11 @@ func TestPairWindowApprovesMonloaderAndAWorkerOnArrival(t *testing.T) {
 			if len(srv.win.list()) != 0 {
 				t.Error("the trace lists a pairing before its token was claimed")
 			}
-			if _, out := pairStatus(t, srv, id); len(out["token"]) != 32 || !srv.pairedWith(app) {
+			if _, out := pairStatus(t, srv, id); len(out["token"]) != 32 || !srv.pairedWith(pairedKey(app)) {
 				t.Fatalf("claim = %v, want the token minted on the claim", out)
 			}
 			made := srv.win.list()
-			if len(made) != 1 || made[0].App != app || made[0].Source != "127.0.0.1" || made[0].Version != "1.15.0" {
+			if len(made) != 1 || made[0].App != pairedKey(app) || made[0].Source != "127.0.0.1" || made[0].Version != "1.15.0" {
 				t.Errorf("trace = %+v, want one %s pairing from 127.0.0.1", made, app)
 			}
 		})
@@ -275,7 +277,7 @@ func TestDesktopApprovesAnOfferFromThisMachineAtAnyTime(t *testing.T) {
 			})
 			srv.desktop = tc.desktop
 			if tc.repair {
-				pairPeer(srv, tc.app)
+				pairPeer(srv, pairedKey(tc.app))
 			}
 			id, st := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"`+tc.app+`","url":"`+p.URL+`","peer_token":"sek"}`, tc.headers...)
 			if st != tc.want {
@@ -287,9 +289,16 @@ func TestDesktopApprovesAnOfferFromThisMachineAtAnyTime(t *testing.T) {
 			claim := httptest.NewRequest("GET", "/api/v1/pair/status?id="+id, nil)
 			claim.Host = "127.0.0.1:8455"
 			srv.Handler().ServeHTTP(httptest.NewRecorder(), claim)
-			if made := srv.win.list(); len(made) != 1 || made[0].App != tc.app {
+			if made := srv.win.list(); len(made) != 1 || made[0].App != pairedKey(tc.app) {
 				t.Errorf("trace = %+v, want the %s pairing listed", made, tc.app)
 			}
 		})
 	}
+}
+
+func pairedKey(app string) string {
+	if app == contract.AppMonworker {
+		return peer.WorkerKey(app)
+	}
+	return app
 }

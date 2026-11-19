@@ -212,7 +212,7 @@ jobs:
         env:
           NAME: ${{ steps.img.outputs.NAME }}
         run: |
-          for v in cpu: cuda:-cuda openvino:-openvino; do
+          for v in cpu: cuda:-cuda openvino:-openvino lite:-lite; do
             variant="${v%%:*}"
             suffix="${v#*:}"
             refs=()

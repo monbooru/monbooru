@@ -1,5 +1,3 @@
-//go:build tagger
-
 package tagger
 
 import (

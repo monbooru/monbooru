@@ -1,73 +1,31 @@
-//go:build tagger
-
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
-	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/models"
-	"github.com/monbooru/monbooru/internal/tagger"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 )
 
-type blockingBackend struct{ started chan struct{} }
-
-func (b *blockingBackend) Run(ctx context.Context, _ tagger.RunRequest) (tagger.RunResponse, error) {
-	close(b.started)
-	<-ctx.Done()
-	return tagger.RunResponse{}, ctx.Err()
-}
-
-func (b *blockingBackend) Status() tagger.CacheStatus       { return tagger.CacheStatus{} }
-func (b *blockingBackend) ReleaseIdle(_ time.Duration) bool { return false }
-func (b *blockingBackend) ReleaseAll()                      {}
-
-type skipBackend struct{}
-
-func (skipBackend) Run(_ context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
-	resp := tagger.RunResponse{}
-	for range req.Models {
-		resp.Results = append(resp.Results, []tagger.FrameScores{{Err: "unreadable"}})
-	}
-	return resp, nil
-}
-
-func (skipBackend) Status() tagger.CacheStatus       { return tagger.CacheStatus{} }
-func (skipBackend) ReleaseIdle(_ time.Duration) bool { return false }
-func (skipBackend) ReleaseAll()                      {}
-
-func enableStubTagger(t *testing.T, env *testEnv, b tagger.Backend) {
+func enableStubTagger(t *testing.T, env *testEnv, others ...string) *taggertest.Worker {
 	t.Helper()
-	modelRoot := filepath.Join(t.TempDir(), "models")
-	mustMkdirAll(t, filepath.Join(modelRoot, "wd14"), 0o755)
-	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "model.onnx"), []byte("dummy"), 0o644)
-	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "tags.csv"), []byte("tag_id,name,category\n0,sample,0\n"), 0o644)
-	mustWriteFile(t, filepath.Join(modelRoot, "wd14", "tagger.json"), []byte(`{"version": 1, "profile": {"input_size": 8}}`), 0o644)
-
-	lib := filepath.Join(modelRoot, "libonnxruntime.so")
-	mustWriteFile(t, lib, nil, 0o644)
-	t.Setenv("ORT_LIB_PATH", lib)
-	env.cfg.Paths.ModelPath = modelRoot
 	env.cfg.Tagger.Taggers = []config.TaggerInstance{{Name: "wd14", Enabled: true, ConfidenceThreshold: 0.1}}
-	tagger.SetBackend(b)
-	t.Cleanup(func() { tagger.SetBackend(nil) })
+	held := map[string][]string{"wd14": {"sample"}}
+	for _, o := range others {
+		held[o] = []string{"sample"}
+	}
+	return taggertest.Use(t, held)
 }
 
 func TestListTaggers_AppliesFollowsTheGalleryScope(t *testing.T) {
 	env := newTestEnv(t)
-	enableStubTagger(t, env, skipBackend{})
+	enableStubTagger(t, env, "elsewhere")
 	elsewhere := env.cfg.Tagger.Taggers[0]
 	elsewhere.Name, elsewhere.Galleries = "elsewhere", []string{"other"}
-	dir := filepath.Join(env.cfg.Paths.ModelPath, "elsewhere")
-	mustMkdirAll(t, dir, 0o755)
-	mustWriteFile(t, filepath.Join(dir, "model.onnx"), []byte("dummy"), 0o644)
-	mustWriteFile(t, filepath.Join(dir, "tags.csv"), []byte("tag_id,name,category\n0,sample,0\n"), 0o644)
 	env.cfg.Tagger.Taggers = append(env.cfg.Tagger.Taggers, elsewhere)
 
 	w := env.do("GET", "/api/v1/taggers")
@@ -88,7 +46,7 @@ func TestListTaggers_AppliesFollowsTheGalleryScope(t *testing.T) {
 
 func TestCreateImage_AutotagReportsASkippedImage(t *testing.T) {
 	env := newTestEnv(t)
-	enableStubTagger(t, env, skipBackend{})
+	enableStubTagger(t, env).Refuse("unreadable")
 
 	id, _ := uploadForAutotag(t, env, "skip-me.png", 15)
 	awaitIdle(t, env)
@@ -101,7 +59,7 @@ func TestCreateImage_AutotagReportsASkippedImage(t *testing.T) {
 
 func TestCreateImage_AutotagLogsItsPeakMemory(t *testing.T) {
 	env := newTestEnv(t)
-	enableStubTagger(t, env, skipBackend{})
+	enableStubTagger(t, env).Refuse("unreadable")
 	scopes := make(chan string, 1)
 	env.handler.WithMemoryMark(func() func(string) {
 		return func(scope string) { scopes <- scope }
@@ -120,12 +78,11 @@ func TestCreateImage_AutotagLogsItsPeakMemory(t *testing.T) {
 
 func TestCreateImage_AutotagCancelReportsCancelled(t *testing.T) {
 	env := newTestEnv(t)
-	b := &blockingBackend{started: make(chan struct{})}
-	enableStubTagger(t, env, b)
+	started := enableStubTagger(t, env).Block()
 
 	uploadForAutotag(t, env, "tag-me.png", 15)
 	select {
-	case <-b.started:
+	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the auto-tagger never ran")
 	}
@@ -135,32 +92,6 @@ func TestCreateImage_AutotagCancelReportsCancelled(t *testing.T) {
 	if st == nil || st.Running || st.Error != "" || st.Summary != "auto-tagging cancelled" {
 		t.Errorf("job = %+v, want it completed as cancelled", st)
 	}
-}
-
-type countingBackend struct {
-	runs   atomic.Int32
-	answer bool
-}
-
-func (b *countingBackend) Run(ctx context.Context, req tagger.RunRequest) (tagger.RunResponse, error) {
-	b.runs.Add(1)
-	if !b.answer {
-		<-ctx.Done()
-		return tagger.RunResponse{}, ctx.Err()
-	}
-	resp := tagger.RunResponse{}
-	for range req.Models {
-		resp.Results = append(resp.Results, []tagger.FrameScores{{SparseScores: tagger.SparseScores{I: []int32{0}, S: []float32{0.9}}}})
-	}
-	return resp, nil
-}
-
-func (*countingBackend) Status() tagger.CacheStatus       { return tagger.CacheStatus{} }
-func (*countingBackend) ReleaseIdle(_ time.Duration) bool { return false }
-func (*countingBackend) ReleaseAll()                      {}
-
-func sampleBackend() *countingBackend {
-	return &countingBackend{answer: true}
 }
 
 func uploadForAutotag(t *testing.T, env *testEnv, name string, size int) (id int64, note string) {
@@ -194,8 +125,7 @@ func awaitQueueDrained(t *testing.T, env *testEnv) {
 
 func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend()
-	enableStubTagger(t, env, b)
+	b := enableStubTagger(t, env)
 	if err := env.handler.jobs.Start(models.JobTypeSync); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +143,7 @@ func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *
 		t.Errorf("job = %+v, want one autotag job over both uploads", st)
 	}
 
-	if got := b.runs.Load(); got != 2 {
+	if got := b.Calls(); got != 2 {
 		t.Errorf("backend ran %d times, want 2", got)
 	}
 	for _, id := range []int64{first, second} {
@@ -225,8 +155,8 @@ func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *
 
 func TestCreateImage_AutotagCancelDropsTheQueuedUploads(t *testing.T) {
 	env := newTestEnv(t)
-	b := &countingBackend{}
-	enableStubTagger(t, env, b)
+	b := enableStubTagger(t, env)
+	b.Block()
 
 	if _, note := uploadForAutotag(t, env, "first.png", 15); note != "autotag job started" {
 		t.Fatalf("first note = %q, want started", note)
@@ -235,13 +165,13 @@ func TestCreateImage_AutotagCancelDropsTheQueuedUploads(t *testing.T) {
 		t.Fatalf("second note = %q, want queued", note)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for b.runs.Load() == 0 && time.Now().Before(deadline) {
+	for b.Calls() == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	env.handler.jobs.Cancel()
 	awaitQueueDrained(t, env)
 
-	if got := b.runs.Load(); got != 1 {
+	if got := b.Calls(); got != 1 {
 		t.Errorf("backend ran %d times, want the queued upload dropped", got)
 	}
 	if st := env.handler.jobs.Get(); st == nil || st.Running || st.Summary != "auto-tagging cancelled" {
@@ -251,8 +181,8 @@ func TestCreateImage_AutotagCancelDropsTheQueuedUploads(t *testing.T) {
 
 func TestCreateImage_AutotagQueueStartsNothingOnceDoneCloses(t *testing.T) {
 	env := newTestEnv(t)
-	b := &countingBackend{}
-	enableStubTagger(t, env, b)
+	b := enableStubTagger(t, env)
+	b.Block()
 	done := make(chan struct{})
 	env.handler.WithDone(done)
 	if err := env.handler.jobs.Start(models.JobTypeSync); err != nil {
@@ -266,7 +196,7 @@ func TestCreateImage_AutotagQueueStartsNothingOnceDoneCloses(t *testing.T) {
 	awaitQueueDrained(t, env)
 	env.handler.jobs.Complete("synced")
 
-	if got := b.runs.Load(); got != 0 {
+	if got := b.Calls(); got != 0 {
 		t.Errorf("backend ran %d times after done closed, want 0", got)
 	}
 	if env.handler.jobs.IsRunning() {
@@ -281,8 +211,7 @@ func autotagged(t *testing.T, env *testEnv, id int64) int {
 
 func TestAutotagImage_TagsAnExistingImage(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend()
-	enableStubTagger(t, env, b)
+	enableStubTagger(t, env)
 	id := env.createTestImage(t, "later.png", 15, 15)
 
 	w := doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/autotag", id), nil)
@@ -296,8 +225,7 @@ func TestAutotagImage_TagsAnExistingImage(t *testing.T) {
 
 func TestAutotagImages_RunsTheIDsAsOneJob(t *testing.T) {
 	env := newTestEnv(t)
-	b := sampleBackend()
-	enableStubTagger(t, env, b)
+	b := enableStubTagger(t, env)
 	first := env.createTestImage(t, "first.png", 15, 15)
 	second := env.createTestImage(t, "second.png", 16, 16)
 
@@ -307,7 +235,7 @@ func TestAutotagImages_RunsTheIDsAsOneJob(t *testing.T) {
 	wantIn(t, w.Body.String(), `"images":2`)
 	awaitQueueDrained(t, env)
 
-	if got := b.runs.Load(); got != 2 {
+	if got := b.Calls(); got != 2 {
 		t.Errorf("backend ran %d times, want 2", got)
 	}
 	if st := env.handler.jobs.Get(); st == nil || st.Summary != "auto-tagged 2 images" {
@@ -322,7 +250,7 @@ func TestAutotagImages_RunsTheIDsAsOneJob(t *testing.T) {
 
 func TestAutotagImages_RefusesWhatNoTaggerCanRun(t *testing.T) {
 	env := newTestEnv(t)
-	enableStubTagger(t, env, skipBackend{})
+	enableStubTagger(t, env).Refuse("unreadable")
 	id := env.createTestImage(t, "named.png", 15, 15)
 
 	w := doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/autotag", id), []byte(`{"tagger_name":"nope"}`))

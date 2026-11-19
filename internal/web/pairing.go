@@ -18,6 +18,7 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 // The pairing routes sit outside the api auth wrapper, since the operator's
@@ -62,17 +63,26 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 	// A re-pair is not a conflict: a replaced plugin comes back with no
 	// credentials. It still queues for approval.
 	req := peer.Req{
-		Request:   pairing.Request{App: body.App, Source: session.ClientIP(r), Scopes: peer.GrantedScopes(body.RequestedScopes)},
+		Request:   pairing.Request{App: body.App, Label: body.Label, Source: session.ClientIP(r), Scopes: peer.GrantedScopes(body.RequestedScopes)},
 		URL:       body.URL,
-		PeerToken: body.PeerToken, Version: body.Version, Buttons: body.Buttons, Repair: s.pairedWith(body.App),
+		PeerToken: body.PeerToken, Version: body.Version, Buttons: body.Buttons,
 	}
+	// A worker's token carries no scope and its offer no button.
+	if body.App == contract.AppMonworker {
+		if req.WorkerName() == tagger.LocalWorker {
+			pairRefuse(w, &pairing.Refusal{Status: http.StatusBadRequest, Code: pairing.CodeInvalidRequest, Msg: "the name local is the local worker's; set MONWORKER_NAME"})
+			return
+		}
+		req.Scopes, req.Buttons = nil, nil
+	}
+	req.Repair = s.pairedWith(req.Paired())
 	req.Auto = s.autoApproves(r, req)
 	accepted, f := s.pairs.Offer(req)
 	if f != nil {
 		pairRefuse(w, f)
 		return
 	}
-	logx.Infof("pairing: request from %s (%s)", body.App, body.URL)
+	logx.Infof("pairing: request from %s (%s)", req.Paired(), body.URL)
 	if req.Auto {
 		s.pairs.SetState(accepted.RequestID, pairing.Approved)
 		logx.Infof("pairing: approved request %s from %s without a click", accepted.RequestID, req.Source)
@@ -151,8 +161,12 @@ func (s *Server) repointPeer(secret, source string) {
 }
 
 func (s *Server) mintPairedToken(req peer.Req) (string, error) {
-	tok, secret := apitoken.New(req.App+" (paired)", peer.GrantedScopes(req.Scopes))
-	tok.Paired = req.App
+	name, scopes := req.App+" (paired)", peer.GrantedScopes(req.Scopes)
+	if req.App == contract.AppMonworker {
+		name, scopes = req.WorkerName()+" (worker)", []string{}
+	}
+	tok, secret := apitoken.New(name, scopes)
+	tok.Paired = req.Paired()
 	tok.PeerURL = peer.CallbackURL(req.URL, req.Source)
 	if err := s.withConfig(func(c *config.Config) error {
 		peer.Grant(c, req, tok)
@@ -163,9 +177,9 @@ func (s *Server) mintPairedToken(req peer.Req) (string, error) {
 	if req.Auto {
 		s.win.record(req)
 	} else {
-		s.win.forget(req.App)
+		s.win.forget(req.Paired())
 	}
-	logx.Infof("pairing: issued token to %s", req.App)
+	logx.Infof("pairing: issued token to %s", req.Paired())
 	return secret, nil
 }
 
@@ -184,10 +198,17 @@ func (s *Server) pluginPairApprove(w http.ResponseWriter, r *http.Request) {
 	base := cmp.Or(s.peerOverrideURL(req.App), peer.CallbackURL(req.URL, req.Source))
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+	isWorker := req.App == contract.AppMonworker
 	if !peer.Reachable(ctx, base) {
 		msg := "no api url to reach " + req.App + "; pairing not completed."
-		if base != "" {
+		if isWorker {
+			msg = req.WorkerName() + " is unreachable at " + base + "; pairing not completed. Check that it is running and that this machine can reach it."
+		} else if base != "" {
 			msg = req.App + " is unreachable at " + base + "; pairing not completed. Check the api url and that it is running."
+		}
+		if isWorker {
+			s.workerPairDecided(w, pairing.Pending, msg)
+			return
 		}
 		s.renderTemplate(w, "partials/plugin_pairing.html", s.pairViewData())
 		writeFlashOOB(w, "flash-plugins", "warn", msg)
@@ -195,6 +216,10 @@ func (s *Server) pluginPairApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	s.pairs.SetState(id, pairing.Approved)
 	logx.Infof("pairing: approved request %s from %s", id, session.ClientIP(r))
+	if isWorker {
+		s.workerPairDecided(w, pairing.Approved, "")
+		return
+	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", s.pairViewData())
 	writeFlashOOB(w, "flash-plugins", "", "")
 	s.renderPluginRows(w, r, true)
@@ -248,6 +273,9 @@ func (s *Server) removePairing(app string) error {
 	})
 	if err == nil {
 		s.win.forget(app)
+		if name, ok := peer.WorkerLabel(app); ok {
+			tagger.CurrentPool().Forget(name)
+		}
 	}
 	return err
 }

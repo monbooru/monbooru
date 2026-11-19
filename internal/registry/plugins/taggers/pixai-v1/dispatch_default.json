@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "rules": [
-    { "source": "rating:g", "category": "rating", "name": "general" },
-    { "source": "rating:s", "category": "rating", "name": "sensitive" },
-    { "source": "rating:q", "category": "rating", "name": "questionable" },
-    { "source": "rating:e", "category": "rating", "name": "explicit" }
-  ]
-}

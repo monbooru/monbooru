@@ -532,7 +532,7 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 		return err
 	}
 	peak := s.host.MemoryMark()
-	skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, enabled, s.jobs, cfg.Tagger.ExecutionProvider)
+	skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, enabled, s.jobs)
 	finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(ids), skipped, err)
 	if finished {
 		peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(ids), models.Plural(len(ids), "image", "images")))

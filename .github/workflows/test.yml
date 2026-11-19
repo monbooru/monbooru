@@ -129,32 +129,6 @@ jobs:
       - name: Test
         run: go test -race -timeout 30m ./...
 
-  tagger:
-    name: Tests, tagger build
-    needs: target
-    if: needs.target.outputs.sha != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.target.outputs.sha }}
-          persist-credentials: false
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Install ffmpeg
-        run: sudo apt-get install -y --no-install-recommends ffmpeg
-
-      - name: Test
-        run: go test -tags tagger -timeout 30m ./...
-
   tray:
     name: Linux tray
     needs: target
@@ -182,7 +156,7 @@ jobs:
 
   test:
     name: Status on the commit
-    needs: [target, race, tagger, tray]
+    needs: [target, race, tray]
     if: always() && needs.target.result == 'success' && needs.target.outputs.sha != ''
     runs-on: ubuntu-latest
     permissions:

@@ -31,6 +31,12 @@ type autoPairing struct {
 	seen                 bool
 }
 
+// Worker is the worker's name when the pairing is a worker's.
+func (a autoPairing) Worker() string {
+	name, _ := peer.WorkerLabel(a.App)
+	return name
+}
+
 // The window and the pairings it made live in memory: a restart closes it
 // and forgets the trace.
 type pairWindow struct {
@@ -64,8 +70,8 @@ func (pw *pairWindow) closesAt() time.Time {
 func (pw *pairWindow) record(req peer.Req) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	pw.made = slices.DeleteFunc(pw.made, func(a autoPairing) bool { return a.App == req.App })
-	pw.made = append(pw.made, autoPairing{App: req.App, Version: req.Version, Source: req.Source, Scopes: req.Scopes, At: time.Now()})
+	pw.made = slices.DeleteFunc(pw.made, func(a autoPairing) bool { return a.App == req.Paired() })
+	pw.made = append(pw.made, autoPairing{App: req.Paired(), Version: req.Version, Source: req.Source, Scopes: req.Scopes, At: time.Now()})
 }
 
 func (pw *pairWindow) forget(app string) {

@@ -177,10 +177,21 @@ func (s *Server) pairViewData() map[string]any {
 	return data
 }
 
+// A worker's request waits in the Auto-Tagger section, under its name;
+// the notice leads there when no other request waits.
 func (s *Server) pairNotice() webui.PairNotice {
 	n := webui.PairNotice{Href: "/settings#plugins"}
+	workers := 0
 	for _, req := range s.pairs.ListPending() {
-		n.Items = append(n.Items, webui.PairItem{App: req.App, Source: req.Source, Version: req.Version, Repair: req.Repair, ExpiresAt: req.ExpiresAt()})
+		name := req.App
+		if req.App == contract.AppMonworker {
+			name = req.WorkerName()
+			workers++
+		}
+		n.Items = append(n.Items, webui.PairItem{App: name, Source: req.Source, Version: req.Version, Repair: req.Repair, ExpiresAt: req.ExpiresAt()})
+	}
+	if workers > 0 && workers == len(n.Items) {
+		n.Href = "/settings#tagger"
 	}
 	return n
 }
@@ -204,6 +215,9 @@ func (s *Server) pendingOffers() []pendingOffer {
 	}
 	out := make([]pendingOffer, 0, len(pending))
 	for _, req := range pending {
+		if req.App == contract.AppMonworker {
+			continue
+		}
 		ip := net.ParseIP(req.Source)
 		local := managed[req.App] && ip != nil && ip.IsLoopback()
 		out = append(out, pendingOffer{Req: req, SessionNote: req.OpenOutranksScopes() && !local})
@@ -228,7 +242,12 @@ func (s *Server) pluginPairDeny(w http.ResponseWriter, r *http.Request) {
 	if !parseFormOK(w, r) {
 		return
 	}
+	req, _ := s.pairs.Get(r.PathValue("id"))
 	s.pairs.SetState(r.PathValue("id"), pairing.Denied)
+	if req.App == contract.AppMonworker {
+		s.workerPairDecided(w, pairing.Denied, "")
+		return
+	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", s.pairViewData())
 }
 

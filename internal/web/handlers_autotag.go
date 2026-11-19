@@ -7,7 +7,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +27,7 @@ func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, im
 	peak := autotagMemoryMark()
 	go func() {
 		ctx := s.jobs.Context()
-		skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, selected, s.jobs, cfg.Tagger.ExecutionProvider)
+		skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, selected, s.jobs)
 		if imageID != 0 {
 			if finished, _ := tagger.SettleImage(ctx, s.jobs, imageID, skipped, err); finished {
 				peak(fmt.Sprintf("image #%d", imageID))
@@ -41,37 +40,18 @@ func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, im
 	}()
 }
 
-// autotagMemoryMark resets the peaks, so the func it returns logs the job's
-// own peak over the RSS at the mark. Under the subprocess backend the job's
-// memory is the worker's, logged beside the parent's.
+// autotagMemoryMark resets the peak, so the func it returns logs the job's
+// own peak over the RSS at the mark; the inference's memory is the
+// worker's.
 func autotagMemoryMark() func(scope string) {
 	desktop.ResetPeak("self")
 	baseline := desktop.ProcStatus("self", "VmRSS")
-	workerPID, workerBase := "", uint64(0)
-	if pid, ok := tagger.WorkerPID(); ok {
-		workerPID = strconv.Itoa(pid)
-		desktop.ResetPeak(workerPID)
-		workerBase = desktop.ProcStatus(workerPID, "VmRSS")
-	}
 	return func(scope string) {
 		if baseline == 0 {
 			return
 		}
-		var parts []string
 		if peak := desktop.ProcStatus("self", "VmHWM"); peak > baseline {
-			parts = append(parts, "+"+webui.HumanBytes(int64(peak-baseline)))
-		}
-		if pid, ok := tagger.WorkerPID(); ok {
-			p, base := strconv.Itoa(pid), uint64(0)
-			if p == workerPID {
-				base = workerBase
-			}
-			if peak := desktop.ProcStatus(p, "VmHWM"); peak > base {
-				parts = append(parts, "worker +"+webui.HumanBytes(int64(peak-base)))
-			}
-		}
-		if len(parts) > 0 {
-			logx.Infof("autotag %s: peak RSS %s", scope, strings.Join(parts, ", "))
+			logx.Infof("autotag %s: peak RSS +%s", scope, webui.HumanBytes(int64(peak-baseline)))
 		}
 	}
 }

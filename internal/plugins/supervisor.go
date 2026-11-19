@@ -24,6 +24,10 @@ type Launch struct {
 	Command string
 	Args    []string
 	Dir     string
+	// Env joins MONBOORU_URL in the process's environment.
+	Env []string
+	// Label names the process in the log; "" is "plugin <name>".
+	Label string
 }
 
 type Supervisor struct {
@@ -55,6 +59,7 @@ const (
 
 type managedPlugin struct {
 	name    string
+	label   string
 	command string
 	args    []string
 	dir     string
@@ -79,9 +84,13 @@ func (s *Supervisor) Start(p Launch) {
 	}
 	s.mu.Unlock()
 
-	env := []string{"MONBOORU_URL=" + s.CallbackURL()}
+	env := append([]string{"MONBOORU_URL=" + s.CallbackURL()}, p.Env...)
 
 	m.mu.Lock()
+	m.label = p.Label
+	if m.label == "" {
+		m.label = "plugin " + p.Name
+	}
 	m.command, m.args = p.Command, p.Args
 	m.dir, m.env = p.Dir, env
 	m.stopped, m.restarts = false, 0
@@ -133,14 +142,14 @@ func (s *Supervisor) supervise(m *managedPlugin) {
 		// The flag, not the channel, is the authority: the backoff select
 		// can miss a stop, so it is read again before each run.
 		m.mu.Lock()
-		stopped := m.stopped
+		stopped, label := m.stopped, m.label
 		m.mu.Unlock()
 		if stopped {
 			return
 		}
 		started := time.Now()
 		if err := m.run(); err != nil {
-			logx.Errorf("plugin %s: %v", m.name, err)
+			logx.Errorf("%s: %v", label, err)
 		}
 		m.mu.Lock()
 		if m.stopped {
@@ -154,7 +163,7 @@ func (s *Supervisor) supervise(m *managedPlugin) {
 		stop := m.stop
 		delay := min(BackoffMin<<min(m.restarts-1, 6), managedBackoffMax)
 		m.mu.Unlock()
-		logx.Warnf("plugin %s: exited, restarting in %s", m.name, delay)
+		logx.Warnf("%s: exited, restarting in %s", label, delay)
 		select {
 		case <-time.After(delay):
 		case <-stop:
@@ -180,6 +189,7 @@ func (m *managedPlugin) run() error {
 		m.mu.Unlock()
 		return nil
 	}
+	label := m.label
 	cmd := exec.Command(m.command, m.args...)
 	desktop.HideConsole(cmd)
 	cmd.Dir = m.dir
@@ -198,7 +208,7 @@ func (m *managedPlugin) run() error {
 	}
 	m.proc, m.stdin, m.running = cmd, stdin, true
 	m.mu.Unlock()
-	logx.Infof("plugin %s: started (pid %d)", m.name, cmd.Process.Pid)
+	logx.Infof("%s: started (pid %d)", label, cmd.Process.Pid)
 
 	lastLine := make(chan string, 1)
 	go func() {
@@ -207,12 +217,12 @@ func (m *managedPlugin) run() error {
 		var last string
 		for scanner.Scan() {
 			last = scanner.Text()
-			logx.Infof("plugin %s: %s", m.name, last)
+			logx.Infof("%s: %s", label, last)
 		}
 		if scanner.Err() != nil {
 			// A line past the cap stops the scan; undrained, the child blocks
 			// on a full pipe and Wait never returns.
-			logx.Warnf("plugin %s: output dropped: %v", m.name, scanner.Err())
+			logx.Warnf("%s: output dropped: %v", label, scanner.Err())
 			_, _ = io.Copy(io.Discard, out)
 		}
 		lastLine <- last
@@ -238,7 +248,7 @@ func (m *managedPlugin) run() error {
 // Closing stdin is the exit signal a managed plugin must honour.
 func (m *managedPlugin) terminate() {
 	m.mu.Lock()
-	cmd, stdin := m.proc, m.stdin
+	cmd, stdin, label := m.proc, m.stdin, m.label
 	m.mu.Unlock()
 	if cmd == nil {
 		return
@@ -258,7 +268,7 @@ func (m *managedPlugin) terminate() {
 	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
-		logx.Warnf("plugin %s: killed after %s", m.name, managedStopGrace)
+		logx.Warnf("%s: killed after %s", label, managedStopGrace)
 	}
 }
 
@@ -281,4 +291,20 @@ func (s *Supervisor) State(name string) string {
 	default:
 		return "starting"
 	}
+}
+
+// PID is the running process's, 0 when there is none.
+func (s *Supervisor) PID(name string) int {
+	s.mu.Lock()
+	m := s.managed[name]
+	s.mu.Unlock()
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.proc == nil || m.proc.Process == nil {
+		return 0
+	}
+	return m.proc.Process.Pid
 }

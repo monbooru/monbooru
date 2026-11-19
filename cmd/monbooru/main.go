@@ -27,10 +27,6 @@ func main() {
 	// Before anything prints: a Windows GUI build starts with no console.
 	desktop.AttachConsole()
 
-	if len(os.Args) >= 2 && os.Args[1] == "tagger-worker" {
-		runWorker(os.Args[2:])
-		return
-	}
 	if len(os.Args) >= 2 && os.Args[1] == "healthcheck" {
 		runHealthcheck(os.Args[2:])
 		return

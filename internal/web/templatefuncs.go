@@ -140,12 +140,6 @@ func templateFuncs() template.FuncMap {
 			}
 			return d.Round(time.Millisecond).String()
 		},
-		"minusDuration": func(a, b time.Duration) time.Duration {
-			return a - b
-		},
-		"int64Duration": func(d time.Duration) int64 {
-			return int64(d)
-		},
 		"plural":      models.Plural,
 		"abbrevCount": abbrevCount,
 		"searchTime":  searchTime,

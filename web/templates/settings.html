@@ -529,15 +529,17 @@
   <section id="tagger" class="settings-section">
     <div class="settings-section-header">
       <h3>Auto-Tagger</h3>
-      <p class="field-hint">Settings for the local tagging models.</p>
-      {{template "partials/tagger_mode_badge.html" (dict "Provider" $cfg.Tagger.ExecutionProvider)}}
+      <p class="field-hint">Settings for the workers and the tagging models.</p>
+      {{template "partials/tagger_mode_badge.html" (dict "Provider" .TaggerProvider "None" .Workers.None)}}
     </div>
     <div id="flash-tagger" data-action-flash role="status"></div>
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
+    {{template "partials/tagger_workers.html" .Workers}}
+    {{if .LocalRunning}}
     <form hx-post="/settings/tagger" hx-target="#flash-tagger" hx-swap="innerHTML">
       <div class="settings-sub">
-        <h4>Workers / GPU</h4>
+        <h4>Local worker</h4>
         <div class="settings-cols">
           <div class="field">
             <label>Execution provider</label>
@@ -549,12 +551,15 @@
             </div>
             <p class="field-hint">{{if $pin}}Set by {{$pin}} in the environment.{{else}}Providers need a matching ONNX Runtime library.{{end}}</p>
           </div>
-          {{template "partials/range_field.html" dict "Name" "parallel" "Label" "Parallel workers" "Min" 1 "Max" 16 "Step" 1 "Value" $cfg.Tagger.Parallel "Ticks" (list 1 2 4 8 12 16) "Hint" "Images tagged in parallel."}}
-          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Unload the model after (minutes idle)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "0 unloads it right after each run."}}
+          {{template "partials/range_field.html" dict "Name" "parallel" "Label" "Parallel images" "Min" 1 "Max" 16 "Step" 1 "Value" $cfg.Tagger.Parallel "Ticks" (list 1 2 4 8 12 16) "Hint" "Images tagged at once."}}
+          {{template "partials/range_field.html" dict "Name" "cpu_threads" "Label" "CPU threads" "Min" 0 "Max" .CPUCount "Step" 1 "Value" $cfg.Tagger.CPUThreads "Hint" "0 uses every core."}}
+          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Unload the model after (minutes idle)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "0 unloads it half a minute after each run."}}
         </div>
         <div class="settings-actions"><button type="submit">Save</button></div>
       </div>
     </form>
+    {{end}}
+    {{if not .Workers.None}}
     <div class="settings-sub">
       <h4>Taggers list</h4>
       {{if $rows}}
@@ -614,7 +619,7 @@
                         hx-post="/settings/tagger/{{$r.Name}}/enable" hx-target="#flash-tagger" hx-swap="innerHTML">Enable</button>
                 {{end}}
                 {{template "tagger_reset_button" (dict "Name" $r.Name "Differs" $r.Differs)}}
-                {{if not $r.Enabled}}
+                {{if and $r.LocalFolder (not $r.Enabled)}}
                 <button type="button" class="btn-sm tagger-act-delete btn-danger"
                         hx-post="/settings/tagger/{{$r.Name}}/delete" hx-target="#flash-tagger" hx-swap="innerHTML"
                         hx-confirm="Delete tagger {{$r.Name}}?"
@@ -630,10 +635,11 @@
       </table>
       </div>
       {{else}}
-      <p class="field-hint">No tagger subfolders found in <code>{{$cfg.Paths.ModelPath}}</code>.</p>
+      <p class="field-hint">No tagger in the workers' models folders.</p>
       {{end}}
       <p class="field-hint" id="tagger-registry">More taggers: see <code>TAGGERS.md</code> in the <a href="{{.PluginsRepoURL}}" target="_blank" rel="noopener">monbooru-plugins</a> registry.</p>
     </div>
+    {{end}}
     {{range $rows}}{{if and .Installed (not .Malformed)}}
     <dialog id="tagger-config-{{.Name}}" class="tagger-config-dialog">
       <h4 class="dlg-title">{{.Name}}{{template "webui/dialog_x"}}</h4>
@@ -669,9 +675,18 @@
     {{else}}
     <dialog id="tagger-cmd-dialog">
       <p class="dlg-title"><span id="tagger-cmd-name"></span> <span class="dlg-title-sub">- <span id="tagger-cmd-desc"></span></span>{{template "webui/dialog_x"}}</p>
-      <p class="field-hint">Run the command below on a host with internet access, then reload the Settings page.</p>
+      {{$targets := .InstallTargets}}
+      {{if gt (len $targets) 1}}
+      <div class="field"><label>Worker</label><div class="radio-grid">
+        {{range $i, $t := $targets}}<label><input type="radio" name="tagger-cmd-worker" data-where="{{$t.Where}}" data-dir="{{$t.Dir}}"{{if eq $i 0}} checked{{end}}> {{$t.Name}}</label>
+        {{end}}
+      </div></div>
+      {{end}}
+      {{with index $targets 0}}
+      <p class="field-hint">Run the command below on <span id="tagger-cmd-where">{{.Where}}</span>, then reload the Settings page.</p>
+      {{end}}
       <p class="field-hint" id="tagger-cmd-gated" hidden>This model is login-gated on Hugging Face: accept its terms on the model page while logged in, then <code>export HF_TOKEN=&lt;your access token&gt;</code> before running.</p>
-      <p class="code-block-label"><strong>Direct host install</strong> <span class="field-hint">(run inside <code>{{$cfg.Paths.ModelPath}}</code>)</span>
+      <p class="code-block-label"><strong>Direct host install</strong> <span class="field-hint">(run inside <code id="tagger-cmd-dir">{{(index $targets 0).Dir}}</code>)</span>
         <button type="button" class="btn-sm code-block-copy" id="tagger-cmd-host-copy" title="Copy command">Copy</button>
         <span class="copy-flash" hidden>copied</span>
       </p>
@@ -1180,12 +1195,7 @@
           <tr><th>Mode</th><td>{{providerLabel $tg.Provider}}</td></tr>
           <tr><th>Status</th><td>
             {{if $tg.InUse}}running
-            {{else}}idle {{schedDuration $tg.IdleFor}}
-              {{if $tg.IdleReleaseAfter}}
-                {{$remain := minusDuration $tg.IdleReleaseAfter $tg.IdleFor}}
-                {{if gt (int64Duration $remain) 0}}(releases in {{schedDuration $remain}}){{else}}(release pending){{end}}
-              {{end}}
-            {{end}}
+            {{else}}idle{{end}}
           </td></tr>
           <tr><th>Models</th><td>{{range $i, $n := $tg.Sessions}}{{if $i}}, {{end}}{{$n}}{{end}}</td></tr>
           {{if $tg.WorkerRSS}}

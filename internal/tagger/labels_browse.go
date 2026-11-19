@@ -1,11 +1,8 @@
 package tagger
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 	"sort"
-	"strconv"
-	"sync"
 )
 
 // Rule is "" for the model's own routing, "default" for an embedded rule
@@ -20,16 +17,17 @@ type LabelView struct {
 
 // The single_general inferred-category lift needs a job's database, so
 // those labels show their static routing.
-func BrowseLabels(modelPath, dataPath, taggerName, tagsFile string, catIDs map[string]int64) ([]LabelView, error) {
-	profile, err := ResolveProfile(modelPath, taggerName, tagsFile)
-	if err != nil {
-		return nil, err
+func BrowseLabels(dataPath, taggerName string, catIDs map[string]int64) ([]LabelView, error) {
+	h, ok := currentPool().heldModel(taggerName)
+	if !ok {
+		return nil, fmt.Errorf("no worker holds tagger %q", taggerName)
 	}
-	labels, err := browsedLabels(filepath.Join(modelPath, taggerName, tagsFile), profile)
-	if err != nil {
-		return nil, err
+	if len(h.labels.Labels) == 0 {
+		return nil, fmt.Errorf("its worker has not sent the labels of %q", taggerName)
 	}
-	embedded := compileEntries(DefaultDispatchRules(modelPath, taggerName), catIDs)
+	profile := profileOf(h.labels)
+	labels := toTagLabels(h.labels)
+	embedded := compileEntries(stockRules(h.labels), catIDs)
 	overlay := compileEntries(OverlayDispatchRules(dataPath, taggerName), catIDs)
 	empty := &DispatchTable{}
 
@@ -61,40 +59,6 @@ func BrowseLabels(modelPath, dataPath, taggerName, tagsFile string, catIDs map[s
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	return out, nil
-}
-
-// The tag page and the labels panel read a tagger's whole label file on
-// every view, so the parse is kept until the file or its profile changes.
-var labelFiles = struct {
-	sync.Mutex
-	byPath map[string]parsedLabels
-}{byPath: map[string]parsedLabels{}}
-
-type parsedLabels struct {
-	stamp  string
-	labels []tagLabel
-}
-
-func browsedLabels(path string, profile Profile) ([]tagLabel, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	stamp := fi.ModTime().String() + "/" + strconv.FormatInt(fi.Size(), 10) + "/" + profile.fingerprint()
-	labelFiles.Lock()
-	cached, ok := labelFiles.byPath[path]
-	labelFiles.Unlock()
-	if ok && cached.stamp == stamp {
-		return cached.labels, nil
-	}
-	labels, err := loadLabels(path, profile)
-	if err != nil {
-		return nil, err
-	}
-	labelFiles.Lock()
-	labelFiles.byPath[path] = parsedLabels{stamp, labels}
-	labelFiles.Unlock()
-	return labels, nil
 }
 
 func compileEntries(entries []DispatchEntry, catIDs map[string]int64) map[string]DispatchRule {

@@ -1,5 +1,3 @@
-//go:build tagger
-
 // Package tagger runs ONNX models over images and turns what they emit
 // into tags.
 package tagger
@@ -9,12 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
@@ -22,12 +18,13 @@ import (
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/worker"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
+// IsAvailable is whether a worker that holds an enabled tagger can take a
+// job now.
 func IsAvailable(cfg *config.Config) bool { return len(EnabledTaggers(cfg)) > 0 }
-
-func buildSupportsInference() bool { return true }
 
 func UnavailableReason(cfg *config.Config) string { return reasonFrom(DiscoverTaggers(cfg)) }
 
@@ -35,8 +32,11 @@ func reasonFrom(taggers []TaggerStatus) string {
 	if len(enabledIn(taggers, nil)) > 0 {
 		return ""
 	}
+	if !currentPool().HasWorker() {
+		return "no worker"
+	}
 	if len(taggers) == 0 {
-		return "no tagger subfolders found under paths.model_path"
+		return "no worker holds a tagger"
 	}
 	for _, t := range taggers {
 		if t.Enabled && !t.Available {
@@ -46,62 +46,19 @@ func reasonFrom(taggers []TaggerStatus) string {
 	return "no enabled tagger"
 }
 
-func CheckProviderAvailable(provider string) error {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider == "" || provider == "cpu" {
-		return nil
-	}
-	if !config.IsValidExecutionProvider(provider) {
-		return fmt.Errorf("unsupported execution provider %q", provider)
-	}
-
-	if err := defaultBackend.probeProvider(provider); err != nil {
-		return err
-	}
-
-	// A CUDA-capable library says nothing about the device: in a container
-	// without the GPU passed in, session creation only fails at job time.
-	if provider == "cuda" && runtime.GOOS == "linux" {
-		if _, err := os.Stat("/dev/nvidia0"); err != nil {
-			return fmt.Errorf("no NVIDIA GPU device found (pass the GPU into the container, e.g. Podman AddDevice=nvidia.com/gpu=all)")
-		}
-	}
-	return nil
-}
-
 func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTaggers(cfg) }
 
-func Status() CacheStatus {
-	if b := activeBackend(); b != nil {
-		return b.Status()
-	}
-	return CacheStatus{}
-}
-
-func ReleaseIdle(after time.Duration) bool {
-	if b := activeBackend(); b != nil {
-		return b.ReleaseIdle(after)
-	}
-	return false
-}
-
-func ReleaseAll() {
-	if b := activeBackend(); b != nil {
-		b.ReleaseAll()
-	}
-}
+// Status is the local worker's, for the stats.
+func Status() CacheStatus { return currentPool().LocalStatus() }
 
 // RunWithTaggers takes only enabled, available taggers and returns how many
-// ids were left untagged. provider overrides the configured one; a handle with
-// no thumbnails path extracts pages under the system temp directory.
-func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager, provider string) (int, error) {
+// ids were left untagged; a handle with no thumbnails path extracts pages
+// under the system temp directory.
+func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager) (int, error) {
 	if len(taggers) == 0 {
 		return 0, fmt.Errorf("no tagger is enabled or available")
 	}
-	backend := activeBackend()
-	if backend == nil {
-		return 0, fmt.Errorf("auto-tagger disabled (no backend registered)")
-	}
+	pool := currentPool()
 	database := h.DB
 	mangaCacheDir := gallery.MangaCacheDir(h.ThumbnailsPath)
 
@@ -120,8 +77,8 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 	// meta) is filed there.
 	inferredCats := map[string]int64{}
 	hasSingleGeneral := slices.ContainsFunc(taggers, func(t TaggerStatus) bool {
-		profile, perr := ResolveProfile(cfg.Paths.ModelPath, t.Name, t.TagsFile)
-		return perr == nil && profile.CategoryScheme == "single_general"
+		h, ok := currentPool().heldModel(t.Name)
+		return ok && h.labels.CategoryScheme == "single_general"
 	})
 	if hasSingleGeneral && generalCatID != 0 {
 		// A name the user has tagged as general by hand stays general.
@@ -158,20 +115,25 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 	}
 
 	plan := make([]plannedTagger, len(taggers))
+	names := make([]string, len(taggers))
 	for i, t := range taggers {
-		if plan[i], err = planTagger(cfg.Paths.ModelPath, cfg.Paths.DataPath, t, catIDs, generalCatID, inferredCats); err != nil {
+		if plan[i], err = planTagger(cfg.Paths.DataPath, t, catIDs, generalCatID, inferredCats); err != nil {
 			return 0, err
 		}
+		names[i] = t.Name
 	}
-	base := RunRequest{
-		ModelPath:       cfg.Paths.ModelPath,
-		DataPath:        cfg.Paths.DataPath,
-		SessionParallel: cfg.Tagger.Parallel,
-		Taggers:         taggers,
-		Provider:        provider,
+	// A person waiting on one image passes the batch jobs at the workers.
+	priority := worker.PriorityBatch
+	if len(ids) == 1 {
+		priority = worker.PriorityInteractive
 	}
 
-	parallel := min(max(1, cfg.Tagger.Parallel), len(ids))
+	// One image per slot of the workers that can take the job, so each
+	// worker pulls as fast as it answers and no frame waits decoded.
+	parallel := min(max(1, pool.Slots(names)), len(ids))
+	if n := cfg.Tagger.CPUThreads; n > 0 {
+		parallel = min(parallel, n)
+	}
 
 	// The job has one status line, so each worker writes its own slot and
 	// every update joins them all.
@@ -228,7 +190,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
 			}
 		}
-		scores, inferred, err := inferFrames(ctx, backend, base, plan, imageID, framePaths, fileType, onPage)
+		scores, inferred, err := inferFrames(ctx, pool, priority, taggers, plan, imageID, framePaths, fileType, onPage)
 		if err != nil {
 			return err
 		}
@@ -281,9 +243,6 @@ feed:
 	close(queue)
 	wg.Wait()
 
-	if cfg.Tagger.IdleReleaseAfterMinutes <= 0 {
-		backend.ReleaseAll()
-	}
 	if err := ctx.Err(); err != nil {
 		return int(skipped.Load()), err
 	}
@@ -294,10 +253,10 @@ feed:
 	return int(skipped.Load()), nil
 }
 
-// inferFrames runs every frame through every tagger, one backend call per
-// frame and input, and reports whether any frame was inferred. A frame
-// that fails to read or that a model refuses is logged and left out.
-func inferFrames(ctx context.Context, backend Backend, base RunRequest, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
+// inferFrames runs every frame through every tagger, one call per frame
+// and input, and reports whether any frame was inferred. A frame that
+// fails to read or that a model refuses is logged and left out.
+func inferFrames(ctx context.Context, pool *Pool, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
 	type group struct {
 		input   inputKey
 		models  []string
@@ -310,7 +269,7 @@ func inferFrames(ctx context.Context, backend Backend, base RunRequest, plan []p
 			groups = append(groups, group{input: p.input})
 			g = len(groups) - 1
 		}
-		groups[g].models = append(groups[g].models, base.Taggers[tIdx].Name)
+		groups[g].models = append(groups[g].models, taggers[tIdx].Name)
 		groups[g].taggers = append(groups[g].taggers, tIdx)
 	}
 	inputs := make([]inputKey, len(groups))
@@ -334,27 +293,19 @@ func inferFrames(ctx context.Context, backend Backend, base RunRequest, plan []p
 			continue
 		}
 		for g, grp := range groups {
-			req := base
-			req.Models, req.Size, req.Frames = grp.models, grp.input.size, [][]byte{frames[g]}
-			resp, err := backend.Run(ctx, req)
+			resp, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]})
 			if err != nil {
 				return nil, false, err
 			}
-			if len(resp.Results) != len(grp.models) {
-				return nil, false, fmt.Errorf("tagger backend answered %d models, want %d", len(resp.Results), len(grp.models))
-			}
 			for m, tIdx := range grp.taggers {
-				if len(resp.Results[m]) != 1 {
-					return nil, false, fmt.Errorf("tagger backend answered %d frames, want 1", len(resp.Results[m]))
-				}
-				fr := resp.Results[m][0]
+				fr := resp.Results[m].Frames[0]
 				if fr.Err != "" {
 					logx.Warnf("tagger: inference failed: image %d via %q frame %d/%d (%s): %s",
 						imageID, grp.models[m], fIdx+1, len(framePaths), fp, fr.Err)
 					continue
 				}
 				inferred = true
-				scores[tIdx] = append(scores[tIdx], fr.SparseScores)
+				scores[tIdx] = append(scores[tIdx], SparseScores{I: fr.I, S: fr.S})
 			}
 		}
 	}

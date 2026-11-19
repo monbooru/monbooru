@@ -5,6 +5,7 @@
 /dist/
 /stage/
 /tools/
+/worker/
 /AppDir/
 /packaging/windows/payload/
 
@@ -26,8 +27,6 @@ thumbnails/
 cover.out
 coverage.html
 coverage.out
-coverage-tagger.html
-coverage-tagger.out
 
 # IDE / editor
 .vscode/

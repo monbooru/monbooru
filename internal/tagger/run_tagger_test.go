@@ -1,5 +1,3 @@
-//go:build tagger
-
 package tagger
 
 import (
@@ -7,16 +5,18 @@ import (
 	"fmt"
 	"image/color"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/jobs"
+	"github.com/monbooru/monbooru/internal/shared/worker"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -35,75 +35,75 @@ func setupStoreResultsDB(t *testing.T) *db.DB {
 }
 
 type callRecorder struct {
-	mu       sync.Mutex
-	failOn   int
-	calls    int
-	models   [][]string
-	releases int
+	fake   *worker.Fake
+	mu     sync.Mutex
+	failOn int
+	calls  int
+	models [][]string
 
 	pageDirs string
 	dirs     []int
 }
 
-func (b *callRecorder) Run(_ context.Context, req RunRequest) (RunResponse, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.calls++
-	b.models = append(b.models, req.Models)
-	if b.pageDirs != "" {
-		found, _ := filepath.Glob(filepath.Join(b.pageDirs, "autotag-*"))
-		b.dirs = append(b.dirs, len(found))
-	}
-	if b.calls == b.failOn {
-		return RunResponse{}, fmt.Errorf("worker gone")
-	}
-	resp := RunResponse{}
-	for range req.Models {
-		frames := make([]FrameScores, len(req.Frames))
-		for i := range frames {
-			frames[i].SparseScores = SparseScores{I: []int32{0}, S: []float32{0.9}}
+func (b *callRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == worker.PathTag {
+		b.mu.Lock()
+		b.calls++
+		if b.pageDirs != "" {
+			found, _ := filepath.Glob(filepath.Join(b.pageDirs, "autotag-*"))
+			b.dirs = append(b.dirs, len(found))
 		}
-		resp.Results = append(resp.Results, frames)
+		fail := b.calls == b.failOn
+		b.mu.Unlock()
+		if fail {
+			http.Error(w, `{"error":"worker gone"}`, http.StatusInternalServerError)
+			return
+		}
 	}
-	return resp, nil
+	b.fake.ServeHTTP(w, r)
+	if r.URL.Path == worker.PathTag {
+		b.fake.Mu.Lock()
+		last := b.fake.Calls[len(b.fake.Calls)-1].Models
+		b.fake.Mu.Unlock()
+		b.mu.Lock()
+		b.models = append(b.models, last)
+		b.mu.Unlock()
+	}
 }
 
-func (b *callRecorder) Status() CacheStatus              { return CacheStatus{} }
-func (b *callRecorder) ReleaseIdle(_ time.Duration) bool { return false }
-func (b *callRecorder) ReleaseAll()                      { b.mu.Lock(); b.releases++; b.mu.Unlock() }
-
-func stubTaggers(t *testing.T, cfg *config.Config, sizes map[string]int) []TaggerStatus {
+func recordWorker(t *testing.T, rec *callRecorder, slots int, sizes map[string]int) []TaggerStatus {
 	t.Helper()
-	if cfg.Paths.ModelPath == "" {
-		cfg.Paths.ModelPath = t.TempDir()
+	var ms []fakeModel
+	for _, name := range slices.Sorted(maps.Keys(sizes)) {
+		ms = append(ms, fakeModel{name: name, size: sizes[name], labels: labelsOf("landscape")})
 	}
+	rec.fake = useFakeWorker(t, ms...)
+	rec.fake.Mu.Lock()
+	rec.fake.Info.Slots = slots
+	rec.fake.Mu.Unlock()
+	srv := httptest.NewServer(rec)
+	t.Cleanup(srv.Close)
+	currentPool().Set([]WorkerDef{{Name: "fake", URL: srv.URL, Token: "tok"}})
+	currentPool().Refresh(context.Background())
 	var out []TaggerStatus
 	for _, name := range slices.Sorted(maps.Keys(sizes)) {
-		makeTaggerDir(t, cfg.Paths.ModelPath, name, []string{"model.onnx"})
-		dir := filepath.Join(cfg.Paths.ModelPath, name)
-		mustWriteFile(t, filepath.Join(dir, "tags.csv"), []byte("tag_id,name,category\n0,landscape,0\n"), 0o644)
-		mustWriteFile(t, filepath.Join(dir, "tagger.json"), fmt.Appendf(nil, `{"version": 1, "profile": {"input_size": %d}}`, sizes[name]), 0o644)
-		out = append(out, TaggerStatus{TaggerInstance: config.TaggerInstance{Name: name, Enabled: true, ConfidenceThreshold: 0.35, ModelFile: "model.onnx", TagsFile: "tags.csv"}})
+		out = append(out, TaggerStatus{TaggerInstance: config.TaggerInstance{Name: name, Enabled: true, ConfidenceThreshold: 0.35}})
 	}
 	return out
 }
 
-func runScope(t *testing.T, database *db.DB, ids []int64, rec *callRecorder, parallel int, sizes map[string]int, thumbs string) error {
+func runScope(t *testing.T, database *db.DB, ids []int64, rec *callRecorder, slots int, sizes map[string]int, thumbs string) error {
 	t.Helper()
 	mgr := jobs.NewManager()
 	if err := mgr.Start("autotag"); err != nil {
 		t.Fatal(err)
 	}
-	prev := activeBackend()
-	SetBackend(rec)
-	t.Cleanup(func() { SetBackend(prev) })
+	taggers := recordWorker(t, rec, slots, sizes)
 	cfg := &config.Config{}
-	cfg.Tagger.Parallel = parallel
-	cfg.Tagger.IdleReleaseAfterMinutes = 15
-	taggers := stubTaggers(t, cfg, sizes)
+	cfg.Paths.DataPath = t.TempDir()
 	_, err := RunWithTaggers(context.Background(),
 		gallery.Handle{DB: database, TagSvc: tags.New(database, nil), ThumbnailsPath: thumbs},
-		cfg, ids, taggers, mgr, "cpu")
+		cfg, ids, taggers, mgr)
 	return err
 }
 
@@ -143,9 +143,6 @@ func TestRunWithTaggers_TagsEveryImageOnce(t *testing.T) {
 	}
 	if rec.calls != 5 || countTagged(t, database) != 5 {
 		t.Errorf("calls %d, images tagged %d, want 5 and 5", rec.calls, countTagged(t, database))
-	}
-	if rec.releases != 0 {
-		t.Errorf("released the backend %d times with an idle release of 15 minutes", rec.releases)
 	}
 }
 
@@ -205,27 +202,5 @@ func TestRunWithTaggers_ExtractsOneArchivePerWorker(t *testing.T) {
 		if left, _ := filepath.Glob(filepath.Join(rec.pageDirs, "autotag-*")); len(left) != 0 {
 			t.Errorf("parallel %d: %d extraction folders left after the run", parallel, len(left))
 		}
-	}
-}
-
-func TestRunWithTaggers_AtZeroIdleReleasesTheBackendOnceAtTheEnd(t *testing.T) {
-	database := setupStoreResultsDB(t)
-	ids := insertPNGImages(t, database, 3)
-	rec := &callRecorder{}
-	mgr := jobs.NewManager()
-	if err := mgr.Start("autotag"); err != nil {
-		t.Fatal(err)
-	}
-	prev := activeBackend()
-	SetBackend(rec)
-	t.Cleanup(func() { SetBackend(prev) })
-	cfg := &config.Config{}
-	cfg.Tagger.Parallel = 2
-	taggers := stubTaggers(t, cfg, map[string]int{"stub": 8})
-	if _, err := RunWithTaggers(context.Background(), gallery.Handle{DB: database, TagSvc: tags.New(database, nil)}, cfg, ids, taggers, mgr, "cpu"); err != nil {
-		t.Fatal(err)
-	}
-	if rec.releases != 1 {
-		t.Errorf("released %d times, want 1", rec.releases)
 	}
 }

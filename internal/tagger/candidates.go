@@ -1,10 +1,9 @@
-//go:build tagger
-
 package tagger
 
 import (
 	"fmt"
-	"path/filepath"
+
+	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
 // plannedTagger is what the parent knows of a tagger for a run: the frame
@@ -14,37 +13,24 @@ type plannedTagger struct {
 	cands []CandidateLabel
 }
 
-func planTagger(modelPath, dataPath string, t TaggerStatus, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) (plannedTagger, error) {
-	profile, err := ResolveProfile(modelPath, t.Name, t.TagsFile)
-	if err != nil {
-		return plannedTagger{}, fmt.Errorf("resolve profile for %q: %w", t.Name, err)
+func planTagger(dataPath string, t TaggerStatus, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) (plannedTagger, error) {
+	h, ok := currentPool().heldModel(t.Name)
+	if !ok {
+		return plannedTagger{}, fmt.Errorf("no worker holds tagger %q", t.Name)
 	}
-	size := profile.InputSize
-	if size == 0 {
-		dims, err := onnxInputDims(filepath.Join(modelPath, t.Name, t.ModelFile))
-		if err != nil {
-			return plannedTagger{}, fmt.Errorf("inspect onnx model for %q: %w", t.Name, err)
-		}
-		if size = inferInputSize(dims, profile.Layout); size <= 0 {
-			return plannedTagger{}, fmt.Errorf("onnx model for %q: cannot infer input size from dimensions %v", t.Name, dims)
-		}
+	if h.model.Input.Size < 1 || len(h.labels.Labels) == 0 {
+		return plannedTagger{}, fmt.Errorf("tagger %q: its worker has not described it", t.Name)
 	}
-	cands, err := taggerCandidates(modelPath, dataPath, t, profile, catIDs, generalCatID, inferredCats)
-	if err != nil {
-		return plannedTagger{}, err
-	}
-	return plannedTagger{input: inputKey{size, padFill(profile)}, cands: cands}, nil
+	cands := taggerCandidates(h.labels, LoadDispatch(stockRules(h.labels), dataPath, t.Name, catIDs), catIDs, generalCatID, inferredCats)
+	return plannedTagger{input: inputKey{h.model.Input.Size, h.model.Input.Fill}, cands: cands}, nil
 }
 
 // taggerCandidates gives a tagger's output channels the tag each one
 // becomes in this gallery: its category, its mapping, and for a
 // single_general model the category the gallery already files the name in.
-func taggerCandidates(modelPath, dataPath string, t TaggerStatus, profile Profile, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) ([]CandidateLabel, error) {
-	labels, err := loadLabels(filepath.Join(modelPath, t.Name, t.TagsFile), profile)
-	if err != nil {
-		return nil, fmt.Errorf("load labels for %q: %w", t.Name, err)
-	}
-	dispatch := LoadDispatch(modelPath, dataPath, t.Name, catIDs)
+func taggerCandidates(l worker.Labels, dispatch *DispatchTable, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) []CandidateLabel {
+	profile := profileOf(l)
+	labels := toTagLabels(l)
 	catNames := make(map[int64]string, len(catIDs))
 	for name, cid := range catIDs {
 		catNames[cid] = name
@@ -72,7 +58,7 @@ func taggerCandidates(modelPath, dataPath string, t TaggerStatus, profile Profil
 		}
 		cands[idx] = CandidateLabel{Name: name, CatID: catID, CatName: catNames[catID]}
 	}
-	return cands, nil
+	return cands
 }
 
 // mergeTaggers aggregates each tagger's frames and keeps a tag's best

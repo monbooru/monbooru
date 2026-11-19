@@ -44,6 +44,8 @@ type Config struct {
 	// Omitted when empty: TOML refuses a hand-added [[plugin]] block once
 	// `plugin = []` is written.
 	Plugins []PluginConfig `toml:"plugin,omitempty"`
+	// Workers are the monworkers paired with this monbooru.
+	Workers []WorkerConfig `toml:"worker,omitempty"`
 
 	// Unexported so the encoder never writes them.
 	portableBase string
@@ -258,7 +260,13 @@ type TaggerConfig struct {
 	// Read only to migrate old configs, and never written back.
 	UseCUDA           bool   `toml:"use_cuda,omitempty"`
 	ExecutionProvider string `toml:"execution_provider"`
-	Parallel          int    `toml:"parallel"`
+	// LocalWorker runs the monworker found beside monbooru or on PATH,
+	// started and stopped with it; off unless set.
+	LocalWorker bool `toml:"local_worker"`
+	Parallel    int  `toml:"parallel"`
+	// CPUThreads bounds the threads the local worker's models use, and
+	// the frames monbooru prepares at once; 0 is every core.
+	CPUThreads int `toml:"cpu_threads"`
 	// 0 disables the cache: each run loads the model fresh.
 	IdleReleaseAfterMinutes int                  `toml:"idle_release_after_minutes"`
 	Aggregation             TaggerAggregationCfg `toml:"aggregation"`
@@ -294,6 +302,15 @@ func ExecutionProviderLabel(name string) string {
 		}
 	}
 	return name
+}
+
+// WorkerConfig is a monworker monbooru calls: its name from the pairing,
+// its address, and the token it answers.
+type WorkerConfig struct {
+	Name   string `toml:"name"`
+	URL    string `toml:"url"`
+	Token  string `toml:"token"`
+	Paused bool   `toml:"paused,omitempty"`
 }
 
 type TaggerAggregationCfg struct {
@@ -568,6 +585,12 @@ func load(path, base string, seed func(*Config)) (*Config, error) {
 	}
 
 	migrateTaggerProvider(cfg)
+	if !fresh && migrateLocalWorker(cfg, path) {
+		if err := Save(cfg, path); err != nil {
+			return nil, fmt.Errorf("writing local_worker: %w", err)
+		}
+		logx.Infof("config: local_worker = true written: the taggers now run on the local worker")
+	}
 	applyEnvOverrides(cfg)
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -609,6 +632,26 @@ func resolveIn(cfg *Config, base string) {
 	for i := range cfg.Galleries {
 		cfg.Galleries[i].GalleryPath = fsx.AbsIn(cfg.Galleries[i].GalleryPath, base)
 	}
+}
+
+// A config from before the worker, with an enabled tagger and no
+// local_worker key, gets local_worker = true, so an upgrade that tags
+// keeps tagging; one without stays off like a new install.
+func migrateLocalWorker(cfg *Config, path string) bool {
+	if cfg.Tagger.LocalWorker || !slices.ContainsFunc(cfg.Tagger.Taggers, func(t TaggerInstance) bool { return t.Enabled }) {
+		return false
+	}
+	var keys struct {
+		Tagger map[string]any `toml:"tagger"`
+	}
+	if _, err := toml.DecodeFile(path, &keys); err != nil {
+		return false
+	}
+	if _, set := keys.Tagger["local_worker"]; set {
+		return false
+	}
+	cfg.Tagger.LocalWorker = true
+	return true
 }
 
 // A use_cuda = true config with no execution_provider migrates to "cuda".
@@ -806,6 +849,7 @@ func applyEnvOverrides(cfg *Config) {
 			pinEnv(cfg, "tagger.execution_provider", "MONBOORU_TAGGER_USE_CUDA", provider, "cuda")
 		}
 	}
+	envOverride(cfg, "tagger.local_worker", func(c *Config) *bool { return &c.Tagger.LocalWorker }, strconv.ParseBool)
 	envOverride(cfg, "auth.enable_password", func(c *Config) *bool { return &c.Auth.EnablePassword }, strconv.ParseBool)
 	envOverride(cfg, "auth.password_hash", func(c *Config) *string { return &c.Auth.PasswordHash }, parseString)
 	envOverride(cfg, "auth.session_lifetime_days", func(c *Config) *int { return &c.Auth.SessionLifetimeDays }, strconv.Atoi)

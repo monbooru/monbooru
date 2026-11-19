@@ -1,6 +1,8 @@
 package tagger
 
 import (
+	"slices"
+
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
@@ -18,8 +20,8 @@ type DispatchRule struct {
 
 // An overlay rule that fails to compile leaves the embedded rule for its
 // source in place.
-func LoadDispatch(modelPath, dataPath, taggerName string, catIDs map[string]int64) *DispatchTable {
-	return &DispatchTable{rules: compileEntries(allDispatchRules(modelPath, dataPath, taggerName), catIDs)}
+func LoadDispatch(stock []DispatchEntry, dataPath, taggerName string, catIDs map[string]int64) *DispatchTable {
+	return &DispatchTable{rules: compileEntries(slices.Concat(stock, OverlayDispatchRules(dataPath, taggerName)), catIDs)}
 }
 
 func compileDispatchRule(r DispatchEntry, catIDs map[string]int64) (DispatchRule, bool) {

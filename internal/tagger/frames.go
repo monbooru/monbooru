@@ -64,19 +64,6 @@ func rgb8(img *image.RGBA) []byte {
 	return out
 }
 
-// camieDefaultFill is the padding colour of Camie's onnx_inference.py.
-var camieDefaultFill = [3]uint8{124, 116, 104}
-
-func padFill(profile Profile) [3]uint8 {
-	switch {
-	case profile.Pad == "white_square":
-		return [3]uint8{0xff, 0xff, 0xff}
-	case profile.FillColor != nil:
-		return *profile.FillColor
-	}
-	return camieDefaultFill
-}
-
 func padAndResize(src image.Image, size int, fill [3]uint8) *image.RGBA {
 	scaled, offX, offY := resizeAspect(src, size)
 
@@ -109,23 +96,4 @@ func resizeAspect(src image.Image, size int) (scaled *image.RGBA, offX, offY int
 	// the aliasing it leaves gets tagged as pixel art.
 	draw.BiLinear.Scale(scaled, scaled.Bounds(), src, b, draw.Src, nil)
 	return scaled, (size - scaleW) / 2, (size - scaleH) / 2
-}
-
-func inferInputSize(dims []int64, layout string) int {
-	if len(dims) != 4 {
-		return 0
-	}
-	var d int64
-	switch layout {
-	case "nhwc":
-		d = dims[1]
-	case "nchw":
-		d = dims[2]
-	default:
-		return 0
-	}
-	if d <= 0 {
-		return 0
-	}
-	return int(d)
 }

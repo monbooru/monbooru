@@ -11,7 +11,11 @@ import (
 	"testing"
 )
 
-var white = [3]uint8{0xff, 0xff, 0xff}
+var (
+	white = [3]uint8{0xff, 0xff, 0xff}
+
+	camieFill = [3]uint8{124, 116, 104}
+)
 
 func TestPrepareFrameRefusesAnEmptyImage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty.jpg")
@@ -91,7 +95,7 @@ func TestRGB8DropsAlphaRowByRow(t *testing.T) {
 func TestPadAndResize_WhiteSquare_AlphaForced(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
 
-	dst := padAndResize(src, 8, padFill(wd14Profile))
+	dst := padAndResize(src, 8, white)
 	for i := 0; i+3 < len(dst.Pix); i += 4 {
 		if dst.Pix[i] != 0xff || dst.Pix[i+1] != 0xff || dst.Pix[i+2] != 0xff || dst.Pix[i+3] != 0xff {
 			t.Fatalf("pix %d not forced to opaque white: %v", i, dst.Pix[i:i+4])
@@ -104,7 +108,7 @@ func TestPadAndResize_WhiteSquare_BlendsHalfTransparentOverWhite(t *testing.T) {
 	for i := 0; i < len(src.Pix); i += 4 {
 		src.Pix[i], src.Pix[i+1], src.Pix[i+2], src.Pix[i+3] = 0xff, 0xff, 0xff, 0x80
 	}
-	dst := padAndResize(src, 8, padFill(wd14Profile))
+	dst := padAndResize(src, 8, white)
 	for i := 0; i < len(dst.Pix); i += 4 {
 		if dst.Pix[i] < 250 || dst.Pix[i+1] < 250 || dst.Pix[i+2] < 250 || dst.Pix[i+3] != 0xff {
 			t.Fatalf("pix %d = %v, want half-transparent white over white", i, dst.Pix[i:i+4])
@@ -114,10 +118,10 @@ func TestPadAndResize_WhiteSquare_BlendsHalfTransparentOverWhite(t *testing.T) {
 
 func TestPadAndResize_MeanColorAspect_TransparentTakesTheFill(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
-	dst := padAndResize(src, 8, padFill(Profile{Pad: "mean_color_aspect"}))
+	dst := padAndResize(src, 8, camieFill)
 	for i := 0; i < len(dst.Pix); i += 4 {
-		if dst.Pix[i] != camieDefaultFill[0] || dst.Pix[i+1] != camieDefaultFill[1] || dst.Pix[i+2] != camieDefaultFill[2] || dst.Pix[i+3] != 0xff {
-			t.Fatalf("pix %d = %v, want the fill %v", i, dst.Pix[i:i+4], camieDefaultFill)
+		if dst.Pix[i] != camieFill[0] || dst.Pix[i+1] != camieFill[1] || dst.Pix[i+2] != camieFill[2] || dst.Pix[i+3] != 0xff {
+			t.Fatalf("pix %d = %v, want the fill %v", i, dst.Pix[i:i+4], camieFill)
 		}
 	}
 }
@@ -136,7 +140,7 @@ func TestPadAndResize_Antialiases(t *testing.T) {
 		}
 	}
 
-	dst := padAndResize(src, size, padFill(wd14Profile))
+	dst := padAndResize(src, size, white)
 	lo, hi := uint8(0xff), uint8(0)
 	for i := 0; i < len(dst.Pix); i += 4 {
 		lo, hi = min(lo, dst.Pix[i]), max(hi, dst.Pix[i])
@@ -146,7 +150,7 @@ func TestPadAndResize_Antialiases(t *testing.T) {
 	}
 }
 
-func TestPadAndResize_MeanColorAspect(t *testing.T) {
+func TestPadAndResize_CentresOnTheFill(t *testing.T) {
 
 	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
 	for i := 0; i+3 < len(src.Pix); i += 4 {
@@ -155,18 +159,17 @@ func TestPadAndResize_MeanColorAspect(t *testing.T) {
 		src.Pix[i+2] = 0x00
 		src.Pix[i+3] = 0xff
 	}
-	prof := Profile{Pad: "mean_color_aspect"}
-	dst := padAndResize(src, 64, padFill(prof))
+	dst := padAndResize(src, 64, camieFill)
 	if dst.Bounds().Dx() != 64 || dst.Bounds().Dy() != 64 {
 		t.Fatalf("size = %v, want 64x64", dst.Bounds())
 	}
 	stride := dst.Stride
 	off := func(x, y int) int { return y*stride + x*4 }
-	if dst.Pix[off(0, 0)+0] != camieDefaultFill[0] ||
-		dst.Pix[off(0, 0)+1] != camieDefaultFill[1] ||
-		dst.Pix[off(0, 0)+2] != camieDefaultFill[2] {
+	if dst.Pix[off(0, 0)+0] != camieFill[0] ||
+		dst.Pix[off(0, 0)+1] != camieFill[1] ||
+		dst.Pix[off(0, 0)+2] != camieFill[2] {
 		t.Errorf("top-left = (%d,%d,%d), want camie default %v",
-			dst.Pix[off(0, 0)], dst.Pix[off(0, 0)+1], dst.Pix[off(0, 0)+2], camieDefaultFill)
+			dst.Pix[off(0, 0)], dst.Pix[off(0, 0)+1], dst.Pix[off(0, 0)+2], camieFill)
 	}
 	if dst.Pix[off(32, 32)+0] != 0xff ||
 		dst.Pix[off(32, 32)+1] != 0x00 ||
@@ -176,14 +179,13 @@ func TestPadAndResize_MeanColorAspect(t *testing.T) {
 	}
 }
 
-func TestPadAndResize_MeanColorAspect_FillColorOverride(t *testing.T) {
+func TestPadAndResize_TakesTheFillItIsGiven(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
 	for i := 0; i+3 < len(src.Pix); i += 4 {
 		src.Pix[i+0] = 0xff
 		src.Pix[i+3] = 0xff
 	}
-	prof := Profile{Pad: "mean_color_aspect", FillColor: &[3]uint8{10, 20, 30}}
-	dst := padAndResize(src, 64, padFill(prof))
+	dst := padAndResize(src, 64, [3]uint8{10, 20, 30})
 
 	off := dst.Stride*0 + 0
 	if dst.Pix[off] != 10 || dst.Pix[off+1] != 20 || dst.Pix[off+2] != 30 {
@@ -192,18 +194,10 @@ func TestPadAndResize_MeanColorAspect_FillColorOverride(t *testing.T) {
 	}
 }
 
-func TestPadAndResize_MeanColorAspect_BlackFillIsKept(t *testing.T) {
+func TestPadAndResize_BlackFillIsKept(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	dst := padAndResize(src, 64, padFill(Profile{Pad: "mean_color_aspect", FillColor: &[3]uint8{0, 0, 0}}))
+	dst := padAndResize(src, 64, [3]uint8{0, 0, 0})
 	if p := dst.Pix[0:3]; p[0] != 0 || p[1] != 0 || p[2] != 0 {
 		t.Errorf("black fill = %v, want (0,0,0)", p)
-	}
-}
-
-func TestPadAndResize_FillTakesTheProfileColour(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
-	dst := padAndResize(src, 64, padFill(Profile{Pad: "fill", FillColor: &[3]uint8{0, 0, 0}}))
-	if p := dst.Pix[0:3]; p[0] != 0 || p[1] != 0 || p[2] != 0 {
-		t.Errorf("fill = %v, want (0,0,0)", p)
 	}
 }

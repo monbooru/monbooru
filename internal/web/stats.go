@@ -1,9 +1,10 @@
 package web
 
 import (
+	"os"
 	"slices"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/tagger"
@@ -24,16 +25,14 @@ type mountStats struct {
 }
 
 type taggerCacheStats struct {
-	Loaded           bool
-	Provider         string
-	InUse            bool
-	Sessions         []string
-	IdleFor          time.Duration
-	IdleReleaseAfter time.Duration
-	WorkerPID        int
-	WorkerRSS        int64
-	WorkerAnon       int64
-	WorkerFile       int64
+	Loaded     bool
+	Provider   string
+	InUse      bool
+	Sessions   []string
+	WorkerPID  int
+	WorkerRSS  int64
+	WorkerAnon int64
+	WorkerFile int64
 }
 
 type statsData struct {
@@ -131,21 +130,30 @@ func gatherTaggerStats(s *Server) taggerCacheStats {
 		InUse:    st.InUse,
 		Sessions: st.Sessions,
 	}
-	s.cfgMu.RLock()
-	mins := s.cfg.Tagger.IdleReleaseAfterMinutes
-	s.cfgMu.RUnlock()
-	if mins > 0 {
-		out.IdleReleaseAfter = time.Duration(mins) * time.Minute
-	}
-	if st.Loaded && !st.InUse && !st.LastUsed.IsZero() {
-		out.IdleFor = time.Since(st.LastUsed)
-	}
-	if pid, ok := tagger.WorkerPID(); ok {
+	// The models live in the worker's inference child, so its memory
+	// counts with the worker's.
+	if pid := s.peers.PID(localWorkerName); pid > 0 {
 		out.WorkerPID = pid
-		if r, rok := desktop.ProcRSS(pid); rok {
-			out.WorkerRSS = int64(r.Total)
-			out.WorkerAnon = int64(r.Anon)
-			out.WorkerFile = int64(r.File)
+		for _, p := range append([]int{pid}, procChildren(pid)...) {
+			if r, ok := desktop.ProcRSS(p); ok {
+				out.WorkerRSS += int64(r.Total)
+				out.WorkerAnon += int64(r.Anon)
+				out.WorkerFile += int64(r.File)
+			}
+		}
+	}
+	return out
+}
+
+func procChildren(pid int) []int {
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(pid) + "/children")
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, f := range strings.Fields(string(data)) {
+		if n, err := strconv.Atoi(f); err == nil {
+			out = append(out, n)
 		}
 	}
 	return out

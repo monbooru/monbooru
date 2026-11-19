@@ -13,9 +13,9 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
-func MergedDispatchRules(modelPath, dataPath, taggerName string) []DispatchEntry {
+func MergedDispatchRules(dataPath, taggerName string) []DispatchEntry {
 	merged := map[string]DispatchEntry{}
-	for _, e := range allDispatchRules(modelPath, dataPath, taggerName) {
+	for _, e := range allDispatchRules(dataPath, taggerName) {
 		merged[e.Source] = e
 	}
 	out := slices.Collect(maps.Values(merged))
@@ -31,7 +31,7 @@ func MarshalDispatchDoc(rules []DispatchEntry) ([]byte, error) {
 // same snapshot.
 var overlayMu sync.Mutex
 
-func UpdateDispatchOverlay(modelPath, dataPath, taggerName string, mutate func(map[string]DispatchEntry) error) error {
+func UpdateDispatchOverlay(dataPath, taggerName string, mutate func(map[string]DispatchEntry) error) error {
 	overlayMu.Lock()
 	defer overlayMu.Unlock()
 	current, err := ReadDispatchOverlay(dataPath, taggerName)
@@ -45,14 +45,14 @@ func UpdateDispatchOverlay(modelPath, dataPath, taggerName string, mutate func(m
 	if err := mutate(overlay); err != nil {
 		return err
 	}
-	return SaveDispatchOverlay(modelPath, dataPath, taggerName, slices.Collect(maps.Values(overlay)))
+	return SaveDispatchOverlay(dataPath, taggerName, slices.Collect(maps.Values(overlay)))
 }
 
 // The overlay stays a pure delta against stock, and an empty one is
 // deleted: the file existing is what "differs from stock" means.
-func SaveDispatchOverlay(modelPath, dataPath, taggerName string, rules []DispatchEntry) error {
+func SaveDispatchOverlay(dataPath, taggerName string, rules []DispatchEntry) error {
 	embedded := map[string]DispatchEntry{}
-	for _, e := range DefaultDispatchRules(modelPath, taggerName) {
+	for _, e := range DefaultDispatchRules(taggerName) {
 		embedded[e.Source] = e
 	}
 	kept := make([]DispatchEntry, 0, len(rules))

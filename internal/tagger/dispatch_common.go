@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
 const dispatchSchemaVersion = 1
@@ -27,10 +28,10 @@ type DispatchEntry struct {
 	Name     string `json:"name,omitempty"`
 }
 
-func DispatchTargetCategories(modelPath, dataPath, taggerName string) []string {
+func DispatchTargetCategories(dataPath, taggerName string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, e := range allDispatchRules(modelPath, dataPath, taggerName) {
+	for _, e := range allDispatchRules(dataPath, taggerName) {
 		if e.Category == "" || seen[e.Category] {
 			continue
 		}
@@ -41,24 +42,27 @@ func DispatchTargetCategories(modelPath, dataPath, taggerName string) []string {
 }
 
 // Overlay rules come last, so a map keyed on Source keeps them.
-func allDispatchRules(modelPath, dataPath, taggerName string) []DispatchEntry {
-	return slices.Concat(DefaultDispatchRules(modelPath, taggerName), OverlayDispatchRules(dataPath, taggerName))
+func allDispatchRules(dataPath, taggerName string) []DispatchEntry {
+	return slices.Concat(DefaultDispatchRules(taggerName), OverlayDispatchRules(dataPath, taggerName))
 }
 
-// DefaultDispatchRules are the rules a tagger ships with: monbooru's own for
-// a tagger it ships, else the model folder's dispatch_default.json, which a
-// registry entry installs. Either is stock; dispatch.json is the overlay.
-func DefaultDispatchRules(modelPath, taggerName string) []DispatchEntry {
-	data, source, err := stockFile(modelPath, taggerName, stockDispatch)
-	if err != nil {
+// DefaultDispatchRules are the rules a tagger ships with, its
+// dispatch_default.json, as the worker that holds it sends them. They are
+// stock; this library's own rules are the overlay.
+func DefaultDispatchRules(taggerName string) []DispatchEntry {
+	h, ok := currentPool().heldModel(taggerName)
+	if !ok {
 		return nil
 	}
-	rules, err := decodeDispatchDoc(data)
-	if err != nil {
-		logx.Warnf("tagger: %s dispatch: %v", source, err)
-		return nil
+	return stockRules(h.labels)
+}
+
+func stockRules(l worker.Labels) []DispatchEntry {
+	out := make([]DispatchEntry, len(l.Mappings))
+	for i, m := range l.Mappings {
+		out[i] = DispatchEntry{Source: m.Source, Category: m.Category, Name: m.Name}
 	}
-	return rules
+	return out
 }
 
 // OverlayPath is where a tagger's mappings live: in the data folder, since

@@ -654,7 +654,6 @@ func (s *Server) elsewhereLines(tag *models.Tag, aliases []models.Tag) []pathLin
 // so on the name's own lane, and one that knows neither has no lane.
 func (s *Server) taggerLanes(tag *models.Tag, aliases []models.Tag, catColor func(string) string) (own, spelled []pathLane) {
 	cfg := s.cfgSnapshot()
-	modelPath := s.modelPath()
 	catIDs, _ := s.categoryChoices()
 	active := s.activeGallery()
 	reaches := func(v tagger.LabelView, name, cat string) bool {
@@ -664,7 +663,7 @@ func (s *Server) taggerLanes(tag *models.Tag, aliases []models.Tag, catColor fun
 		if t.Malformed {
 			continue
 		}
-		views, err := tagger.BrowseLabels(modelPath, s.dataPath(), t.Name, taggerTagsFile(t.TaggerInstance), catIDs)
+		views, err := tagger.BrowseLabels(s.dataPath(), t.Name, catIDs)
 		if err != nil {
 			continue
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 )
 
 func rulesStub(t *testing.T, body string) *httptest.Server {
@@ -342,16 +343,13 @@ func TestTheSkipNoteIsMonloadersCondition(t *testing.T) {
 }
 
 func TestTagRulesPanel_TaggerThresholdAndOffLanes(t *testing.T) {
-	srv, modelPath := newModelServer(t,
+	srv, _ := newModelServer(t,
 		config.TaggerInstance{Name: "alpha", Enabled: true, ConfidenceThreshold: 0.35, CategoryThresholds: map[string]float64{"general": 0.6}, TagsFile: "tags.csv"},
 		config.TaggerInstance{Name: "beta", Enabled: true, ConfidenceThreshold: 0.35, TagsFile: "tags.csv", Galleries: []string{}},
 		config.TaggerInstance{Name: "gamma", Enabled: false, ConfidenceThreshold: 0.35, TagsFile: "tags.csv"},
 		config.TaggerInstance{Name: "delta", Enabled: true, ConfidenceThreshold: 0.35, TagsFile: "tags.csv"},
 	)
-	for _, name := range []string{"alpha", "beta", "gamma"} {
-		installTagger(t, modelPath, name, "tag_id,name,category\n1,watermark,0\n")
-	}
-	installTagger(t, modelPath, "delta", "tag_id,name,category\n1,other,0\n")
+	taggertest.Use(t, map[string][]string{"alpha": {"watermark"}, "beta": {"watermark"}, "gamma": {"watermark"}, "delta": {"other"}})
 	cx := srv.active()
 	tag := mustTag(t, cx.TagSvc, "watermark", cx.GeneralCategoryID)
 

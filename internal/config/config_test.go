@@ -1075,3 +1075,45 @@ func TestLoadWarnsOnAnUnknownKey(t *testing.T) {
 		t.Errorf("BindAddress = %q, want the default", cfg.Server.BindAddress)
 	}
 }
+
+func TestAnUpgradeThatTagsKeepsItsLocalWorker(t *testing.T) {
+	tagging := "[tagger]\n\n[[tagger.taggers]]\nname = \"wd-swinv2\"\nenabled = true\n"
+	for _, tc := range []struct {
+		name, section string
+		want          bool
+	}{
+		{"an enabled tagger and no key", tagging, true},
+		{"no enabled tagger", "[tagger]\n\n[[tagger.taggers]]\nname = \"wd-swinv2\"\nenabled = false\n", false},
+		{"the key set off", "[tagger]\nlocal_worker = false\n\n[[tagger.taggers]]\nname = \"wd-swinv2\"\nenabled = true\n", false},
+		{"no tagger section", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, baseTOML+tc.section)
+			if got := mustLoad(t, path).Tagger.LocalWorker; got != tc.want {
+				t.Fatalf("local_worker = %v, want %v", got, tc.want)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if written := strings.Contains(string(data), "local_worker = true"); written != tc.want {
+				t.Errorf("local_worker = true written: %v, want %v:\n%s", written, tc.want, data)
+			}
+		})
+	}
+}
+
+func TestANewInstallStartsWithTheLocalWorkerOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "monbooru.toml")
+	cfg, err := LoadWithDefaults(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tagger.LocalWorker {
+		t.Error("a new install starts with the local worker on")
+	}
+	t.Setenv("MONBOORU_TAGGER_LOCAL_WORKER", "true")
+	if cfg := mustLoad(t, path); !cfg.Tagger.LocalWorker || cfg.EnvPinned("tagger.local_worker") != "MONBOORU_TAGGER_LOCAL_WORKER" {
+		t.Errorf("the variable did not turn it on: %v", cfg.Tagger.LocalWorker)
+	}
+}

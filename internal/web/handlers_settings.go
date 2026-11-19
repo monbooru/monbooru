@@ -2,14 +2,17 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
@@ -37,6 +40,11 @@ type settingsData struct {
 	ScheduleScope      scheduleScope
 	Stats              statsData
 	ExecutionProviders []struct{ Name, Label string }
+	Workers            workersData
+	LocalRunning       bool
+	TaggerProvider     string
+	InstallTargets     []installTarget
+	CPUCount           int
 	ScheduleModes      []scheduleModeRow
 	PluginPairing      map[string]any
 	PluginRows         []pluginRowView
@@ -57,9 +65,12 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 	base := s.base(r, "settings", "Settings - "+s.booruName())
 	panel := s.pairViewData()
 	delete(panel, "Notice")
-	modelPath := s.modelPath()
-	catalog := tagger.LoadCatalog(modelPath)
-	s.reconcileTaggers(catalog)
+	// The install dialog says to reload this page once the files are in.
+	glance, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	tagger.CurrentPool().Glance(glance)
+	cancel()
+	catalog := tagger.LoadCatalog()
+	s.reconcileTaggers()
 	cfg := s.cfgSnapshot()
 	taggers := tagger.AvailableTaggers(cfg)
 	taggerByName := map[string]tagger.TaggerStatus{}
@@ -71,30 +82,28 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 	catalogNames := map[string]bool{}
 	for _, e := range catalog {
 		catalogNames[e.Name] = true
-		target := filepath.Join(modelPath, e.Name)
-		get := e.Missing(target)
 		row := taggerRow{}
 		if t, installed := taggerByName[e.Name]; installed {
-			row = s.installedTaggerRow(t, totalGalleries, modelPath, &e)
-			if !t.Missing || t.Malformed {
-				get.Files = nil
-			}
+			row = s.installedTaggerRow(t, totalGalleries, &e)
 		}
 		row.Name = e.Name
-		row.Files, row.TargetDir = get.Files, target
 		row.Supported = true
 		row.Description = e.Description
 		row.Gated = e.Gated
-		row.HostCommand = get.HostCommand()
+		row.HostCommand = e.Command
+		if e.Command != "" {
+			row.Files, row.TargetDir = e.Files, filepath.Join(s.modelPath(), e.Name)
+		}
 		supportedRows = append(supportedRows, row)
 	}
 	for _, t := range taggers {
 		if catalogNames[t.Name] {
 			continue
 		}
-		unsupportedRows = append(unsupportedRows, s.installedTaggerRow(t, totalGalleries, modelPath, nil))
+		unsupportedRows = append(unsupportedRows, s.installedTaggerRow(t, totalGalleries, nil))
 	}
 	taggerRows := append(supportedRows, unsupportedRows...)
+	workers := s.workersView()
 	s.renderTemplate(w, "settings.html", settingsData{
 		baseData:           base,
 		Galleries:          s.galleryRowsWithSnapshot(s.activeGallery(), base.VisibleCount, base.TagCount),
@@ -105,6 +114,11 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		ScheduleScope:      scheduleScopeView(cfg, taggers, base.MonloaderPaired),
 		Stats:              s.gatherStats(),
 		ExecutionProviders: config.ExecutionProviders,
+		Workers:            workers,
+		LocalRunning:       s.local != nil && s.local.running(),
+		TaggerProvider:     s.taggerProvider(cfg),
+		InstallTargets:     s.installTargets(cfg, workers),
+		CPUCount:           runtime.NumCPU(),
 		ScheduleModes:      scheduleModeRows(),
 		PluginPairing:      panel,
 		PluginRows:         s.pluginRows(),

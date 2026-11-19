@@ -2679,6 +2679,13 @@ document.addEventListener('click', function (e) {
   dlg.showModal();
 });
 
+document.addEventListener('change', function (e) {
+  var r = e.target.closest('input[name="tagger-cmd-worker"]');
+  if (!r) return;
+  document.getElementById('tagger-cmd-where').textContent = r.dataset.where || '';
+  document.getElementById('tagger-cmd-dir').textContent = r.dataset.dir || '';
+});
+
 var _jobAutoClearTimer = null;
 var _jobAutoClearFinishedAt = '';
 var _lastReloadedFinishedAt = '';

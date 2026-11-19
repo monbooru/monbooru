@@ -53,6 +53,16 @@ func ResolveMinHits(fraction float64, frameCount int) int {
 	return min(max(int(math.Ceil(fraction*float64(frameCount))), 2), 10)
 }
 
+type TagKey struct {
+	Name  string
+	CatID int64
+}
+
+type Scored struct {
+	Score      float32
+	TaggerName string
+}
+
 type CandidateLabel struct {
 	Name        string
 	CatID       int64

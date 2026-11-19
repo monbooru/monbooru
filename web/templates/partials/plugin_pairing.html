@@ -24,16 +24,24 @@
     <tbody>
       {{range .AutoPaired}}
       <tr>
-        <td class="stack-head"><strong>{{.App}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}</td>
+        <td class="stack-head"><strong>{{or .Worker .App}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}</td>
         <td data-label="Source">{{.Source}}</td>
         <td data-label="When">{{.At.Format "15:04"}}</td>
         <td data-label="Scopes">{{range $i, $s := .Scopes}}{{if $i}} {{end}}{{$s}}{{else}}<span class="status-dim">none</span>{{end}}</td>
         <td class="cell-action">
+          {{with .Worker}}
+          <form hx-post="/settings/workers/{{.}}/remove" hx-target="#tagger-workers" hx-swap="outerHTML"
+                hx-confirm="Remove the worker {{.}}?" data-confirm-ok="Remove"
+                data-confirm-danger="{{.}} must pair again before monbooru can tag with it." style="display:inline">
+            <button type="submit" class="btn-sm btn-danger">Revoke</button>
+          </form>
+          {{else}}
           <form hx-post="/settings/plugins/{{.App}}/remove" hx-target="#plugin-rows" hx-swap="outerHTML"
                 hx-confirm="Revoke the {{.App}} pairing?" data-confirm-ok="Revoke"
                 data-confirm-danger="{{.App}} must pair again before it can call monbooru." style="display:inline">
             <button type="submit" class="btn-sm btn-danger">Revoke</button>
           </form>
+          {{end}}
         </td>
       </tr>
       {{end}}

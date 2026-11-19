@@ -88,3 +88,12 @@ func TestRevokeKeepsAPluginBlocksOperatorLines(t *testing.T) {
 		t.Error("the enable was cleared with the pairing")
 	}
 }
+
+func TestOnlyAWorkersKeyNamesAWorker(t *testing.T) {
+	if name, ok := WorkerLabel(WorkerKey("gpu-box")); !ok || name != "gpu-box" {
+		t.Errorf("a worker's key: %q %v", name, ok)
+	}
+	if name, ok := WorkerLabel("monloader"); ok || name != "" {
+		t.Errorf("monloader: %q %v, want no worker", name, ok)
+	}
+}

@@ -5,7 +5,6 @@ go 1.27.4
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/yalue/onnxruntime_go v1.19.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.48.0
 	golang.org/x/sys v0.50.0

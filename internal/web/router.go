@@ -83,12 +83,15 @@ type Server struct {
 	cfgMu      sync.RWMutex // guards cfg reads/writes and config.Save calls
 	jobs       *jobs.Manager
 	pairs      *peer.Store
-	sessions   *session.Store
-	loginRL    *session.Backoff
-	tmpl       *template.Template
-	staticFS   fs.FS
-	lightFS    fs.FS
-	done       chan struct{}
+	// pool is every worker the config names, the local one first.
+	pool     *tagger.Pool
+	local    *localWorker
+	sessions *session.Store
+	loginRL  *session.Backoff
+	tmpl     *template.Template
+	staticFS fs.FS
+	lightFS  fs.FS
+	done     chan struct{}
 
 	desktop bool
 	// A field so a test can run the handler without an opener popping a window.
@@ -202,6 +205,16 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 
 	go s.runPluginProbes()
 	tagger.MoveDispatchOverlays(cfg.Paths.ModelPath, cfg.Paths.DataPath)
+	s.pool = tagger.NewPool(filepath.Join(cfg.Paths.DataPath, "workers"))
+	s.local = newLocalWorker()
+	s.syncWorkers(cloneConfig(cfg))
+	tagger.SetPool(s.pool)
+	poolCtx, stopPool := context.WithCancel(context.Background())
+	go func() {
+		<-s.done
+		stopPool()
+	}()
+	go s.pool.Run(poolCtx, workerRefresh)
 	s.seedThemesDir()
 	plugins.EnsureDir(s.pluginsDir())
 	s.peers.StartManaged(s.effectivePlugins())
@@ -209,6 +222,9 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 
 	return s, nil
 }
+
+// How often each worker is asked what it holds.
+const workerRefresh = 30 * time.Second
 
 // Long enough that a paused browse skips the rebuild, short enough that a
 // finished one frees the memory.
@@ -255,20 +271,6 @@ func (s *Server) runMemoryReclaim() {
 			s.ml.Fetches.Prune()
 			s.ml.ReconcileAll(s.allContexts())
 			debug.FreeOSMemory()
-			s.cfgMu.RLock()
-			mins := s.cfg.Tagger.IdleReleaseAfterMinutes
-			s.cfgMu.RUnlock()
-			if mins > 0 {
-				before := desktop.ProcStatus("self", "VmRSS")
-				if tagger.ReleaseIdle(time.Duration(mins) * time.Minute) {
-					after := desktop.ProcStatus("self", "VmRSS")
-					if before > 0 && after > 0 && before > after {
-						logx.Infof("memory reclaim: released idle auto-tagger session (-%s)", webui.HumanBytes(int64(before-after)))
-					} else {
-						logx.Infof("memory reclaim: released idle auto-tagger session")
-					}
-				}
-			}
 		case <-s.done:
 			return
 		}
@@ -567,6 +569,12 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /images/{id}/relations", s.imageRelationsPage)
 	rt.read("POST /settings/maintenance/vacuum-db", s.vacuumDBPost)
 	rt.read("POST /settings/maintenance/free-memory", s.freeMemoryPost)
+	rt.free("POST /settings/workers/local/enable", s.taggerLocalWorkerPost(true))
+	rt.free("POST /settings/workers/local/disable", s.taggerLocalWorkerPost(false))
+	rt.free("POST /settings/workers/{name}/pause", s.taggerWorkerPausePost(true))
+	rt.free("POST /settings/workers/{name}/resume", s.taggerWorkerPausePost(false))
+	rt.free("POST /settings/workers/{name}/remove", s.taggerWorkerRemovePost)
+	rt.free("GET /internal/workers", s.taggerWorkersGet)
 	rt.free("POST /settings/tagger/{name}/enable", s.settingsTaggerEnablePost)
 	rt.free("POST /settings/tagger/{name}/disable", s.settingsTaggerDisablePost)
 	rt.free("POST /settings/tagger/{name}/delete", s.settingsTaggerDeletePost)
@@ -1060,6 +1068,7 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	c.Plugins = slices.Clone(c.Plugins)
 	c.Auth.Tokens = slices.Clone(c.Auth.Tokens)
 	c.Tagger.Taggers = slices.Clone(c.Tagger.Taggers)
+	c.Workers = slices.Clone(c.Workers)
 	return &c
 }
 
@@ -1309,29 +1318,48 @@ func (s *Server) Close() {
 	default:
 		close(s.done)
 	}
-	// Otherwise ReleaseAll waits out a running auto-tag chunk.
 	s.jobs.Cancel()
 	const jobWait = 5 * time.Second
 	if !s.jobs.WaitIdle(jobWait) {
 		logx.Warnf("shutdown: a job was still running %s after its cancel", jobWait)
 	}
 	s.peers.StopAll()
-	tagger.ReleaseAll()
 	s.set.Close()
 }
 
 func (s *Server) withConfig(fn func(*config.Config) error) error {
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
 	before := cloneConfig(s.cfg)
 	if err := fn(s.cfg); err != nil {
 		*s.cfg = *before
+		s.cfgMu.Unlock()
 		return err
 	}
 	if err := config.Save(s.cfg, s.configPath); err != nil {
 		*s.cfg = *before
+		s.cfgMu.Unlock()
 		logx.Errorf("config save: %v", err)
 		return err
 	}
+	after := cloneConfig(s.cfg)
+	s.cfgMu.Unlock()
+	// Outside the lock: stopping the local worker waits for it to exit.
+	s.syncWorkers(after)
 	return nil
+}
+
+// syncWorkers runs the local worker as cfg says and gives the pool every
+// worker that runs or is paired.
+func (s *Server) syncWorkers(cfg *config.Config) {
+	if s.pool == nil {
+		return
+	}
+	defs := make([]tagger.WorkerDef, 0, len(cfg.Workers)+1)
+	if s.local != nil && s.local.apply(s.peers.Supervisor, cfg) {
+		defs = append(defs, s.local.def())
+	}
+	for _, w := range cfg.Workers {
+		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Paused: w.Paused})
+	}
+	s.pool.Set(defs)
 }

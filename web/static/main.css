@@ -2580,6 +2580,7 @@ body.reader-body {
 }
 .peer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .peer-address { color: var(--fg-dim); }
+.worker-table .worker-name { white-space: nowrap; }
 .peer-line { margin-top: 4px; font-size: 12px; }
 .peer-label { display: inline-block; min-width: 64px; color: var(--fg-dim); }
 #plugins .peer-row .field { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 12px; }
