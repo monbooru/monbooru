@@ -343,6 +343,18 @@ func TestBooruLookups(t *testing.T) {
 	}
 }
 
+func TestBooruFavicon(t *testing.T) {
+	env, base, _ := booruEnv(t)
+	w := env.do("GET", base+"/favicon.ico")
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/theme.favicon" {
+		t.Errorf("favicon.ico: %d to %q, want 302 to /theme.favicon", w.Code, w.Header().Get("Location"))
+	}
+	wrong := BooruPath(env.cfg.DefaultGallery, strings.Repeat("0", 32)) + "/favicon.ico"
+	if w := env.do("GET", wrong); w.Code != http.StatusUnauthorized {
+		t.Errorf("favicon.ico under a wrong key: %d, want 401", w.Code)
+	}
+}
+
 func TestBooruFiles(t *testing.T) {
 	env, base, id := booruEnv(t)
 	cases := []struct {
