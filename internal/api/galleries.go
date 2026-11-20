@@ -61,7 +61,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
 	node := gallery.FindFolder(tree, path)
 	if node == nil {
-		contract.WriteError(w, http.StatusNotFound, "not_found", "folder not found: "+path)
+		contract.WriteError(w, http.StatusNotFound, contract.CodeFolderNotFound, "folder not found: "+path)
 		return
 	}
 	offset, limit := parsePage(r, contract.FolderPageSize, contract.FolderPageSize)
