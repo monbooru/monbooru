@@ -93,6 +93,12 @@ func buildSpec(baseURL string) map[string]any {
 					"tags":   map[string]any{"type": "integer", "description": "Non-alias tag count"},
 					"active": map[string]any{"type": "boolean", "description": "True for the gallery used when no ?gallery= selector is given"},
 				}),
+				"Folder": objectSchema(nil, map[string]any{
+					"path":    map[string]any{"type": "string", "description": "Relative to the gallery, /-separated; what a folder field and path take"},
+					"name":    map[string]any{"type": "string", "description": "The last path segment"},
+					"images":  map[string]any{"type": "integer", "description": "Visible (non-missing) images in this folder and every folder under it"},
+					"folders": map[string]any{"type": "integer", "description": "How many subfolders it has; 0 for a leaf"},
+				}),
 				"Tagger": objectSchema(nil, map[string]any{
 					"name":      map[string]any{"type": "string", "description": "The tagger's folder name under paths.model_path; what tagger_name takes"},
 					"enabled":   map[string]any{"type": "boolean", "description": "Turned on in Settings"},
@@ -122,6 +128,7 @@ func buildSpec(baseURL string) map[string]any {
 					"count": map[string]any{"type": "integer", "description": "Members whose file is present"},
 				}),
 				"PaginatedCollections": paginatedSchema("#/components/schemas/Collection"),
+				"PaginatedFolders":     paginatedSchema("#/components/schemas/Folder"),
 				"ImplicationJob": objectSchema(nil, map[string]any{
 					"created": map[string]any{"type": "boolean", "description": "Declare only: false when the edge already existed and is re-applied"},
 					"job":     map[string]any{"type": "string", "description": "GET /jobs/current follows the run"},
@@ -984,6 +991,35 @@ func buildSpec(baseURL string) map[string]any {
 					map[string]any{
 						"200": map[string]any{"description": "Galleries with counts and the active flag", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Gallery"}}}}},
 						"500": resp("A gallery's counts could not be read", "#/components/schemas/Error"),
+					}),
+			},
+			"/folders": map[string]any{
+				"get": op("List a folder's subfolders", "listFolders",
+					[]map[string]any{
+						galleryParam(),
+						queryParam("path", "The folder to list, relative to the gallery; empty for the top level"),
+						queryParam("page", "Page number"),
+						queryParam("limit", "Results per page (default and max 500)"),
+						queryParam("page_size", "Synonym for limit"),
+					},
+					map[string]any{
+						"200": resp("One level, in path order; only folders holding a visible image, or a folder under them, are listed", "#/components/schemas/PaginatedFolders"),
+						"404": resp("No visible image sits at or under path", "#/components/schemas/Error"),
+						"500": resp("The folders could not be read", "#/components/schemas/Error"),
+					}),
+			},
+			"/folders/search": map[string]any{
+				"get": op("Search a gallery's folders", "searchFolders",
+					[]map[string]any{
+						galleryParam(),
+						queryParam("q", "Part of the path, case-insensitive; empty finds nothing"),
+						queryParam("limit", "Results (default 10, max 100)"),
+					},
+					map[string]any{
+						"200": map[string]any{"description": "Folders whose path starts with q, then those holding it elsewhere, each in path order", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{
+							"results": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Folder"}},
+						})}}},
+						"500": resp("The folders could not be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/jobs/current": map[string]any{
