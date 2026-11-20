@@ -48,9 +48,6 @@ func reasonFrom(taggers []TaggerStatus) string {
 
 func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTaggers(cfg) }
 
-// Status is the local worker's.
-func Status() CacheStatus { return currentPool().LocalStatus() }
-
 // RunWithTaggers takes only enabled, available taggers and returns how many
 // ids were left untagged; a handle with no thumbnails path extracts pages
 // under the system temp directory.

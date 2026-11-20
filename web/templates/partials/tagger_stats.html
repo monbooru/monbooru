@@ -4,21 +4,20 @@
   <div class="table-scroll">
   <table class="stats-table">
     <tbody>
-      {{if .Loaded}}
-      <tr><th>Mode</th><td>{{providerLabel .Provider}}</td></tr>
-      <tr><th>Status</th><td>
-        {{if .InUse}}running
-        {{else}}idle{{end}}
-      </td></tr>
-      <tr><th>Models</th><td>{{range $i, $n := .Sessions}}{{if $i}}, {{end}}{{$n}}{{end}}</td></tr>
+      {{range .}}
+      <tr><th>{{.Name}}</th><td>{{.State}}</td></tr>
+      {{if .Up}}
+      <tr><th class="stats-d1">Mode</th><td>{{or .Provider "-"}}</td></tr>
+      <tr><th class="stats-d1">Models</th><td>{{range $i, $n := .Loaded}}{{if $i}}, {{end}}{{$n}}{{else}}not loaded{{end}}</td></tr>
+      {{end}}
       {{if .WorkerRSS}}
-      <tr><th>Worker PID</th><td>{{.WorkerPID}}</td></tr>
+      <tr><th class="stats-d1">Worker PID</th><td>{{.WorkerPID}}</td></tr>
       <tr><th class="stats-d1">Worker memory (RSS)</th><td>{{humanBytes .WorkerRSS}}</td></tr>
       <tr><th class="stats-d2">Worker native (ONNX + CGO)</th><td>{{humanBytes .WorkerAnon}}</td></tr>
       <tr><th class="stats-d2">Worker code &amp; libs</th><td>{{humanBytes .WorkerFile}}</td></tr>
       {{end}}
       {{else}}
-      <tr><th>Status</th><td>not loaded</td></tr>
+      <tr><th>Status</th><td>no worker</td></tr>
       {{end}}
     </tbody>
   </table>

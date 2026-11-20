@@ -203,3 +203,36 @@ func TestTheStatsBlockOfTheTaggerPollsOnItsOwn(t *testing.T) {
 	}
 	wantNotIn(t, block, "<h4>Database size per gallery</h4>")
 }
+
+func TestTheStatsBlockListsEveryWorker(t *testing.T) {
+	srv := newTestServer(t)
+	_, body := getBody(t, srv, "/internal/tagger-stats")
+	wantIn(t, body, "<th>Status</th><td>no worker</td>")
+
+	busy := fakeWorker(t, "cuda", "a")
+	gone := fakeWorker(t, "cpu", "a")
+	gone.Close()
+	usePool(t,
+		tagger.WorkerDef{Name: "gpu-box", URL: busy.URL, Token: "tok"},
+		tagger.WorkerDef{Name: "laptop", URL: fakeWorker(t, "cpu", "a").URL, Token: "tok"},
+		tagger.WorkerDef{Name: "attic", URL: gone.URL, Token: "tok"},
+	)
+	f := busy.Config.Handler.(*worker.Fake)
+	f.Mu.Lock()
+	f.Info.Loaded, f.Info.Busy = []string{"wd-swinv2"}, true
+	f.Mu.Unlock()
+	_, body = getBody(t, srv, "/internal/tagger-stats")
+	compact := strings.Join(strings.Fields(body), "")
+	for _, want := range []string{
+		`<th>gpu-box</th><td>tagging</td></tr><tr><thclass="stats-d1">Mode</th>`,
+		`<th>laptop</th><td>idle</td>`,
+		`<thclass="stats-d1">Mode</th><td>CUDA</td></tr><tr><thclass="stats-d1">Models</th><td>wd-swinv2</td>`,
+		`<thclass="stats-d1">Models</th><td>notloaded</td>`,
+		`<th>attic</th><td>offlinesince`,
+	} {
+		wantIn(t, compact, want)
+	}
+	_, attic, _ := strings.Cut(compact, "<th>attic</th>")
+	wantNotIn(t, attic, "Mode")
+	wantNotIn(t, compact, "WorkerPID")
+}

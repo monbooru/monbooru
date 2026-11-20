@@ -29,6 +29,8 @@ type workerRow struct {
 	// Dot is the footer dot's state: ok, down or paused.
 	Dot, State string
 	Models     []workerModel
+	// Loaded names the models the worker has loaded now.
+	Loaded []string
 }
 
 type workersData struct {
@@ -55,27 +57,12 @@ func (s *Server) workersView() workersData {
 	}
 	first := map[string]tagger.WorkerView{}
 	for _, v := range views {
-		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, ModelsDir: v.Info.ModelsDir}
+		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, ModelsDir: v.Info.ModelsDir,
+			Loaded: slices.Sorted(slices.Values(v.Info.Loaded))}
 		if v.Info.Provider != "" {
 			row.Provider = config.ExecutionProviderLabel(v.Info.Provider)
 		}
-		switch {
-		case v.Paused:
-			row.Dot, row.State = "paused", "paused"
-		case !v.Checked:
-			row.Dot, row.State = "paused", "starting"
-		case !v.Up:
-			row.Dot, row.State = "down", "offline"
-			if !v.DownSince.IsZero() {
-				row.State = "offline since " + v.DownSince.Local().Format("15:04")
-			}
-		case v.InUse || v.Info.Busy:
-			row.Dot, row.State = "ok", "tagging"
-		case v.Standby:
-			row.Dot, row.State = "ok", "standby"
-		default:
-			row.Dot, row.State = "ok", "idle"
-		}
+		row.Dot, row.State = workerState(v)
 		for _, m := range v.Models {
 			wm := workerModel{Name: m.Name}
 			if f, ok := first[m.Name]; !ok {
@@ -93,6 +80,25 @@ func (s *Server) workersView() workersData {
 		}
 	}
 	return d
+}
+
+func workerState(v tagger.WorkerView) (dot, state string) {
+	switch {
+	case v.Paused:
+		return "paused", "paused"
+	case !v.Checked:
+		return "paused", "starting"
+	case !v.Up:
+		if v.DownSince.IsZero() {
+			return "down", "offline"
+		}
+		return "down", "offline since " + v.DownSince.Local().Format("15:04")
+	case v.InUse || v.Info.Busy:
+		return "ok", "tagging"
+	case v.Standby:
+		return "ok", "standby"
+	}
+	return "ok", "idle"
 }
 
 func modelDigest(v tagger.WorkerView, name string) string {

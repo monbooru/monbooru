@@ -1,7 +1,6 @@
 package tagger
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -589,31 +588,6 @@ func (p *Pool) reading() bool {
 		}
 	}
 	return false
-}
-
-// LocalStatus is what the local worker says it has loaded.
-func (p *Pool) LocalStatus() CacheStatus {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, w := range p.workers {
-		if w.def.Local && w.up {
-			return CacheStatus{
-				Loaded:   len(w.cache.Info.Loaded) > 0,
-				Provider: cmp.Or(w.cache.Info.Provider, "cpu"),
-				InUse:    w.inUse > 0 || w.cache.Info.Busy,
-				Sessions: slices.Sorted(slices.Values(w.cache.Info.Loaded)),
-			}
-		}
-	}
-	return CacheStatus{}
-}
-
-// CacheStatus.Sessions is sorted so a refresh doesn't reorder the list.
-type CacheStatus struct {
-	Loaded   bool
-	Provider string
-	InUse    bool
-	Sessions []string
 }
 
 // WorkersDescribed is whether every worker has said once what it holds,

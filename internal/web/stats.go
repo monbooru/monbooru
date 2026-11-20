@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/desktop"
-	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 type galleryDBStats struct {
@@ -24,11 +23,13 @@ type mountStats struct {
 	UsedPct   int
 }
 
-type taggerCacheStats struct {
-	Loaded     bool
-	Provider   string
-	InUse      bool
-	Sessions   []string
+// workerStats is one worker as the Stats block shows it; the memory is
+// the local worker's only, the one process monbooru can read.
+type workerStats struct {
+	Name, Provider, State string
+	// Up is a worker answering, whose mode and models are worth a row.
+	Up         bool
+	Loaded     []string
 	WorkerPID  int
 	WorkerRSS  int64
 	WorkerAnon int64
@@ -40,7 +41,7 @@ type statsData struct {
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
-	Tagger     taggerCacheStats
+	Tagger     []workerStats
 }
 
 // Cheap by design: no directory walks.
@@ -122,25 +123,24 @@ func (s *Server) gatherStats() statsData {
 	return out
 }
 
-func gatherTaggerStats(s *Server) taggerCacheStats {
-	st := tagger.Status()
-	out := taggerCacheStats{
-		Loaded:   st.Loaded,
-		Provider: st.Provider,
-		InUse:    st.InUse,
-		Sessions: st.Sessions,
-	}
-	// The models live in the worker's inference child, so its memory
-	// counts with the worker's.
-	if pid := s.peers.PID(localWorkerName); pid > 0 {
-		out.WorkerPID = pid
-		for _, p := range append([]int{pid}, procChildren(pid)...) {
-			if r, ok := desktop.ProcRSS(p); ok {
-				out.WorkerRSS += int64(r.Total)
-				out.WorkerAnon += int64(r.Anon)
-				out.WorkerFile += int64(r.File)
+func gatherTaggerStats(s *Server) []workerStats {
+	rows := s.workersView().Rows
+	out := make([]workerStats, 0, len(rows))
+	for _, r := range rows {
+		st := workerStats{Name: r.Name, Provider: r.Provider, State: r.State, Up: r.Dot == "ok", Loaded: r.Loaded}
+		// The models live in the worker's inference child, so its memory
+		// counts with the worker's.
+		if pid := s.peers.PID(localWorkerName); r.Local && !r.Disabled && pid > 0 {
+			st.WorkerPID = pid
+			for _, p := range append([]int{pid}, procChildren(pid)...) {
+				if rss, ok := desktop.ProcRSS(p); ok {
+					st.WorkerRSS += int64(rss.Total)
+					st.WorkerAnon += int64(rss.Anon)
+					st.WorkerFile += int64(rss.File)
+				}
 			}
 		}
+		out = append(out, st)
 	}
 	return out
 }
