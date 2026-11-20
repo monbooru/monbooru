@@ -179,6 +179,38 @@ func FindFolder(tree []FolderNode, path string) *FolderNode {
 	return n
 }
 
+// SearchFolders finds the folders whose path holds q, any case, those
+// starting with it first, in path order, at most limit. A walk of the
+// cached tree: no query per keystroke.
+func SearchFolders(tree []FolderNode, q string, limit int) []*FolderNode {
+	needle := strings.ToLower(strings.TrimSpace(q))
+	root := FindFolder(tree, "")
+	if needle == "" || root == nil {
+		return nil
+	}
+	var starts, holds []*FolderNode
+	var walk func(nodes []FolderNode) bool
+	walk = func(nodes []FolderNode) bool {
+		for i := range nodes {
+			n := &nodes[i]
+			path := strings.ToLower(n.Path)
+			switch {
+			case strings.HasPrefix(path, needle):
+				starts = append(starts, n)
+			case len(holds) < limit && strings.Contains(path, needle):
+				holds = append(holds, n)
+			}
+			if len(starts) >= limit || !walk(n.Children) {
+				return false
+			}
+		}
+		return true
+	}
+	walk(root.Children)
+	found := append(starts, holds...)
+	return found[:min(len(found), limit)]
+}
+
 func FolderTreeUnder(database *db.DB, ceiling RankCeiling) ([]FolderNode, error) {
 	where, args := ceiling.and("i")
 	flat, err := db.QueryAll(database.Read, db.ScanRow(func(fc *folderCount) []any {

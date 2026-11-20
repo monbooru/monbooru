@@ -81,8 +81,6 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	writePage(w, offset/limit+1, limit, len(kids), out)
 }
 
-// Folders whose path holds q, any case, those starting with it first, in
-// path order. A walk of the cached tree: no query per keystroke.
 func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
 	tree, ok := h.folderTree(w, r)
 	if !ok {
@@ -90,28 +88,10 @@ func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	_, limit := contract.PageParams("", q.Get("limit"), folderSearchLimit, folderSearchMax)
-	needle := strings.ToLower(strings.TrimSpace(q.Get("q")))
-	starts, holds := []contract.Folder{}, []contract.Folder{}
-	var walk func(nodes []gallery.FolderNode) bool
-	walk = func(nodes []gallery.FolderNode) bool {
-		for i := range nodes {
-			n := &nodes[i]
-			path := strings.ToLower(n.Path)
-			switch {
-			case strings.HasPrefix(path, needle):
-				starts = append(starts, folderOf(n))
-			case len(holds) < limit && strings.Contains(path, needle):
-				holds = append(holds, folderOf(n))
-			}
-			if len(starts) >= limit || !walk(n.Children) {
-				return false
-			}
-		}
-		return true
+	found := gallery.SearchFolders(tree, q.Get("q"), limit)
+	out := make([]contract.Folder, len(found))
+	for i, n := range found {
+		out[i] = folderOf(n)
 	}
-	if root := gallery.FindFolder(tree, ""); needle != "" && root != nil {
-		walk(root.Children)
-	}
-	out := append(starts, holds...)
-	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out[:min(len(out), limit)]})
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }
