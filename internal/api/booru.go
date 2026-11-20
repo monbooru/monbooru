@@ -360,19 +360,31 @@ type booruPost struct {
 
 // A video's length is only read from here.
 type booruMediaAsset struct {
-	ID          int64    `json:"id"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	MD5         string   `json:"md5"`
-	FileExt     string   `json:"file_ext"`
-	FileSize    int64    `json:"file_size"`
-	ImageWidth  int      `json:"image_width"`
-	ImageHeight int      `json:"image_height"`
-	Duration    *float64 `json:"duration"`
-	Status      string   `json:"status"`
-	FileKey     string   `json:"file_key"`
-	IsPublic    bool     `json:"is_public"`
-	PixelHash   string   `json:"pixel_hash"`
+	ID          int64         `json:"id"`
+	CreatedAt   string        `json:"created_at"`
+	UpdatedAt   string        `json:"updated_at"`
+	MD5         string        `json:"md5"`
+	FileExt     string        `json:"file_ext"`
+	FileSize    int64         `json:"file_size"`
+	ImageWidth  int           `json:"image_width"`
+	ImageHeight int           `json:"image_height"`
+	Duration    *booruSeconds `json:"duration"`
+	Status      string        `json:"status"`
+	FileKey     string        `json:"file_key"`
+	IsPublic    bool          `json:"is_public"`
+	PixelHash   string        `json:"pixel_hash"`
+}
+
+// booruSeconds always carries a decimal point: Go writes 5.0 as 5, which
+// an app declaring the field a double reads as an int and fails the page.
+type booruSeconds float64
+
+func (s booruSeconds) MarshalJSON() ([]byte, error) {
+	out := strconv.FormatFloat(float64(s), 'f', -1, 64)
+	if !strings.Contains(out, ".") {
+		out += ".0"
+	}
+	return []byte(out), nil
 }
 
 func booruPostsOf(base string, g *library.Gallery, images []models.Image) ([]booruPost, error) {
@@ -427,7 +439,7 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 	}
 	p.MediaAsset = booruMediaAsset{
 		ID: img.ID, CreatedAt: created, UpdatedAt: created, MD5: img.MD5, FileExt: ext, FileSize: img.FileSize,
-		ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight, Duration: img.DurationSec, Status: "active", IsPublic: true,
+		ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight, Duration: (*booruSeconds)(img.DurationSec), Status: "active", IsPublic: true,
 	}
 
 	byCategory := map[int][]string{}
