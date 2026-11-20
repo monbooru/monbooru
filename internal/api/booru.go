@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
@@ -716,6 +718,7 @@ var booruRewrites = map[string]booruRewrite{
 	"source":   {"sourceurl", nil},
 	"ratio":    {"ratio", booruRatio},
 	"status":   {"id", booruStatus},
+	"age":      {"date", func(v string) string { return booruAgeAt(v, time.Now()) }},
 	// A user's favorites on Danbooru; a gallery keeps one set, whoever is
 	// named. monbooru keeps no time a post was favorited, so ordfav lists
 	// them newest first.
@@ -871,6 +874,108 @@ func booruStatus(v string) string {
 		return ""
 	}
 	return booruNone
+}
+
+// Danbooru's age: is how long before now a post was made, so each bound
+// becomes that moment and the operators turn around: age:<1w is
+// date:>(a week ago). A bare age is the whole day it falls on. The moment
+// keeps now's time zone, which the date filter reads its values in.
+func booruAgeAt(v string, now time.Time) string {
+	at := func(s string) string {
+		d, ok := booruDuration(s)
+		if !ok {
+			return ""
+		}
+		return now.Add(-d).Format("2006-01-02T15:04:05")
+	}
+	if from, to, ok := strings.Cut(v, ".."); ok {
+		a, b := at(from), at(to)
+		switch {
+		case from == "" && b != "":
+			return ">=" + b
+		case to == "" && a != "":
+			return "<=" + a
+		case a != "" && b != "":
+			return min(a, b) + ".." + max(a, b)
+		}
+		return ""
+	}
+	for _, op := range []struct{ age, date string }{{"<=", ">="}, {">=", "<="}, {"<", ">"}, {">", "<"}} {
+		if rest, ok := strings.CutPrefix(v, op.age); ok {
+			if t := at(rest); t != "" {
+				return op.date + t
+			}
+			return ""
+		}
+	}
+	d, ok := booruDuration(v)
+	if !ok {
+		return ""
+	}
+	return now.Add(-d).Format(time.DateOnly)
+}
+
+// Danbooru's units, smallest first; a month and a year are averages.
+var booruDurationUnits = []struct {
+	name string
+	size time.Duration
+}{
+	{"seconds", time.Second},
+	{"minutes", time.Minute},
+	{"hours", time.Hour},
+	{"days", 24 * time.Hour},
+	{"weeks", 7 * 24 * time.Hour},
+	{"months", 8766 * time.Hour / 12},
+	{"years", 8766 * time.Hour},
+}
+
+// booruDuration reads a duration as Danbooru does: numbers each followed by
+// a unit, largest first (1y2mo). A unit may be cut to any prefix that
+// names only it, m is minutes, and a number without one is seconds.
+func booruDuration(s string) (time.Duration, bool) {
+	var total time.Duration
+	prev := len(booruDurationUnits)
+	for s != "" {
+		num := strings.TrimLeft(s, "0123456789.")
+		n, err := strconv.ParseFloat(s[:len(s)-len(num)], 64)
+		rest := strings.TrimLeftFunc(num, unicode.IsLetter)
+		unit := booruDurationUnit(strings.ToLower(num[:len(num)-len(rest)]))
+		if err != nil || unit < 0 || unit >= prev {
+			return 0, false
+		}
+		part := n * float64(booruDurationUnits[unit].size)
+		if part > float64(1<<62) {
+			return 0, false
+		}
+		total += time.Duration(part)
+		prev, s = unit, rest
+	}
+	return total, prev < len(booruDurationUnits)
+}
+
+func booruDurationUnit(abbr string) int {
+	switch abbr {
+	case "":
+		return 0
+	case "m":
+		return 1
+	case "hr":
+		return 2
+	case "wk":
+		return 4
+	case "yr":
+		return 6
+	}
+	found := -1
+	for i, u := range booruDurationUnits {
+		if strings.HasPrefix(u.name, abbr) {
+			if found >= 0 {
+				return -1
+			}
+			found = i
+		}
+	}
+	return found
 }
 
 // Danbooru names a file type by its extension. One monbooru does not know
