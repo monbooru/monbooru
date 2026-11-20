@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/api"
@@ -36,13 +35,10 @@ type booruEndpointsView struct {
 // picked, on the host this browser reached, as an app on the same network
 // reaches it. Each gallery shows whether it answers there.
 func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
-	s.cfgMu.RLock()
-	auth, bind := s.cfg.Auth, s.cfg.Server.BindAddress
-	auth.Tokens = slices.Clone(auth.Tokens)
-	s.cfgMu.RUnlock()
-	chosen := api.ChosenBooruToken(auth)
+	c := s.cfgSnapshot()
+	chosen := api.ChosenBooruToken(c.Auth)
 	var v booruEndpointsView
-	for _, t := range auth.Tokens {
+	for _, t := range c.Auth.Tokens {
 		if api.BooruToken(t) {
 			v.Options = append(v.Options, booruTokenOption{ID: t.ID, Name: t.Name, Chosen: chosen != nil && chosen.ID == t.ID})
 		}
@@ -51,11 +47,11 @@ func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 		return v
 	}
 	origin, key := s.browserOrigin(r), api.BooruKey(chosen.TokenHash)
-	for _, g := range s.galleries() {
+	for _, g := range c.Galleries {
 		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key), On: g.Booru})
 	}
 	switch {
-	case desktop.IsLoopbackAddr(bind):
+	case desktop.IsLoopbackAddr(c.Server.BindAddress):
 		v.Unreachable = "monbooru only answers this computer, so a phone cannot reach these addresses. " +
 			"Set server.bind_address to 0.0.0.0 with its port (MONBOORU_SERVER_BIND_ADDRESS) and restart."
 	case desktop.IsLoopbackAddr(r.Host):
