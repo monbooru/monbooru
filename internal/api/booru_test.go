@@ -128,6 +128,7 @@ func booruEnv(t *testing.T) (*testEnv, string, int64) {
 	t.Helper()
 	env := newTestEnv(t)
 	env.cfg.Auth.BooruTokenID = env.cfg.Auth.Tokens[0].ID
+	env.cfg.FindGallery(env.cfg.DefaultGallery).Booru = true
 	id := env.createTestImage(t, "booru.png", 40, 30)
 	body, _ := json.Marshal(map[string]any{"tags": []string{"blue_sky", "artist:user_a", "character:char_a", "rating:explicit"}})
 	mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", id), body), http.StatusOK)

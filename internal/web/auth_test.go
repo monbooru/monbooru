@@ -727,6 +727,9 @@ func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
 	setTokens(srv, []apitoken.Token{tok})
 	pickBooruToken(srv, tok.ID)
+	srv.cfgMu.Lock()
+	srv.cfg.Galleries[0].Booru = true
+	srv.cfgMu.Unlock()
 	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 	cases := []struct {
 		name, path string

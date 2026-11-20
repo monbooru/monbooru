@@ -133,13 +133,19 @@ func (h *Handler) booru(next booruHandler) http.HandlerFunc {
 }
 
 // The key is checked before the gallery, so a wrong key learns nothing
-// about which galleries exist.
+// about which galleries exist, and a gallery not turned on answers as one
+// that does not.
 func (h *Handler) booruGallery(w http.ResponseWriter, r *http.Request) (*library.Gallery, bool) {
-	if !booruKeyValid(h.cfg().Auth, r.PathValue("key")) {
+	cfg := h.cfg()
+	if !booruKeyValid(cfg.Auth, r.PathValue("key")) {
 		contract.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid key")
 		return nil, false
 	}
-	g, ok := h.resolver(r.PathValue("gallery"))
+	name := r.PathValue("gallery")
+	g, ok := h.resolver(name)
+	if gc := cfg.FindGallery(name); gc == nil || !gc.Booru {
+		ok = false
+	}
 	if !ok {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "unknown gallery")
 		return nil, false
