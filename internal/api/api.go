@@ -81,7 +81,8 @@ func (h *Handler) WithFavicon(url func() string) *Handler {
 }
 
 // WithGalleryLock hands the upload routes the gallery lock their caller
-// holds around every other route, to take once their body is read.
+// holds around every other route, to take once their body is read. The
+// booru layer takes it itself too, to let go before a file's bytes.
 func (h *Handler) WithGalleryLock(lock func() (unlock func())) *Handler {
 	h.lock = lock
 	return h

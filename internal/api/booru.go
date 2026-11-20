@@ -102,9 +102,9 @@ func (h *Handler) mountBooru(mux *http.ServeMux) {
 	mux.HandleFunc(at+"autocomplete.json", h.booru(booruAutocomplete))
 	mux.HandleFunc(at+"tags.json", h.booru(booruTags))
 	mux.HandleFunc(at+"notes.json", h.booru(booruNotes))
-	mux.HandleFunc(at+"file/{name}", h.booru(booruFile(fileOf)))
-	mux.HandleFunc(at+"sample/{name}", h.booru(booruFile(booruSampleOf)))
-	mux.HandleFunc(at+"thumb/{name}", h.booru(booruFile(thumbnailOf)))
+	mux.HandleFunc(at+"file/{name}", h.booruFile(fileOf))
+	mux.HandleFunc(at+"sample/{name}", h.booruFile(booruSampleOf))
+	mux.HandleFunc(at+"thumb/{name}", h.booruFile(thumbnailOf))
 	mux.HandleFunc(at+"favicon.ico", h.booru(h.booruFavicon))
 	mux.HandleFunc(at+"{rest...}", h.booru(booruEmpty))
 }
@@ -119,20 +119,58 @@ func (h *Handler) booruFavicon(w http.ResponseWriter, r *http.Request, _ *librar
 	http.Redirect(w, r, h.favicon(), http.StatusFound)
 }
 
-// The key is checked before the gallery, so a wrong key learns nothing
-// about which galleries exist.
+// The layer takes the gallery lock itself, so its files can let go of it.
 func (h *Handler) booru(next booruHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !booruKeyValid(h.cfg().Auth, r.PathValue("key")) {
-			contract.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid key")
-			return
+		if h.lock != nil {
+			defer h.lock()()
 		}
-		g, ok := h.resolver(r.PathValue("gallery"))
-		if !ok {
-			contract.WriteError(w, http.StatusNotFound, "not_found", "unknown gallery")
-			return
+		if g, ok := h.booruGallery(w, r); ok {
+			next(w, r, g)
 		}
-		next(w, r, g)
+	}
+}
+
+// The key is checked before the gallery, so a wrong key learns nothing
+// about which galleries exist.
+func (h *Handler) booruGallery(w http.ResponseWriter, r *http.Request) (*library.Gallery, bool) {
+	if !booruKeyValid(h.cfg().Auth, r.PathValue("key")) {
+		contract.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid key")
+		return nil, false
+	}
+	g, ok := h.resolver(r.PathValue("gallery"))
+	if !ok {
+		contract.WriteError(w, http.StatusNotFound, "not_found", "unknown gallery")
+		return nil, false
+	}
+	return g, true
+}
+
+// The lock is let go before the first byte, as the web UI's files do: a
+// gallery switch queued behind a phone's long video would stall every
+// request after it. The extension is only there for the apps that read
+// the type off the URL.
+func (h *Handler) booruFile(plan func(http.ResponseWriter, *library.Gallery, int64) (string, bool)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path, ok := func() (string, bool) {
+			if h.lock != nil {
+				defer h.lock()()
+			}
+			g, ok := h.booruGallery(w, r)
+			if !ok {
+				return "", false
+			}
+			stem, _, _ := strings.Cut(r.PathValue("name"), ".")
+			id, err := strconv.ParseInt(stem, 10, 64)
+			if err != nil || id <= 0 {
+				contract.WriteError(w, http.StatusNotFound, "not_found", "image not found")
+				return "", false
+			}
+			return plan(w, g, id)
+		}()
+		if ok {
+			http.ServeFile(w, r, path)
+		}
 	}
 }
 
@@ -445,21 +483,6 @@ func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string,
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	return rendition, true
-}
-
-// The extension is only there for the apps that read the type off the URL.
-func booruFile(plan func(http.ResponseWriter, *library.Gallery, int64) (string, bool)) booruHandler {
-	return func(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
-		stem, _, _ := strings.Cut(r.PathValue("name"), ".")
-		id, err := strconv.ParseInt(stem, 10, 64)
-		if err != nil || id <= 0 {
-			contract.WriteError(w, http.StatusNotFound, "not_found", "image not found")
-			return
-		}
-		if path, ok := plan(w, g, id); ok {
-			http.ServeFile(w, r, path)
-		}
-	}
 }
 
 type booruAutocompleteJSON struct {

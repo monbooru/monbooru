@@ -677,8 +677,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		rt.read(method+" /api/v1/", apiHandler)
 	}
-	// Read-only and keyed by its path, so no peer to note.
-	rt.read("GET "+api.BooruPrefix, apiMux.ServeHTTP)
+	// Read-only and keyed by its path, so no peer to note. Free: the layer
+	// takes the gallery lock itself.
+	rt.free("GET "+api.BooruPrefix, apiMux.ServeHTTP)
 }
 
 func (s *Server) allContexts() []*library.Gallery {
