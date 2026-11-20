@@ -222,8 +222,13 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 		contract.WriteJSON(w, http.StatusOK, []booruPost{})
 		return
 	}
-	page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruPageLimit, booruMaxLimit)
 	bq := translateBooruQuery(q.Get("tags"), booruVocabularyOf(g))
+	// As on Danbooru, the limit parameter wins over the limit: metatag.
+	pageSize := q.Get("limit")
+	if pageSize == "" && bq.limit > 0 {
+		pageSize = strconv.Itoa(bq.limit)
+	}
+	page, limit := contract.PageParams(q.Get("page"), pageSize, booruPageLimit, booruMaxLimit)
 	result, err := search.Execute(r.Context(), h.searchSource(g), search.Query{
 		Expr: search.Parse(bq.text), Sort: bq.sort, Order: bq.order, Page: page, Limit: limit, SkipCount: true,
 	})
@@ -682,7 +687,11 @@ func booruObjectRoute(route string) bool {
 	return strings.HasPrefix(route, "wiki_pages/") || strings.HasPrefix(route, "counts/")
 }
 
-type booruQuery struct{ text, sort, order string }
+type booruQuery struct {
+	text, sort, order string
+	// The limit: metatag's page size, 0 when none is given.
+	limit int
+}
 
 // A Danbooru metatag monbooru spells differently. read takes one value of
 // a comma list, which becomes any of them; nil passes the value whole. An
@@ -776,9 +785,15 @@ func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 		return tok
 	}
 	key = strings.ToLower(key)
-	if key == "order" {
+	switch key {
+	case "order":
 		if !neg {
 			q.sort, q.order = booruOrder(strings.ToLower(val))
+		}
+		return ""
+	case "limit":
+		if n, err := strconv.Atoi(val); err == nil && n > 0 && !neg {
+			q.limit = n
 		}
 		return ""
 	}
