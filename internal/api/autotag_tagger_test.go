@@ -156,17 +156,19 @@ func TestCreateImage_AutotagBehindARunningJobIsQueuedAndRunsOnceTheSlotFrees(t *
 func TestCreateImage_AutotagCancelDropsTheQueuedUploads(t *testing.T) {
 	env := newTestEnv(t)
 	b := enableStubTagger(t, env)
-	b.Block()
+	started := b.Block()
 
 	if _, note := uploadForAutotag(t, env, "first.png", 15); note != "autotag job started" {
 		t.Fatalf("first note = %q, want started", note)
 	}
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the auto-tagger never ran")
+	}
 	if _, note := uploadForAutotag(t, env, "second.png", 16); note != "autotag queued" {
 		t.Fatalf("second note = %q, want queued", note)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for b.Calls() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
 	}
 	env.handler.jobs.Cancel()
 	awaitQueueDrained(t, env)
