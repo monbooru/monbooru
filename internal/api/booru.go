@@ -566,13 +566,17 @@ func booruTags(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 	var err error
 	switch {
 	case q.Get("search[name_comma]") != "" || q.Get("search[name]") != "":
+		// Capped while collecting, so a long list costs no more than the cap.
 		var names []string
 		for _, n := range strings.Split(q.Get("search[name_comma]")+","+q.Get("search[name]"), ",") {
+			if len(names) == booruMaxNames {
+				break
+			}
 			if n = tags.NormalizeTagName(n); n != "" && !slices.Contains(names, n) {
 				names = append(names, n)
 			}
 		}
-		found, err = g.TagSvc.NamedTags(names[:min(len(names), booruMaxNames)])
+		found, err = g.TagSvc.NamedTags(names)
 	case q.Get("search[name_matches]") != "":
 		_, limit := contract.PageParams("", q.Get("limit"), booruSuggest, booruMaxLimit)
 		found, err = g.TagSvc.SuggestTags(strings.Trim(q.Get("search[name_matches]"), "*"), "", limit)
