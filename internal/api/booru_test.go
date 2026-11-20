@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/models"
@@ -153,6 +154,37 @@ func TestTranslateBooruPageSize(t *testing.T) {
 	}
 }
 
+func TestBooruAge(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	cases := []struct{ in, want string }{
+		{"<1w", ">2026-06-08T12:00:00"},
+		{"<=1d", ">=2026-06-14T12:00:00"},
+		{">=2h30mi", "<=2026-06-15T09:30:00"},
+		{"<1.5hours", ">2026-06-15T10:30:00"},
+		{"<90", ">2026-06-15T11:58:30"},
+		{"<5m", ">2026-06-15T11:55:00"},
+		{"<1mo", ">2026-05-16T01:30:00"},
+		{">1y", "<2025-06-15T06:00:00"},
+		{"..1d", ">=2026-06-14T12:00:00"},
+		{"1d..", "<=2026-06-14T12:00:00"},
+		{"1w..1d", "2026-06-08T12:00:00..2026-06-14T12:00:00"},
+		{"1d..1w", "2026-06-08T12:00:00..2026-06-14T12:00:00"},
+		{"3d", "2026-06-12"},
+		{"<1x", ""},
+		{"<1d1w", ""},
+		{"<1m1s", ">2026-06-15T11:58:59"},
+		{"<", ""},
+		{"mo", ""},
+		{"..", ""},
+		{"<99999999y", ""},
+	}
+	for _, tc := range cases {
+		if got := booruAgeAt(tc.in, now); got != tc.want {
+			t.Errorf("age:%s = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestBooruObjectRoute(t *testing.T) {
 	for route, want := range map[string]bool{
 		"profile": true, "users/12": true, "comments/5": true, "wiki_pages/sky": true, "related_tag": true,
@@ -286,6 +318,9 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=limit:1&limit=2", []int64{other, id}},
 		{"?tags=random:1+blue_sky", []int64{id}},
 		{"?tags=random:1&limit=1&page=2", nil},
+		{"?tags=age:<1d", []int64{other, id}},
+		{"?tags=age:>1d", nil},
+		{"?tags=age:nope", []int64{other, id}},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
