@@ -682,6 +682,44 @@ func TestPickingTheBooruToken(t *testing.T) {
 	}
 }
 
+func TestTurningABooruGalleryOn(t *testing.T) {
+	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	cases := []struct {
+		name, gallery, on string
+		before, want      bool
+		flash             string
+	}{
+		{"on", "default", "1", false, true, "answers at its Danbooru compatible address"},
+		{"off", "default", "", true, false, "no longer answers"},
+		{"not an unknown gallery", "no_such", "1", false, false, "Could not save"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, []apitoken.Token{tok})
+			srv.cfg.Auth.BooruTokenID = tok.ID
+			srv.cfg.Galleries[0].Booru = tc.before
+			form := url.Values{"gallery": {tc.gallery}, "on": {tc.on}}
+			req := httptest.NewRequest("POST", "/settings/auth/booru-gallery", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			srv.settingsBooruGalleryPost(w, req)
+			body := w.Body.String()
+			wantIn(t, body, tc.flash)
+			if got := srv.cfg.Galleries[0].Booru; got != tc.want {
+				t.Errorf("default turned on = %v, want %v", got, tc.want)
+			}
+			if tc.flash == "Could not save" {
+				return
+			}
+			wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+			if got := strings.Contains(body, wantBooruURL(srv, tok)); got != tc.want {
+				t.Errorf("address shown = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func setTokenScopes(srv *Server, id string, scopes ...string) string {
 	form := url.Values{"scope": scopes}
 	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+id+"/privileges", strings.NewReader(form.Encode()))
