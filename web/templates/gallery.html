@@ -605,13 +605,20 @@ function openBatchAutotagDialog(scope) {
   openBatchDialog('batch-autotag', scope, {
     radio: '#batch-autotag-form input[name="tagger_name"][value=""]',
     beforeShow: function() {
+      var kept = autotagWorkerTicks();
       document.querySelectorAll('#batch-autotag-workers input[name="workers"]').forEach(function(box) {
-        box.checked = !box.hasAttribute('data-local');
+        box.checked = Object.prototype.hasOwnProperty.call(kept, box.value) ? kept[box.value] === true : !box.hasAttribute('data-local');
         box.dataset.auto = '';
       });
       updateAutotagWorkers();
     }
   });
+}
+
+// The ticks last chosen, by worker name; a worker never ticked or left
+// out gets the default.
+function autotagWorkerTicks() {
+  try { return JSON.parse(localStorage.getItem('monbooru_autotag_workers')) || {}; } catch (e) { return {}; }
 }
 
 // A worker that holds none of the taggers the job runs cannot be ticked.
@@ -669,6 +676,11 @@ function confirmBatchAutotag() {
       return;
     }
     ticked.forEach(function(b) { params.push('workers=' + encodeURIComponent(b.value)); });
+    var kept = autotagWorkerTicks();
+    Array.prototype.forEach.call(boxes, function(b) {
+      if (!b.disabled && b.dataset.auto !== '1') kept[b.value] = b.checked;
+    });
+    try { localStorage.setItem('monbooru_autotag_workers', JSON.stringify(kept)); } catch (e) {}
   }
   confirmBatchSimple('batch-autotag', '/internal/autotag', params, 'Auto-tag failed.');
 }
