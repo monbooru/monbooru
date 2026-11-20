@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -653,6 +654,7 @@ var booruRewrites = map[string]booruRewrite{
 	"filetype": {"mime", booruFileType},
 	"filesize": {"size", nil},
 	"source":   {"sourceurl", nil},
+	"ratio":    {"ratio", booruRatio},
 	// A user's favorites on Danbooru, the favorite flag here.
 	"fav": {},
 }
@@ -780,6 +782,22 @@ func booruFileType(v string) string {
 		return ft
 	}
 	return v
+}
+
+var booruRatioRe = regexp.MustCompile(`(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)`)
+
+// Danbooru writes a ratio as 16:9, monbooru as the number; the operators
+// and ranges around it read alike.
+func booruRatio(v string) string {
+	return booruRatioRe.ReplaceAllStringFunc(v, func(m string) string {
+		w, h, _ := strings.Cut(m, ":")
+		x, _ := strconv.ParseFloat(w, 64)
+		y, _ := strconv.ParseFloat(h, 64)
+		if y == 0 {
+			return m
+		}
+		return strconv.FormatFloat(x/y, 'g', -1, 64)
+	})
 }
 
 // A comma list is any of its values.
