@@ -89,7 +89,7 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"filetype:jpg,zip", "( mime:jpeg OR mime:cbz )", "newest", "desc"},
 		{"filesize:1mb..2mb", "size:1mb..2mb", "newest", "desc"},
 		{"source:https://a.example/*", "sourceurl:https://a.example/*", "newest", "desc"},
-		{"fav:user_a", "", "newest", "desc"},
+		{"fav:user_a", "fav:true", "newest", "desc"},
 		{"ratio:16:9", "ratio:1.7777777777777777", "newest", "desc"},
 		{"ratio:>=4:3", "ratio:>=1.3333333333333333", "newest", "desc"},
 		{"ratio:1:1..2:1", "ratio:1..2", "newest", "desc"},

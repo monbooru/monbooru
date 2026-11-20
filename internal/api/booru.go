@@ -700,9 +700,14 @@ var booruRewrites = map[string]booruRewrite{
 	"source":   {"sourceurl", nil},
 	"ratio":    {"ratio", booruRatio},
 	"status":   {"id", booruStatus},
-	// A user's favorites on Danbooru, the favorite flag here.
-	"fav": {},
+	// A user's favorites on Danbooru; a gallery keeps one set, whoever is
+	// named. monbooru keeps no time a post was favorited, so ordfav lists
+	// them newest first.
+	"fav":    {"fav", booruFavorite},
+	"ordfav": {"fav", booruFavorite},
 }
+
+func booruFavorite(string) string { return "true" }
 
 // booruNone is an id no post has, for a metatag that finds nothing here.
 const booruNone = "0"
