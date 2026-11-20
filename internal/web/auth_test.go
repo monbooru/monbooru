@@ -678,25 +678,45 @@ func TestPickingTheBooruToken(t *testing.T) {
 	}
 }
 
-func TestBooruEndpointsFollowTheTokens(t *testing.T) {
-	srv := newTestServer(t)
-	tok, _ := apitoken.New("reader", config.AllScopes)
-	setTokens(srv, []apitoken.Token{tok})
-	pickBooruToken(srv, tok.ID)
-
-	form := url.Values{"scope": {config.ScopeWrite}}
-	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+tok.ID+"/privileges", strings.NewReader(form.Encode()))
+func setTokenScopes(srv *Server, id string, scopes ...string) string {
+	form := url.Values{"scope": scopes}
+	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+id+"/privileges", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetPathValue("id", tok.ID)
+	req.SetPathValue("id", id)
 	w := httptest.NewRecorder()
 	srv.settingsTokenPrivilegesPost(w, req)
-	wantIn(t, w.Body.String(), `id="booru-endpoints" hx-swap-oob="true"`)
-	wantNotIn(t, w.Body.String(), wantBooruURL(srv, tok))
+	return w.Body.String()
+}
 
-	setTokens(srv, []apitoken.Token{tok})
-	body := revokeToken(srv, tok.ID)
-	wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
-	wantNotIn(t, body, wantBooruURL(srv, tok))
+func TestBooruEndpointsFollowTheTokens(t *testing.T) {
+	picked, _ := apitoken.New("picked", config.AllScopes)
+	other, _ := apitoken.New("other", config.AllScopes)
+	cases := []struct {
+		name   string
+		change func(*Server) string
+		kept   bool
+	}{
+		{"the picked one loses read", func(s *Server) string { return setTokenScopes(s, picked.ID, config.ScopeWrite) }, false},
+		{"the picked one keeps read", func(s *Server) string { return setTokenScopes(s, picked.ID, config.ScopeRead) }, true},
+		{"the picked one is revoked", func(s *Server) string { return revokeToken(s, picked.ID) }, false},
+		{"another one is revoked", func(s *Server) string { return revokeToken(s, other.ID) }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, []apitoken.Token{picked, other})
+			pickBooruToken(srv, picked.ID)
+			body := tc.change(srv)
+			wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+			if got := strings.Contains(body, wantBooruURL(srv, picked)); got != tc.kept {
+				t.Errorf("address shown = %v, want %v", got, tc.kept)
+			}
+			// Dropped, not just shut: read given back must not reopen it.
+			if got := srv.cfg.Auth.BooruTokenID == picked.ID; got != tc.kept {
+				t.Errorf("pick kept = %v, want %v", got, tc.kept)
+			}
+		})
+	}
 }
 
 // The layer checks its own key, so a login in the web UI does not turn
