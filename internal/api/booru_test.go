@@ -616,6 +616,31 @@ func TestBooruSampleFallsBackToTheFile(t *testing.T) {
 	}
 }
 
+// An app declaring duration a double fails on a bare 5, so it is 5.0.
+func TestBooruDuration(t *testing.T) {
+	seconds := func(f float64) *float64 { return &f }
+	cases := []struct {
+		name string
+		dur  *float64
+		want string
+	}{
+		{"whole seconds", seconds(5), `"duration":5.0`},
+		{"no length", seconds(0), `"duration":0.0`},
+		{"a fraction", seconds(5.005), `"duration":5.005`},
+		{"half", seconds(12.5), `"duration":12.5`},
+		{"none measured", nil, `"duration":null`},
+	}
+	for _, tc := range cases {
+		b, err := json.Marshal(booruPostOf("http://a.example", models.Image{ID: 1, FileType: models.FileTypeMP4, DurationSec: tc.dur}, nil, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), tc.want) {
+			t.Errorf("%s: post has no %s in %s", tc.name, tc.want, b)
+		}
+	}
+}
+
 func TestBooruSampled(t *testing.T) {
 	cases := []struct {
 		name          string
