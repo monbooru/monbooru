@@ -64,8 +64,14 @@ func TestAJobOnTheTickedWorkersLeavesTheOthersAlone(t *testing.T) {
 	if got := ws[0].Calls() + ws[2].Calls(); got != 4 {
 		t.Errorf("local and laptop took %d calls, want one per image", got)
 	}
-	if st := srv.jobs.Get(); st == nil || !strings.HasPrefix(st.Summary, "auto-tagged 4 images") {
-		t.Errorf("job = %+v", st)
+	tagged := map[string]int{}
+	for name, w := range map[string]*taggertest.Worker{tagger.LocalWorker: ws[0], "laptop": ws[2]} {
+		if n := w.Calls(); n > 0 {
+			tagged[name] = n
+		}
+	}
+	if st, want := srv.jobs.Get(), "auto-tagged 4 images"+(tagger.Result{Tagged: tagged}).Shares(); st == nil || st.Summary != want {
+		t.Errorf("job = %+v, want %q", st, want)
 	}
 }
 

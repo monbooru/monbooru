@@ -501,10 +501,11 @@ func (p *Pool) Slots(models, only []string) int {
 }
 
 // Tag runs frames through models on a worker that holds them all, waiting
-// for a free slot; a non-nil only keeps the workers it names. A call that
-// fails in transport goes to another worker, three tries at most, and that
-// worker is down until its next refresh; a worker's refusal is final.
-func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, error) {
+// for a free slot, and names the worker that answered; a non-nil only keeps
+// the workers it names. A call that fails in transport goes to another
+// worker, three tries at most, and that worker is down until its next
+// refresh; a worker's refusal is final.
+func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, string, error) {
 	interactive := req.Priority == worker.PriorityInteractive
 	skip := map[*poolWorker]bool{}
 	var lastErr error
@@ -512,9 +513,9 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 		w, err := p.acquire(ctx, req.Models, interactive, skip, only)
 		if err != nil {
 			if lastErr != nil && errors.Is(err, errNoWorker) {
-				return worker.TagResponse{}, lastErr
+				return worker.TagResponse{}, "", lastErr
 			}
-			return worker.TagResponse{}, err
+			return worker.TagResponse{}, "", err
 		}
 		p.mu.Lock()
 		client := w.client
@@ -522,16 +523,16 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 		resp, err := client.Tag(ctx, req, frames)
 		p.release(w)
 		if err == nil {
-			return resp, nil
+			return resp, w.def.Name, nil
 		}
 		if !worker.IsTransport(err) {
-			return worker.TagResponse{}, fmt.Errorf("worker %s: %w", w.def.Name, err)
+			return worker.TagResponse{}, "", fmt.Errorf("worker %s: %w", w.def.Name, err)
 		}
 		lastErr = fmt.Errorf("worker %s: %w", w.def.Name, err)
 		p.markDown(w, err)
 		skip[w] = true
 	}
-	return worker.TagResponse{}, lastErr
+	return worker.TagResponse{}, "", lastErr
 }
 
 func (p *Pool) markDown(w *poolWorker, err error) {

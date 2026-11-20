@@ -3,8 +3,10 @@
 package tagger
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -51,15 +53,37 @@ func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTagger
 // RunWithTaggers takes only enabled, available taggers and returns how many
 // ids were left untagged; a handle with no thumbnails path extracts pages
 // under the system temp directory.
-func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager) (int, error) {
+func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager) (Result, error) {
 	return RunOn(ctx, h, cfg, ids, taggers, nil, mgr)
+}
+
+// Result is what a run left: the ids skipped, and the images each worker
+// tagged, an image counting for the worker that answered its first call.
+type Result struct {
+	Skipped int
+	Tagged  map[string]int
+}
+
+// Shares names each worker's images, most first, once more than one
+// worker tagged: " (gpu-box 171, laptop 69)".
+func (r Result) Shares() string {
+	if len(r.Tagged) < 2 {
+		return ""
+	}
+	names := slices.Collect(maps.Keys(r.Tagged))
+	slices.SortFunc(names, func(a, b string) int { return cmp.Or(r.Tagged[b]-r.Tagged[a], strings.Compare(a, b)) })
+	parts := make([]string, len(names))
+	for i, n := range names {
+		parts[i] = fmt.Sprintf("%s %d", n, r.Tagged[n])
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // RunOn is RunWithTaggers on the workers named in only, all of them
 // sharing the images; nil leaves the choice to the pool.
-func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, only []string, mgr *jobs.Manager) (int, error) {
+func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, only []string, mgr *jobs.Manager) (Result, error) {
 	if len(taggers) == 0 {
-		return 0, fmt.Errorf("no tagger is enabled or available")
+		return Result{}, fmt.Errorf("no tagger is enabled or available")
 	}
 	pool := currentPool()
 	database := h.DB
@@ -121,7 +145,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	names := make([]string, len(taggers))
 	for i, t := range taggers {
 		if plan[i], err = planTagger(cfg.Paths.DataPath, t, catIDs, generalCatID, inferredCats); err != nil {
-			return 0, err
+			return Result{}, err
 		}
 		names[i] = t.Name
 	}
@@ -171,6 +195,8 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	}
 
 	var skipped atomic.Int64
+	var taggedMu sync.Mutex
+	tagged := map[string]int{}
 	tagOne := func(ctx context.Context, workerIdx int, imageID int64) error {
 		var canonPath, fileType string
 		if err := database.Read.QueryRowContext(ctx,
@@ -193,7 +219,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
 			}
 		}
-		scores, inferred, err := inferFrames(ctx, pool, only, priority, taggers, plan, imageID, framePaths, fileType, onPage)
+		scores, inferred, by, err := inferFrames(ctx, pool, only, priority, taggers, plan, imageID, framePaths, fileType, onPage)
 		if err != nil {
 			return err
 		}
@@ -208,7 +234,11 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), taggerNames); err != nil {
 			logx.Warnf("tagger: store results for image %d: %v", imageID, err)
 			skipped.Add(1)
+			return nil
 		}
+		taggedMu.Lock()
+		tagged[by]++
+		taggedMu.Unlock()
 		return nil
 	}
 
@@ -246,20 +276,22 @@ feed:
 	close(queue)
 	wg.Wait()
 
+	res := Result{Skipped: int(skipped.Load()), Tagged: tagged}
 	if err := ctx.Err(); err != nil {
-		return int(skipped.Load()), err
+		return res, err
 	}
 	if err := context.Cause(runCtx); err != nil {
-		return int(skipped.Load()), err
+		return res, err
 	}
 	mgr.Update(int(completed.Load()), total, "tagging images")
-	return int(skipped.Load()), nil
+	return res, nil
 }
 
 // inferFrames runs every frame through every tagger, one call per frame
-// and input, and reports whether any frame was inferred. A frame that
-// fails to read or that a model refuses is logged and left out.
-func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
+// and input, and reports whether any frame was inferred and which worker
+// answered the first call. A frame that fails to read or that a model
+// refuses is logged and left out.
+func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) (_ [][]SparseScores, _ bool, by string, _ error) {
 	type group struct {
 		input   inputKey
 		models  []string
@@ -284,7 +316,7 @@ func inferFrames(ctx context.Context, pool *Pool, only []string, priority string
 	inferred := false
 	for fIdx, fp := range framePaths {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, false, "", err
 		}
 		if onPage != nil {
 			onPage(fIdx)
@@ -296,10 +328,11 @@ func inferFrames(ctx context.Context, pool *Pool, only []string, priority string
 			continue
 		}
 		for g, grp := range groups {
-			resp, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]}, only)
+			resp, name, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]}, only)
 			if err != nil {
-				return nil, false, err
+				return nil, false, "", err
 			}
+			by = cmp.Or(by, name)
 			for m, tIdx := range grp.taggers {
 				fr := resp.Results[m].Frames[0]
 				if fr.Err != "" {
@@ -312,7 +345,7 @@ func inferFrames(ctx context.Context, pool *Pool, only []string, priority string
 			}
 		}
 	}
-	return scores, inferred, nil
+	return scores, inferred, by, nil
 }
 
 func framesForTagging(canonPath, fileType, mangaCacheDir string, imageID int64) ([]string, func()) {

@@ -193,12 +193,12 @@ func (h *Handler) runAutotagBatch(b queuedBatch) (cancelled bool) {
 		peak = h.memoryMark()
 	}
 	ctx := h.jobs.Context()
-	skipped, err := tagger.RunWithTaggers(ctx, g.Handle, cfg, b.ids, selected, h.jobs)
+	res, err := tagger.RunWithTaggers(ctx, g.Handle, cfg, b.ids, selected, h.jobs)
 	if len(b.ids) == 1 {
-		if finished, _ := tagger.SettleImage(ctx, h.jobs, b.ids[0], skipped, err); finished {
+		if finished, _ := tagger.SettleImage(ctx, h.jobs, b.ids[0], res.Skipped, err); finished {
 			peak(fmt.Sprintf("image #%d", b.ids[0]))
 		}
-	} else if finished, _ := tagger.Settle(ctx, h.jobs, "", "", len(b.ids), skipped, err); finished {
+	} else if finished, _ := tagger.Settle(ctx, h.jobs, "", "", len(b.ids), res, err); finished {
 		peak(fmt.Sprintf("batch %d %s", len(b.ids), models.Plural(len(b.ids), "image", "images")))
 	}
 	return ctx.Err() != nil

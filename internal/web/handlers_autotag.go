@@ -28,14 +28,14 @@ func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, im
 	peak := autotagMemoryMark()
 	go func() {
 		ctx := s.jobs.Context()
-		skipped, err := tagger.RunOn(ctx, cx.Handle, cfg, ids, selected, only, s.jobs)
+		res, err := tagger.RunOn(ctx, cx.Handle, cfg, ids, selected, only, s.jobs)
 		if imageID != 0 {
-			if finished, _ := tagger.SettleImage(ctx, s.jobs, imageID, skipped, err); finished {
+			if finished, _ := tagger.SettleImage(ctx, s.jobs, imageID, res.Skipped, err); finished {
 				peak(fmt.Sprintf("image #%d", imageID))
 			}
 			return
 		}
-		if finished, _ := tagger.Settle(ctx, s.jobs, "", "", len(ids), skipped, err); finished {
+		if finished, _ := tagger.Settle(ctx, s.jobs, "", "", len(ids), res, err); finished {
 			peak(fmt.Sprintf("batch %d %s", len(ids), models.Plural(len(ids), "image", "images")))
 		}
 	}()

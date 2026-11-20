@@ -17,7 +17,8 @@ import (
 
 func tagOne(t *testing.T, p *Pool, priority string) (worker.TagResponse, error) {
 	t.Helper()
-	return p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: priority, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, nil)
+	resp, _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: priority, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, nil)
+	return resp, err
 }
 
 type counting struct {
@@ -282,7 +283,7 @@ func TestAJobNamingItsWorkersSharesThemTheLocalOneIncluded(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 3 {
 		wg.Go(func() {
-			if _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: worker.PriorityBatch, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, only); err != nil {
+			if _, _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: worker.PriorityBatch, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, only); err != nil {
 				t.Error(err)
 			}
 		})
@@ -299,7 +300,7 @@ func TestAJobWhoseWorkersHoldNoneOfItsModelsFails(t *testing.T) {
 	p := usePool(t, "",
 		WorkerDef{Name: "a", URL: serve(t, newFake(t, wd())), Token: "tok"},
 		WorkerDef{Name: "b", URL: serve(t, newFake(t, fakeModel{name: "joytag", labels: labelsOf("a")})), Token: "tok"})
-	_, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, []string{"b"})
+	_, _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, []string{"b"})
 	if !errors.Is(err, errNoWorker) {
 		t.Errorf("tag on b only: %v, want no worker", err)
 	}
