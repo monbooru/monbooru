@@ -454,6 +454,33 @@ func TestBooruLookups(t *testing.T) {
 	}
 }
 
+func TestBooruTagNamesCap(t *testing.T) {
+	env, base, _ := booruEnv(t)
+	filler := func(n int) []string {
+		names := make([]string, n)
+		for i := range names {
+			names[i] = fmt.Sprintf("no_such_%d", i)
+		}
+		return names
+	}
+	cases := []struct {
+		name  string
+		names []string
+		found bool
+	}{
+		{"last within the cap", append(filler(booruMaxNames-1), "blue_sky"), true},
+		{"past the cap", append(filler(booruMaxNames), "blue_sky"), false},
+		{"repeats take no room", append(slices.Repeat([]string{"no_such_0"}, 5000), "blue_sky"), true},
+	}
+	for _, tc := range cases {
+		w := env.do("GET", base+"/tags.json?search[name_comma]="+strings.Join(tc.names, ","))
+		mustCode(t, w, http.StatusOK)
+		if got := strings.Contains(w.Body.String(), `"name":"blue_sky"`); got != tc.found {
+			t.Errorf("%s: blue_sky found = %v, want %v", tc.name, got, tc.found)
+		}
+	}
+}
+
 func TestBooruFavicon(t *testing.T) {
 	env, base, _ := booruEnv(t)
 	if w := env.do("GET", base+"/favicon.ico"); w.Code != http.StatusNotFound {
