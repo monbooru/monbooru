@@ -60,14 +60,11 @@ func IsBooruPath(path string) bool { return strings.HasPrefix(path, BooruPrefix)
 // web UI's own. The route is read after the key, so a gallery named file
 // is not one.
 func IsBooruFile(path string) bool {
-	rest, ok := strings.CutPrefix(path, BooruPrefix)
+	_, route, ok := splitBooruPath(path)
 	if !ok {
 		return false
 	}
-	_, rest, _ = strings.Cut(rest, "/")
-	_, rest, _ = strings.Cut(rest, "/")
-	route, _, _ := strings.Cut(rest, "/")
-	switch route {
+	switch first, _, _ := strings.Cut(route, "/"); first {
 	case "file", "sample", "thumb":
 		return true
 	}
@@ -76,13 +73,22 @@ func IsBooruFile(path string) bool {
 
 // RedactBooruPath keeps the key out of the request log.
 func RedactBooruPath(path string) string {
-	rest, ok := strings.CutPrefix(path, BooruPrefix)
+	gallery, route, ok := splitBooruPath(path)
 	if !ok {
 		return path
 	}
-	name, rest, _ := strings.Cut(rest, "/")
-	_, rest, _ = strings.Cut(rest, "/")
-	return BooruPrefix + name + "/<key>/" + rest
+	return BooruPrefix + gallery + "/<key>/" + route
+}
+
+// splitBooruPath parts a layer path around its key.
+func splitBooruPath(path string) (gallery, route string, ok bool) {
+	rest, ok := strings.CutPrefix(path, BooruPrefix)
+	if !ok {
+		return "", "", false
+	}
+	gallery, rest, _ = strings.Cut(rest, "/")
+	_, route, _ = strings.Cut(rest, "/")
+	return gallery, route, true
 }
 
 // ChosenBooruToken is the token Settings picked for the layer, while it
