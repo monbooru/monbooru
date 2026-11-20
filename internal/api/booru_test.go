@@ -99,6 +99,10 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"ratio:<1:2", "ratio:<0.5", "newest", "desc"},
 		{"ratio:a:9", "ratio:a:9", "newest", "desc"},
 		{"score:>5 user:user_a status:any", "", "newest", "desc"},
+		{"status:Active sky", "sky", "newest", "desc"},
+		{"status:deleted", "id:0", "newest", "desc"},
+		{"-status:deleted", "-id:0", "newest", "desc"},
+		{"status:nope", "id:0", "newest", "desc"},
 		{"width:>100 date:2024-01-01..2024-02-01 artist:user_a", "width:>100 date:2024-01-01..2024-02-01 artist:user_a", "newest", "desc"},
 		{"re:zero -re:zero", "re:zero -re:zero", "newest", "desc"},
 		{"order:id", "", "newest", "asc"},
@@ -243,6 +247,8 @@ func TestBooruPosts(t *testing.T) {
 		// The search one app tests a new site with.
 		{"?tags=*&page=1&limit=30", []int64{other, id}},
 		{fmt.Sprintf("?tags=id:%d,%d", id, other), []int64{other, id}},
+		{"?tags=status:deleted", nil},
+		{"?tags=-status:deleted", []int64{other, id}},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
