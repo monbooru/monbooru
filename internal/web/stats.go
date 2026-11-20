@@ -145,15 +145,24 @@ func gatherTaggerStats(s *Server) taggerCacheStats {
 	return out
 }
 
+// procChildren reads every thread's list: a child is listed under the
+// thread that forked it, and Go forks from any of them.
 func procChildren(pid int) []int {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(pid) + "/children")
+	dir := "/proc/" + strconv.Itoa(pid) + "/task"
+	tasks, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []int
-	for _, f := range strings.Fields(string(data)) {
-		if n, err := strconv.Atoi(f); err == nil {
-			out = append(out, n)
+	for _, task := range tasks {
+		data, err := os.ReadFile(dir + "/" + task.Name() + "/children")
+		if err != nil {
+			continue
+		}
+		for _, f := range strings.Fields(string(data)) {
+			if n, err := strconv.Atoi(f); err == nil {
+				out = append(out, n)
+			}
 		}
 	}
 	return out
