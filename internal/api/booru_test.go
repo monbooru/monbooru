@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -449,6 +450,54 @@ func TestBooruFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.thumbDir, fmt.Sprintf("%d_view.jpg", id))); err != nil {
 		t.Errorf("the sample was not kept: %v", err)
+	}
+}
+
+// lockSeen notes whether the gallery lock was held when the answer began.
+type lockSeen struct {
+	*httptest.ResponseRecorder
+	held     *bool
+	began    bool
+	heldThen bool
+}
+
+func (l *lockSeen) WriteHeader(code int) {
+	if !l.began {
+		l.began, l.heldThen = true, *l.held
+	}
+	l.ResponseRecorder.WriteHeader(code)
+}
+
+func (l *lockSeen) Write(b []byte) (int, error) {
+	l.WriteHeader(http.StatusOK)
+	return l.ResponseRecorder.Write(b)
+}
+
+func TestBooruLetsGoOfTheLockForFiles(t *testing.T) {
+	env, base, id := booruEnv(t)
+	var held bool
+	env.handler.WithGalleryLock(func() func() {
+		held = true
+		return func() { held = false }
+	})
+	cases := []struct {
+		path string
+		held bool
+	}{
+		{"/posts.json", true},
+		{fmt.Sprintf("/file/%d.png", id), false},
+		{fmt.Sprintf("/thumb/%d.jpg", id), false},
+		{fmt.Sprintf("/sample/%d.jpg", id), false},
+	}
+	for _, tc := range cases {
+		w := &lockSeen{ResponseRecorder: httptest.NewRecorder(), held: &held}
+		env.mux.ServeHTTP(w, httptest.NewRequest("GET", base+tc.path, nil))
+		if w.Code != http.StatusOK || w.heldThen != tc.held {
+			t.Errorf("%s: %d, lock held = %v, want 200 and %v", tc.path, w.Code, w.heldThen, tc.held)
+		}
+		if held {
+			t.Errorf("%s: the lock was never let go", tc.path)
+		}
 	}
 }
 
