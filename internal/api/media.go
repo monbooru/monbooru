@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,6 +65,18 @@ func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = os.Remove(frame) }()
 	http.ServeFile(w, r, frame)
+}
+
+// SetGalleryScopedCache: the gallery is in the tag because /images/{id}
+// URLs repeat across galleries, and the mtime is in nanoseconds so two
+// rewrites in a second differ.
+func SetGalleryScopedCache(w http.ResponseWriter, gallery, id, path string) {
+	w.Header().Set("Cache-Control", "private, no-cache")
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%d"`, gallery, id, info.ModTime().UnixNano()))
 }
 
 func containedCanonical(w http.ResponseWriter, g *library.Gallery, id int64) (canonPath, fileType string, ok bool) {

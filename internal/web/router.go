@@ -944,7 +944,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 	// SQLite reuses the highest id once its row is deleted, so a
 	// thumbnail URL can come back with new bytes.
-	setGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
+	api.SetGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
 	http.ServeFile(w, r, fullPath)
 }
 
@@ -1220,7 +1220,7 @@ func (s *Server) planMangaPage(
 	}
 	// The archive's mtime, not the page's: every hit touches the page to keep
 	// it cached, which would make each ETag new.
-	setGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
 	return page, true
 }
 
@@ -1272,13 +1272,13 @@ func (s *Server) planImageBytes(w http.ResponseWriter, r *http.Request, scaled b
 			if err != nil {
 				logx.Warnf("view rendition for image %s: %v", idStr, err)
 			} else {
-				setGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
+				api.SetGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
 				w.Header().Set("Content-Type", "image/jpeg")
 				return rendition, true
 			}
 		}
 	}
-	setGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
 	if ct := gallery.MIMEForFileType(fileType); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
@@ -1298,17 +1298,6 @@ func acceptsMediaType(accept, mediaType string) bool {
 		return err == nil && q > 0
 	}
 	return false
-}
-
-// The gallery is in the tag because /images/{id} URLs repeat across galleries,
-// and the mtime is in nanoseconds so two rewrites in a second differ.
-func setGalleryScopedCache(w http.ResponseWriter, gallery, id, path string) {
-	w.Header().Set("Cache-Control", "private, no-cache")
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%d"`, gallery, id, info.ModTime().UnixNano()))
 }
 
 func (s *Server) RestartRequested() bool { return s.restart.Load() }
