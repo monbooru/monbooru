@@ -569,6 +569,23 @@ func TestBooruLetsGoOfTheLockForFiles(t *testing.T) {
 	}
 }
 
+// A rendition that cannot be built falls back to the file, as in the web UI.
+func TestBooruSampleFallsBackToTheFile(t *testing.T) {
+	env, base, id := booruEnv(t)
+	var canonPath string
+	if err := env.database.Read.QueryRow(`SELECT canonical_path FROM images WHERE id = ?`, id).Scan(&canonPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonPath, []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, env.database.Write, `UPDATE images SET width = 20000, height = 10000 WHERE id = ?`, id)
+	w := env.do("GET", fmt.Sprintf("%s/sample/%d.jpg", base, id))
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" || w.Body.String() != "not an image" {
+		t.Errorf("sample of an undecodable image: %d %q %q, want 200 image/png and the file", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+}
+
 func TestBooruSampled(t *testing.T) {
 	size := func(n int) *int { return &n }
 	cases := []struct {
