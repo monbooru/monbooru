@@ -206,6 +206,9 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=score:>5+blue_sky", []int64{id}},
 		{"?limit=1", []int64{other}},
 		{"?limit=1&page=2", []int64{id}},
+		{fmt.Sprintf("?page=b%d", id), nil},
+		{"?page=a1", nil},
+		{"?page=bx", []int64{other, id}},
 		{fmt.Sprintf("?tags=id:%d,%d", id, other), []int64{other, id}},
 	}
 	for _, tc := range cases {
