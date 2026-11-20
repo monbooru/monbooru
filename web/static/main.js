@@ -3388,7 +3388,8 @@ function initInboxUpload() {
     input.files = _pending.files;
     var empty = files.length === 0;
     if (submitBtn) submitBtn.disabled = empty;
-    if (resetBtn) resetBtn.disabled = empty;
+    // A folder kept from the last upload is something to clear too.
+    if (resetBtn) resetBtn.disabled = empty && !_inboxUploadFolder;
   }
 
   function appendFiles(incoming) {
@@ -3411,9 +3412,9 @@ function initInboxUpload() {
   if (resetBtn) {
     resetBtn.addEventListener('click', function(e) {
       e.preventDefault();
-      clearPending();
       _inboxUploadFolder = '';
       if (folderPicker) folderPick(folderPicker, '');
+      clearPending();
     });
   }
   renderList();
