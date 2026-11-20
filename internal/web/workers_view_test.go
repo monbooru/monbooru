@@ -71,6 +71,20 @@ func TestTheWorkersBlockShowsEachWorkersState(t *testing.T) {
 	wantIn(t, body, "To add a worker on another machine")
 }
 
+func TestTheWorkersBlockFollowsAWorkerThatStartsOrStopsTagging(t *testing.T) {
+	srv := newTestServer(t)
+	busy := fakeWorker(t, "cuda", "a")
+	usePool(t, tagger.WorkerDef{Name: "gpu-box", URL: busy.URL, Token: "tok"})
+	f := busy.Config.Handler.(*worker.Fake)
+	for _, state := range []string{"tagging", "idle"} {
+		f.Mu.Lock()
+		f.Info.Busy = state == "tagging"
+		f.Mu.Unlock()
+		_, body := getBody(t, srv, "/internal/workers")
+		wantIn(t, workerRowHTML(t, body, "gpu-box"), ">"+state+"<")
+	}
+}
+
 func TestWithNoWorkerOnlyTheWorkersBlockShows(t *testing.T) {
 	srv := newTestServer(t)
 	_, body := getBody(t, srv, "/settings")

@@ -116,6 +116,9 @@ func (s *Server) renderWorkers(w http.ResponseWriter, oob bool) {
 }
 
 func (s *Server) taggerWorkersGet(w http.ResponseWriter, r *http.Request) {
+	peek, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	tagger.CurrentPool().Peek(peek)
+	cancel()
 	s.renderWorkers(w, false)
 }
 
