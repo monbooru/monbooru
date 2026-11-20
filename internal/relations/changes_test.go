@@ -42,6 +42,10 @@ func TestService_SignalsAfterEveryCommit(t *testing.T) {
 			_, err := svc.CopyTagsFromDuplicatesToOriginal(dupGroup(img[0]))
 			return err
 		}},
+		{name: "CopySourcesFromDuplicatesToOriginal", run: func() error {
+			_, err := svc.CopySourcesFromDuplicatesToOriginal(dupGroup(img[0]))
+			return err
+		}},
 		{name: "RemoveDupMember", run: func() error { return svc.RemoveDupMember(img[3]) }},
 		{name: "DissolveDupGroup", run: func() error { return svc.DissolveDupGroup(dupGroup(img[0])) }},
 		{name: "AddAlternate", run: func() error { return svc.AddAlternate(img[4], img[5]) }},

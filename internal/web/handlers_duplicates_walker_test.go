@@ -537,6 +537,33 @@ func TestCopyTagsPreview_ListsWhatTheCopyAdds(t *testing.T) {
 	wantNotIn(t, body, "explicit")
 }
 
+func TestCopySources_FromTheMarkedWalker(t *testing.T) {
+	srv := newTestServer(t)
+	_, dup := seedMarkedPair(t, srv, "pair", 10)
+	mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, dup)
+	var gid int64
+	if err := srv.db().Read.QueryRow(`SELECT id FROM dup_groups`).Scan(&gid); err != nil {
+		t.Fatal(err)
+	}
+	if got := galleryResultCount(t, srv, "source:site_b"); got != "1" {
+		t.Fatalf("source:site_b = %s before the copy, want the duplicate", got)
+	}
+
+	preview := fmt.Sprintf("/relations/dup-group/%d/copy-sources/preview", gid)
+	wantIn(t, mustGetBody(t, srv, "/relations/duplicates/marked"), preview)
+	body := mustGetBody(t, srv, preview)
+	wantIn(t, body, "This <strong>1</strong> source will be copied")
+	wantIn(t, body, "b.example")
+
+	w := postForm(t, srv, fmt.Sprintf("/relations/dup-group/%d/copy-sources", gid), url.Values{})
+	mustCode(t, w, http.StatusOK)
+	wantIn(t, w.Body.String(), "Copied 1 source to the original.")
+	if got := galleryResultCount(t, srv, "source:site_b"); got != "2" {
+		t.Errorf("source:site_b = %s after the copy, want both images", got)
+	}
+	wantNotIn(t, mustGetBody(t, srv, "/relations/duplicates/marked"), preview)
+}
+
 func TestMarkedWalkerDeleteAll_KeepsAGroupWhoseOriginalIsMissing(t *testing.T) {
 	for _, tc := range originalGoneWays {
 		t.Run(tc.name, func(t *testing.T) {
