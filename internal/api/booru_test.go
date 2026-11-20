@@ -167,6 +167,17 @@ func TestBooruAuth(t *testing.T) {
 	if w := env.do("GET", base+"/posts.json"); w.Code != http.StatusUnauthorized {
 		t.Errorf("a token without read: %d, want 401", w.Code)
 	}
+
+	// A gallery not turned on answers as an unknown one, files too.
+	env.cfg.Auth.Tokens[0].Scopes = []string{config.ScopeRead}
+	env.cfg.FindGallery(gallery).Booru = false
+	unknown := env.do("GET", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken)))+"/posts.json").Body.String()
+	for _, path := range []string{"/posts.json", "/thumb/1.jpg"} {
+		w := env.do("GET", base+path)
+		if w.Code != http.StatusNotFound || w.Body.String() != unknown {
+			t.Errorf("a gallery turned off, %s: %d %s, want 404 %s", path, w.Code, w.Body.String(), unknown)
+		}
+	}
 }
 
 func TestChosenBooruToken(t *testing.T) {
