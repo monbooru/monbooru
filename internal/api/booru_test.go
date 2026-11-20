@@ -257,9 +257,28 @@ func TestBooruPosts(t *testing.T) {
 		}
 	}
 
-	for _, path := range []string{"/posts/999999.json", "/posts/x.json"} {
+	for _, path := range []string{"/posts/999999.json", "/posts/x.json", "/posts/random.json?tags=no_such_tag"} {
 		if w := env.do("GET", base+path); w.Code != http.StatusNotFound {
 			t.Errorf("%s: %d, want 404", path, w.Code)
+		}
+	}
+
+	randoms := []struct {
+		query string
+		want  []int64
+	}{
+		{"", []int64{id, other}},
+		{"?tags=blue_sky", []int64{id}},
+		{"?tags=-blue_sky", []int64{other}},
+		{"?tags=rating:e", []int64{id}},
+	}
+	for _, tc := range randoms {
+		w := env.do("GET", base+"/posts/random.json"+tc.query)
+		mustCode(t, w, http.StatusOK)
+		var p booruPost
+		mustDecode(t, w, &p)
+		if !slices.Contains(tc.want, p.ID) {
+			t.Errorf("posts/random.json%s = %d, want one of %v", tc.query, p.ID, tc.want)
 		}
 	}
 }
