@@ -196,12 +196,6 @@ func (h *Handler) booruFile(kind string, plan func(http.ResponseWriter, *library
 	}
 }
 
-func (h *Handler) booruSource(g *library.Gallery) search.Source {
-	src := g.Source()
-	src.LookupBackends = h.cfg().LookupBackends(g.Name)
-	return src
-}
-
 // The apps take the file URLs as they come, so they are absolute, on the
 // host the app reached.
 func (h *Handler) booruBase(r *http.Request) string {
@@ -228,7 +222,7 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 	}
 	page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruPageLimit, booruMaxLimit)
 	bq := translateBooruQuery(q.Get("tags"), booruVocabularyOf(g))
-	result, err := search.Execute(r.Context(), h.booruSource(g), search.Query{
+	result, err := search.Execute(r.Context(), h.searchSource(g), search.Query{
 		Expr: search.Parse(bq.text), Sort: bq.sort, Order: bq.order, Page: page, Limit: limit, SkipCount: true,
 	})
 	if err != nil && r.Context().Err() != nil {
@@ -271,7 +265,7 @@ func (h *Handler) booruPost(w http.ResponseWriter, r *http.Request, g *library.G
 
 // booruOne answers the first post the search finds, as an object.
 func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Gallery, expr search.Expr, sort string) {
-	result, err := search.Execute(r.Context(), h.booruSource(g), search.Query{
+	result, err := search.Execute(r.Context(), h.searchSource(g), search.Query{
 		Expr: expr, Sort: sort, Page: 1, Limit: 1, SkipCount: true,
 	})
 	if err != nil && r.Context().Err() != nil {
@@ -293,7 +287,7 @@ func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Ga
 
 func (h *Handler) booruCount(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 	bq := translateBooruQuery(r.URL.Query().Get("tags"), booruVocabularyOf(g))
-	n, err := search.Count(r.Context(), h.booruSource(g), search.Query{Expr: search.Parse(bq.text)})
+	n, err := search.Count(r.Context(), h.searchSource(g), search.Query{Expr: search.Parse(bq.text)})
 	if err != nil && r.Context().Err() != nil {
 		return
 	}
