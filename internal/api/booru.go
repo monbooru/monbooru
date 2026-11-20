@@ -212,7 +212,7 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 	q := r.URL.Query()
 	// As on Danbooru, an md5 looks one post up and answers it alone.
 	if md5 := strings.TrimSpace(q.Get("md5")); md5 != "" {
-		h.booruOne(w, r, g, search.FilterExpr{Key: "md5", Val: md5}, "newest")
+		h.booruOne(w, r, g, search.FilterExpr{Key: "md5", Val: md5}, "newest", false)
 		return
 	}
 	// Danbooru also pages by id, b123 before it, a123 after; monbooru's id:
@@ -249,12 +249,15 @@ func booruIDPage(page string) bool {
 }
 
 // Through the search, so a post the listing would hide stays hidden here.
-// posts/random is one post of those its tags find, as on Danbooru.
+// posts/random is one post of those its tags find, as on Danbooru. The
+// post's page, without .json, answers a missing post empty rather than 404,
+// like the routes the layer has no data for: one app tests a new site
+// with posts/100, which a small gallery does not hold.
 func (h *Handler) booruPost(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
-	name := strings.TrimSuffix(r.PathValue("post"), ".json")
+	name, isJSON := strings.CutSuffix(r.PathValue("post"), ".json")
 	if name == "random" {
 		bq := translateBooruQuery(r.URL.Query().Get("tags"), booruVocabularyOf(g))
-		h.booruOne(w, r, g, search.Parse(bq.text), "random")
+		h.booruOne(w, r, g, search.Parse(bq.text), "random", false)
 		return
 	}
 	id, err := strconv.ParseInt(name, 10, 64)
@@ -262,11 +265,12 @@ func (h *Handler) booruPost(w http.ResponseWriter, r *http.Request, g *library.G
 		contract.WriteError(w, http.StatusNotFound, "not_found", "post not found")
 		return
 	}
-	h.booruOne(w, r, g, search.FilterExpr{Key: "id", Val: strconv.FormatInt(id, 10)}, "newest")
+	h.booruOne(w, r, g, search.FilterExpr{Key: "id", Val: strconv.FormatInt(id, 10)}, "newest", !isJSON)
 }
 
-// booruOne answers the first post the search finds, as an object.
-func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Gallery, expr search.Expr, sort string) {
+// booruOne answers the first post the search finds, as an object; none is
+// a 404, or an empty object when emptyIfNone.
+func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Gallery, expr search.Expr, sort string, emptyIfNone bool) {
 	result, err := search.Execute(r.Context(), h.searchSource(g), search.Query{
 		Expr: expr, Sort: sort, Page: 1, Limit: 1, SkipCount: true,
 	})
@@ -280,11 +284,14 @@ func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Ga
 	if serverError(w, err) {
 		return
 	}
-	if len(posts) == 0 {
+	switch {
+	case len(posts) > 0:
+		contract.WriteJSON(w, http.StatusOK, posts[0])
+	case emptyIfNone:
+		contract.WriteJSON(w, http.StatusOK, map[string]any{})
+	default:
 		contract.WriteError(w, http.StatusNotFound, "not_found", "post not found")
-		return
 	}
-	contract.WriteJSON(w, http.StatusOK, posts[0])
 }
 
 func (h *Handler) booruCount(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
