@@ -47,6 +47,16 @@ func viewRenditionPath(dir string, imageID int64) string {
 
 func NeedsViewRendition(width, height int) bool { return int64(width)*int64(height) > viewMaxPixels }
 
+// ViewRenditionFor sizes the rendition from the image's dimensions: past the
+// pixel cap it is scaled to ViewMaxDim, otherwise it keeps the image's size.
+func ViewRenditionFor(srcPath, dstDir string, imageID int64, fileType string, width, height int) (string, error) {
+	maxDim := 0
+	if NeedsViewRendition(width, height) {
+		maxDim = ViewMaxDim
+	}
+	return EnsureViewRendition(srcPath, dstDir, imageID, fileType, maxDim)
+}
+
 // EnsureViewRendition keeps the image's own size for maxDim 0. It is lazy:
 // only an oversized image, or an AVIF or JPEG XL the browser cannot show,
 // needs one.

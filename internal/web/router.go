@@ -1265,11 +1265,7 @@ func (s *Server) planImageBytes(w http.ResponseWriter, r *http.Request, scaled b
 			w.Header().Add("Vary", "Accept")
 		}
 		if past || (negotiated && !acceptsMediaType(r.Header.Get("Accept"), gallery.MIMEForFileType(fileType))) {
-			maxDim := 0
-			if past {
-				maxDim = gallery.ViewMaxDim
-			}
-			rendition, err := gallery.EnsureViewRendition(canonPath, cx.ThumbnailsPath, id, fileType, maxDim)
+			rendition, err := gallery.ViewRenditionFor(canonPath, cx.ThumbnailsPath, id, fileType, int(width.Int64), int(height.Int64))
 			if err != nil {
 				logx.Warnf("view rendition for image %s: %v", idStr, err)
 			} else {
