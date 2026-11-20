@@ -2826,7 +2826,12 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     if (imageTags) {
       var imageId = imageTags.dataset.imageId;
       if (imageId && window.htmx) {
-        window.htmx.ajax('GET', '/images/' + imageId + '/tags', {target: '#image-tags', swap: 'outerHTML'});
+        // Every tag edit and view switch replaces #image-tags; a list read
+        // before one of them must not undo it on screen.
+        imageTags.addEventListener('htmx:beforeSwap', function(e) {
+          if (!imageTags.isConnected) e.detail.shouldSwap = false;
+        });
+        window.htmx.ajax('GET', '/images/' + imageId + '/tags', {source: imageTags, target: '#image-tags', swap: 'outerHTML'});
       }
     }
   }
