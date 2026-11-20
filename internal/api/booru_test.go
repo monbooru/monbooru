@@ -617,20 +617,20 @@ func TestBooruSampleFallsBackToTheFile(t *testing.T) {
 }
 
 func TestBooruSampled(t *testing.T) {
-	size := func(n int) *int { return &n }
 	cases := []struct {
-		name string
-		img  models.Image
-		want bool
+		name          string
+		fileType      string
+		width, height int
+		want          bool
 	}{
-		{"a plain image", models.Image{FileType: models.FileTypePNG, Width: size(1000), Height: size(1000)}, false},
-		{"an image past the cap", models.Image{FileType: models.FileTypePNG, Width: size(20000), Height: size(10000)}, true},
-		{"an AVIF", models.Image{FileType: models.FileTypeAVIF, Width: size(100), Height: size(100)}, true},
-		{"an archive", models.Image{FileType: models.FileTypeCBZ}, true},
-		{"a large video", models.Image{FileType: models.FileTypeMP4, Width: size(20000), Height: size(10000)}, false},
+		{"a plain image", models.FileTypePNG, 1000, 1000, false},
+		{"an image past the cap", models.FileTypePNG, 20000, 10000, true},
+		{"an AVIF", models.FileTypeAVIF, 100, 100, true},
+		{"an archive", models.FileTypeCBZ, 0, 0, true},
+		{"a large video", models.FileTypeMP4, 20000, 10000, false},
 	}
 	for _, tc := range cases {
-		if got := booruSampled(tc.img); got != tc.want {
+		if got := booruSampled(tc.fileType, tc.width, tc.height); got != tc.want {
 			t.Errorf("%s: sampled = %v, want %v", tc.name, got, tc.want)
 		}
 	}

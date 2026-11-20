@@ -423,7 +423,7 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 		PreviewFileURL: base + "/thumb/" + id + ".jpg",
 	}
 	p.LargeFileURL = p.FileURL
-	if booruSampled(img) {
+	if booruSampled(img.FileType, p.ImageWidth, p.ImageHeight) {
 		p.LargeFileURL, p.HasLarge = base+"/sample/"+id+".jpg", true
 	}
 	if noted {
@@ -481,9 +481,9 @@ func booruExt(fileType string) string {
 // A sample is what an app can show of a file it cannot: the first page of
 // an archive, or the web UI's own cached JPEG of a format phones do not
 // decode or of an image too large to.
-func booruSampled(img models.Image) bool {
-	return img.FileType == models.FileTypeCBZ || gallery.IsFFmpegStill(img.FileType) ||
-		!gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(derefInt(img.Width), derefInt(img.Height))
+func booruSampled(fileType string, width, height int) bool {
+	return fileType == models.FileTypeCBZ || gallery.IsFFmpegStill(fileType) ||
+		!gallery.IsVideoType(fileType) && gallery.NeedsViewRendition(width, height)
 }
 
 func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
@@ -504,16 +504,11 @@ func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string,
 	if serverError(w, err) {
 		return "", false
 	}
-	past := !gallery.IsVideoType(fileType) && gallery.NeedsViewRendition(width, height)
-	if !past && !gallery.IsFFmpegStill(fileType) {
+	if !booruSampled(fileType, width, height) {
 		return fileOf(w, g, id)
 	}
-	maxDim := 0
-	if past {
-		maxDim = gallery.ViewMaxDim
-	}
 	// As the web UI does, a rendition that fails falls back to the file.
-	rendition, err := gallery.EnsureViewRendition(canonPath, g.ThumbnailsPath, id, fileType, maxDim)
+	rendition, err := gallery.ViewRenditionFor(canonPath, g.ThumbnailsPath, id, fileType, width, height)
 	if err != nil {
 		logx.Warnf("booru sample for image %d: %v", id, err)
 		return fileOf(w, g, id)
