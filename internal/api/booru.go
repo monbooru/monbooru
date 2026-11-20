@@ -699,9 +699,13 @@ var booruRewrites = map[string]booruRewrite{
 	"filesize": {"size", nil},
 	"source":   {"sourceurl", nil},
 	"ratio":    {"ratio", booruRatio},
+	"status":   {"id", booruStatus},
 	// A user's favorites on Danbooru, the favorite flag here.
 	"fav": {},
 }
+
+// booruNone is an id no post has, for a metatag that finds nothing here.
+const booruNone = "0"
 
 // What monbooru itself reads in a key: term, so nothing Danbooru adds
 // needs listing here.
@@ -822,6 +826,17 @@ func booruID(v string) string {
 		return v
 	}
 	return ""
+}
+
+// monbooru deletes a post outright and has no moderation queue, so every
+// post is active and any other status finds none, as an unknown one does
+// on Danbooru.
+func booruStatus(v string) string {
+	switch strings.ToLower(v) {
+	case "active", "any", "all":
+		return ""
+	}
+	return booruNone
 }
 
 // Danbooru names a file type by its extension. One monbooru does not know
