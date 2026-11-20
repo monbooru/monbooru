@@ -8,6 +8,7 @@
       {{range .View.Options}}<option value="{{.ID}}"{{if .Chosen}} selected{{end}}>{{.Name}}</option>{{end}}
     </select>
   </form>
+  {{with .View.Unreachable}}<div class="flash flash-warn">{{.}}</div>{{end}}
   {{with .View.Addresses}}
   <div class="table-scroll">
   <table class="data-table stack-table">

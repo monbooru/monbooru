@@ -9,6 +9,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/session"
 )
@@ -27,6 +28,8 @@ type booruAddress struct {
 type booruEndpointsView struct {
 	Options   []booruTokenOption
 	Addresses []booruAddress
+	// Why a phone could not reach the addresses, if it could not.
+	Unreachable string
 }
 
 // The tokens the layer can use, and one address per gallery for the one
@@ -34,7 +37,7 @@ type booruEndpointsView struct {
 // reaches it. Each gallery shows whether it answers there.
 func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 	s.cfgMu.RLock()
-	auth := s.cfg.Auth
+	auth, bind := s.cfg.Auth, s.cfg.Server.BindAddress
 	auth.Tokens = slices.Clone(auth.Tokens)
 	s.cfgMu.RUnlock()
 	chosen := api.ChosenBooruToken(auth)
@@ -50,6 +53,14 @@ func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 	origin, key := s.browserOrigin(r), api.BooruKey(chosen.TokenHash)
 	for _, g := range s.galleries() {
 		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key), On: g.Booru})
+	}
+	switch {
+	case desktop.IsLoopbackAddr(bind):
+		v.Unreachable = "monbooru only answers this computer, so a phone cannot reach these addresses. " +
+			"Set server.bind_address to 0.0.0.0 with its port (MONBOORU_SERVER_BIND_ADDRESS) and restart."
+	case desktop.IsLoopbackAddr(r.Host):
+		v.Unreachable = "These addresses use localhost, which a phone cannot reach. " +
+			"Open Settings from this computer's network address to get ones that work."
 	}
 	return v
 }
