@@ -127,6 +127,27 @@ func TestTranslateBooruQuery(t *testing.T) {
 	}
 }
 
+func TestTranslateBooruPageSize(t *testing.T) {
+	vocab := booruVocabulary{known: func(string) bool { return false }, tag: func(string) bool { return false }}
+	cases := []struct {
+		in, text string
+		limit    int
+	}{
+		{"sky", "sky", 0},
+		{"limit:5 sky", "sky", 5},
+		{"LIMIT:5", "", 5},
+		{"-limit:5", "", 0},
+		{"limit:0", "", 0},
+		{"limit:x", "", 0},
+	}
+	for _, tc := range cases {
+		got := translateBooruQuery(tc.in, vocab)
+		if got.text != tc.text || got.limit != tc.limit {
+			t.Errorf("translate(%q) = %q limit %d, want %q limit %d", tc.in, got.text, got.limit, tc.text, tc.limit)
+		}
+	}
+}
+
 func TestBooruObjectRoute(t *testing.T) {
 	for route, want := range map[string]bool{
 		"profile": true, "users/12": true, "comments/5": true, "wiki_pages/sky": true, "related_tag": true,
@@ -255,6 +276,9 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=fav:user_a", []int64{id}},
 		{"?tags=ordfav:user_a", []int64{id}},
 		{"?tags=-fav:user_a", []int64{other}},
+		{"?tags=limit:1", []int64{other}},
+		{"?tags=limit:1&page=2", []int64{id}},
+		{"?tags=limit:1&limit=2", []int64{other, id}},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
