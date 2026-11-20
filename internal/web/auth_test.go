@@ -682,6 +682,31 @@ func TestPickingTheBooruToken(t *testing.T) {
 	}
 }
 
+func TestBooruAddressesAPhoneCannotReach(t *testing.T) {
+	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	cases := []struct {
+		name, bind, host, want string
+	}{
+		{"reachable", "0.0.0.0:8455", "192.0.2.1:8455", ""},
+		{"listening on this computer only", "127.0.0.1:8455", "localhost:8455", "only answers this computer"},
+		{"a page opened on localhost", "0.0.0.0:8455", "localhost:8455", "use localhost"},
+		{"a page opened on 127.0.0.1", "0.0.0.0:8455", "127.0.0.1:8455", "use localhost"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServerWith(t, false, func(c *config.Config) { c.Server.BindAddress = tc.bind })
+			setTokens(srv, []apitoken.Token{tok})
+			pickBooruToken(srv, tok.ID)
+			req := httptest.NewRequest("GET", "/settings", nil)
+			req.Host = tc.host
+			got := srv.booruEndpoints(req).Unreachable
+			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+				t.Errorf("warning %q, want one with %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTurningABooruGalleryOn(t *testing.T) {
 	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
 	cases := []struct {
