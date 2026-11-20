@@ -77,8 +77,7 @@ func (s *Server) folderPickerLevel(w http.ResponseWriter, r *http.Request) {
 		if node == nil {
 			return webui.FolderPage{}, errFolderGone
 		}
-		from := min((page-1)*contract.FolderPageSize, len(node.Children))
-		kids := node.Children[from:min(from+contract.FolderPageSize, len(node.Children))]
+		kids := node.ChildrenPage((page-1)*contract.FolderPageSize, contract.FolderPageSize)
 		out := make([]webui.FolderEntry, len(kids))
 		for i := range kids {
 			out[i] = folderEntryOf(&kids[i])

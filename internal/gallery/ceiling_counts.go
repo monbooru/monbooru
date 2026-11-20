@@ -179,6 +179,13 @@ func FindFolder(tree []FolderNode, path string) *FolderNode {
 	return n
 }
 
+// ChildrenPage is up to limit of n's subfolders from offset on, in path
+// order.
+func (n *FolderNode) ChildrenPage(offset, limit int) []FolderNode {
+	from := min(offset, len(n.Children))
+	return n.Children[from:min(from+limit, len(n.Children))]
+}
+
 // SearchFolders finds the folders whose path holds q, any case, those
 // starting with it first, in path order, at most limit. A walk of the
 // cached tree: no query per keystroke.

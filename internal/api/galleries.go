@@ -63,13 +63,12 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offset, limit := parsePage(r, contract.FolderPageSize, contract.FolderPageSize)
-	kids := node.Children
-	page := kids[min(offset, len(kids)):min(offset+limit, len(kids))]
+	page := node.ChildrenPage(offset, limit)
 	out := make([]contract.Folder, len(page))
 	for i := range page {
 		out[i] = folderOf(&page[i])
 	}
-	writePage(w, offset/limit+1, limit, len(kids), out)
+	writePage(w, offset/limit+1, limit, len(node.Children), out)
 }
 
 func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
