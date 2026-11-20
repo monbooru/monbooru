@@ -290,9 +290,23 @@ func TestBooruPosts(t *testing.T) {
 		}
 	}
 
-	for _, path := range []string{"/posts/999999.json", "/posts/x.json", "/posts/random.json?tags=no_such_tag"} {
+	for _, path := range []string{"/posts/999999.json", "/posts/x.json", "/posts/x", "/posts/random.json?tags=no_such_tag"} {
 		if w := env.do("GET", base+path); w.Code != http.StatusNotFound {
 			t.Errorf("%s: %d, want 404", path, w.Code)
+		}
+	}
+
+	// The post's page, without .json, as one app tests a new site.
+	pages := []struct {
+		path, want string
+	}{
+		{fmt.Sprintf("/posts/%d", id), fmt.Sprintf(`"id":%d`, id)},
+		{"/posts/100", `{}`},
+	}
+	for _, tc := range pages {
+		w := env.do("GET", base+tc.path)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s, want 200 with %s", tc.path, w.Code, w.Body.String(), tc.want)
 		}
 	}
 
