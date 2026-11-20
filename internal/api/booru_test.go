@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 )
 
@@ -427,7 +430,7 @@ func TestBooruFiles(t *testing.T) {
 	}{
 		{fmt.Sprintf("/file/%d.png", id), http.StatusOK, "image/png"},
 		{fmt.Sprintf("/thumb/%d.jpg", id), http.StatusOK, "image/jpeg"},
-		{fmt.Sprintf("/sample/%d.webp", id), http.StatusOK, "image/png"},
+		{fmt.Sprintf("/sample/%d.jpg", id), http.StatusOK, "image/png"},
 		{"/file/999999.png", http.StatusNotFound, ""},
 		{"/thumb/x.jpg", http.StatusNotFound, ""},
 	}
@@ -435,6 +438,36 @@ func TestBooruFiles(t *testing.T) {
 		w := env.do("GET", base+tc.path)
 		if w.Code != tc.code || tc.contentType != "" && w.Header().Get("Content-Type") != tc.contentType {
 			t.Errorf("%s: %d %q, want %d %q", tc.path, w.Code, w.Header().Get("Content-Type"), tc.code, tc.contentType)
+		}
+	}
+
+	// Past the web UI's pixel cap, the sample is its cached JPEG.
+	mustExec(t, env.database.Write, `UPDATE images SET width = 20000, height = 10000 WHERE id = ?`, id)
+	w := env.do("GET", fmt.Sprintf("%s/sample/%d.jpg", base, id))
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/jpeg" {
+		t.Errorf("oversized sample: %d %q, want 200 image/jpeg", w.Code, w.Header().Get("Content-Type"))
+	}
+	if _, err := os.Stat(filepath.Join(env.thumbDir, fmt.Sprintf("%d_view.jpg", id))); err != nil {
+		t.Errorf("the sample was not kept: %v", err)
+	}
+}
+
+func TestBooruSampled(t *testing.T) {
+	size := func(n int) *int { return &n }
+	cases := []struct {
+		name string
+		img  models.Image
+		want bool
+	}{
+		{"a plain image", models.Image{FileType: models.FileTypePNG, Width: size(1000), Height: size(1000)}, false},
+		{"an image past the cap", models.Image{FileType: models.FileTypePNG, Width: size(20000), Height: size(10000)}, true},
+		{"an AVIF", models.Image{FileType: models.FileTypeAVIF, Width: size(100), Height: size(100)}, true},
+		{"an archive", models.Image{FileType: models.FileTypeCBZ}, true},
+		{"a large video", models.Image{FileType: models.FileTypeMP4, Width: size(20000), Height: size(10000)}, false},
+	}
+	for _, tc := range cases {
+		if got := booruSampled(tc.img); got != tc.want {
+			t.Errorf("%s: sampled = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
