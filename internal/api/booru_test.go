@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 )
@@ -73,10 +74,28 @@ func TestTranslateBooruQuery(t *testing.T) {
 	vocab := booruVocabulary{
 		known: func(key string) bool { return slices.Contains([]string{"width", "date", "md5", "artist"}, key) },
 		tag:   func(name string) bool { return name == "re:zero" },
+		collection: func(name string) string {
+			if name == "trip_a" {
+				return "trip a"
+			}
+			return name
+		},
 	}
 	cases := []struct {
 		in, text, sort, order string
 	}{
+		{"pool:trip_a", `collection:"trip a"`, "newest", "desc"},
+		{"pool:trip_b", `collection:"trip_b"`, "newest", "desc"},
+		{"-pool:trip_a", `-collection:"trip a"`, "newest", "desc"},
+		{"pool:Any", "collection:any", "newest", "desc"},
+		{"pool:series", "collection:any", "newest", "desc"},
+		{"pool:none", "-collection:any", "newest", "desc"},
+		{"-pool:none", "collection:any", "newest", "desc"},
+		{"ordpool:trip_a", `collection:"trip a"`, "order", "asc"},
+		{"ordpool:trip_a order:filesize", `collection:"trip a"`, "order", "asc"},
+		{"order:filesize ordpool:trip_a", `collection:"trip a"`, "order", "asc"},
+		{"ordpool:any", "collection:any", "newest", "desc"},
+		{"-ordpool:trip_a", `-collection:"trip a"`, "newest", "desc"},
 		{"", "", "newest", "desc"},
 		{"blue_sky -cloud", "blue_sky -cloud", "newest", "desc"},
 		{"~cat ~dog sky", "sky ( cat OR dog )", "newest", "desc"},
@@ -288,6 +307,12 @@ func TestBooruPosts(t *testing.T) {
 	env, base, id := booruEnv(t)
 	other := env.createTestImage(t, "other.png", 20, 20)
 	mustExec(t, env.database.Write, `UPDATE images SET is_favorited = 1 WHERE id = ?`, id)
+	for i, img := range []int64{id, other} {
+		pos := i + 1
+		if err := gallery.AddCollectionMembership(env.database, img, "trip a", &pos); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	cases := []struct {
 		query string
@@ -321,6 +346,11 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=age:<1d", []int64{other, id}},
 		{"?tags=age:>1d", nil},
 		{"?tags=age:nope", []int64{other, id}},
+		{"?tags=pool:trip_a", []int64{other, id}},
+		{"?tags=ordpool:trip_a", []int64{id, other}},
+		{"?tags=ordpool:TRIP_A", []int64{id, other}},
+		{"?tags=pool:none", nil},
+		{"?tags=pool:trip_b", nil},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
