@@ -350,8 +350,8 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 		PreviewFileURL: base + "/thumb/" + id + ".jpg",
 	}
 	p.LargeFileURL = p.FileURL
-	if booruSampled(img.FileType) {
-		p.LargeFileURL, p.HasLarge = base+"/sample/"+id+".webp", true
+	if booruSampled(img) {
+		p.LargeFileURL, p.HasLarge = base+"/sample/"+id+".jpg", true
 	}
 	if noted {
 		p.LastNotedAt = &created
@@ -405,11 +405,12 @@ func booruExt(fileType string) string {
 	return fileType
 }
 
-// A sample is what an app can show of a file it cannot: a still of the
-// formats phones do not decode, the first page of an archive.
-func booruSampled(fileType string) bool {
-	ft, _ := models.LookupFileType(fileType)
-	return ft.FFmpegStill || fileType == models.FileTypeCBZ
+// A sample is what an app can show of a file it cannot: the first page of
+// an archive, or the web UI's own cached JPEG of a format phones do not
+// decode or of an image too large to.
+func booruSampled(img models.Image) bool {
+	return img.FileType == models.FileTypeCBZ || gallery.IsFFmpegStill(img.FileType) ||
+		!gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(derefInt(img.Width), derefInt(img.Height))
 }
 
 func serveSampleOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
@@ -417,16 +418,35 @@ func serveSampleOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, i
 	if !ok {
 		return
 	}
-	if fileType != models.FileTypeCBZ {
-		serveStillOf(w, r, g, id)
+	if fileType == models.FileTypeCBZ {
+		page, err := gallery.EnsureMangaPage(g.ThumbnailsPath, canonPath, id, 1)
+		if err != nil {
+			contract.WriteError(w, http.StatusNotFound, "not_found", "page not found")
+			return
+		}
+		http.ServeFile(w, r, page)
 		return
 	}
-	page, err := gallery.EnsureMangaPage(g.ThumbnailsPath, canonPath, id, 1)
-	if err != nil {
-		contract.WriteError(w, http.StatusNotFound, "not_found", "page not found")
+	var width, height int
+	err := g.DB.Read.QueryRow(`SELECT COALESCE(width, 0), COALESCE(height, 0) FROM images WHERE id = ?`, id).Scan(&width, &height)
+	if serverError(w, err) {
 		return
 	}
-	http.ServeFile(w, r, page)
+	past := !gallery.IsVideoType(fileType) && gallery.NeedsViewRendition(width, height)
+	if !past && !gallery.IsFFmpegStill(fileType) {
+		serveFileOf(w, r, g, id)
+		return
+	}
+	maxDim := 0
+	if past {
+		maxDim = gallery.ViewMaxDim
+	}
+	rendition, err := gallery.EnsureViewRendition(canonPath, g.ThumbnailsPath, id, fileType, maxDim)
+	if serverError(w, err) {
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	http.ServeFile(w, r, rendition)
 }
 
 // The extension is only there for the apps that read the type off the URL.
