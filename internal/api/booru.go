@@ -199,11 +199,7 @@ func (h *Handler) booruFile(kind string, plan func(http.ResponseWriter, *library
 // The apps take the file URLs as they come, so they are absolute, on the
 // host the app reached.
 func (h *Handler) booruBase(r *http.Request) string {
-	scheme := "http"
-	if strings.HasPrefix(h.cfg().Server.BaseURL, "https://") {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host + BooruPath(r.PathValue("gallery"), r.PathValue("key"))
+	return ReachedOrigin(h.cfg().Server.BaseURL, r) + BooruPath(r.PathValue("gallery"), r.PathValue("key"))
 }
 
 func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.Gallery) {

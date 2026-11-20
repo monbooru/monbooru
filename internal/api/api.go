@@ -287,8 +287,7 @@ func corsAllowed(cfg *config.Config, r *http.Request, origin string) bool {
 }
 
 // Empty unless Host is a literal address: Host is client-supplied, so a
-// rebound or forged name would vouch for itself. The scheme comes from
-// base_url, which a TLS-terminating proxy hides from the listener.
+// rebound or forged name would vouch for itself.
 func requestOrigin(cfg *config.Config, r *http.Request) string {
 	name := r.Host
 	if h, _, err := net.SplitHostPort(name); err == nil {
@@ -298,8 +297,15 @@ func requestOrigin(cfg *config.Config, r *http.Request) string {
 	if name != "localhost" && net.ParseIP(name) == nil {
 		return ""
 	}
+	return ReachedOrigin(cfg.Server.BaseURL, r)
+}
+
+// ReachedOrigin is the origin on the host the request reached. The scheme
+// comes from base_url, which a TLS-terminating proxy hides from the
+// listener.
+func ReachedOrigin(baseURL string, r *http.Request) string {
 	scheme := "http"
-	if strings.HasPrefix(cfg.Server.BaseURL, "https://") {
+	if strings.HasPrefix(baseURL, "https://") {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host

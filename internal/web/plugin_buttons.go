@@ -3,8 +3,8 @@ package web
 import (
 	"net/http"
 	"slices"
-	"strings"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
 )
 
@@ -61,12 +61,8 @@ func (s *Server) pageURL(r *http.Request) string { return s.browserOrigin(r) + r
 // The host is the one the browser reached: base_url defaults to
 // localhost, which sends a LAN browser nowhere.
 func (s *Server) browserOrigin(r *http.Request) string {
-	scheme := "http"
 	s.cfgMu.RLock()
 	configured := s.cfg.Server.BaseURL
 	s.cfgMu.RUnlock()
-	if strings.HasPrefix(configured, "https://") {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
+	return api.ReachedOrigin(configured, r)
 }
