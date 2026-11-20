@@ -238,7 +238,13 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 	if serverError(w, err) {
 		return
 	}
-	posts, err := booruPostsOf(h.booruBase(r), g, result.Results)
+	images := result.Results
+	// Danbooru pages through the posts random: drew, so the pages stop
+	// after that many.
+	if bq.random > 0 {
+		images = images[:min(len(images), max(bq.random-(page-1)*limit, 0))]
+	}
+	posts, err := booruPostsOf(h.booruBase(r), g, images)
 	if serverError(w, err) {
 		return
 	}
@@ -689,8 +695,9 @@ func booruObjectRoute(route string) bool {
 
 type booruQuery struct {
 	text, sort, order string
-	// The limit: metatag's page size, 0 when none is given.
-	limit int
+	// The limit: metatag's page size and random:'s post count, 0 when
+	// none is given.
+	limit, random int
 }
 
 // A Danbooru metatag monbooru spells differently. read takes one value of
@@ -794,6 +801,13 @@ func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 	case "limit":
 		if n, err := strconv.Atoi(val); err == nil && n > 0 && !neg {
 			q.limit = n
+		}
+		return ""
+	case "random":
+		// N posts drawn at random from those the search finds.
+		if n, err := strconv.Atoi(val); err == nil && n > 0 && !neg {
+			q.random = n
+			q.sort, q.order = "random", "desc"
 		}
 		return ""
 	}
