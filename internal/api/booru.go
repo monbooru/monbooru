@@ -154,6 +154,13 @@ func (h *Handler) booruBase(r *http.Request) string {
 
 func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 	q := r.URL.Query()
+	// Danbooru also pages by id, b123 before it, a123 after; monbooru's id:
+	// is equality only, so such a page ends the scroll rather than
+	// repeating page 1.
+	if booruIDPage(q.Get("page")) {
+		contract.WriteJSON(w, http.StatusOK, []booruPost{})
+		return
+	}
 	page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruPageLimit, booruMaxLimit)
 	bq := translateBooruQuery(q.Get("tags"), booruVocabularyOf(g))
 	result, err := search.Execute(r.Context(), h.booruSource(g), search.Query{
@@ -170,6 +177,14 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 		return
 	}
 	contract.WriteJSON(w, http.StatusOK, posts)
+}
+
+func booruIDPage(page string) bool {
+	if len(page) < 2 || page[0] != 'a' && page[0] != 'b' {
+		return false
+	}
+	_, err := strconv.ParseInt(page[1:], 10, 64)
+	return err == nil
 }
 
 // Through the search, so a post the listing would hide stays hidden here.
