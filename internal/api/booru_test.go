@@ -90,6 +90,8 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"filesize:1mb..2mb", "size:1mb..2mb", "newest", "desc"},
 		{"source:https://a.example/*", "sourceurl:https://a.example/*", "newest", "desc"},
 		{"fav:user_a", "fav:true", "newest", "desc"},
+		{"-fav:user_a", "-fav:true", "newest", "desc"},
+		{"ordfav:user_a order:id", "fav:true", "newest", "asc"},
 		{"ratio:16:9", "ratio:1.7777777777777777", "newest", "desc"},
 		{"ratio:>=4:3", "ratio:>=1.3333333333333333", "newest", "desc"},
 		{"ratio:1:1..2:1", "ratio:1..2", "newest", "desc"},
@@ -227,6 +229,7 @@ func TestChosenBooruToken(t *testing.T) {
 func TestBooruPosts(t *testing.T) {
 	env, base, id := booruEnv(t)
 	other := env.createTestImage(t, "other.png", 20, 20)
+	mustExec(t, env.database.Write, `UPDATE images SET is_favorited = 1 WHERE id = ?`, id)
 
 	cases := []struct {
 		query string
@@ -249,6 +252,9 @@ func TestBooruPosts(t *testing.T) {
 		{fmt.Sprintf("?tags=id:%d,%d", id, other), []int64{other, id}},
 		{"?tags=status:deleted", nil},
 		{"?tags=-status:deleted", []int64{other, id}},
+		{"?tags=fav:user_a", []int64{id}},
+		{"?tags=ordfav:user_a", []int64{id}},
+		{"?tags=-fav:user_a", []int64{other}},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
