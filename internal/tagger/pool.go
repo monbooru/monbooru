@@ -412,6 +412,35 @@ func (p *Pool) Catalog() []worker.CatalogEntry {
 	return out
 }
 
+// JobWorker is a worker a job can be given to now: up, not paused, with
+// the models it can run.
+type JobWorker struct {
+	Name, Provider string
+	Local          bool
+	Slots          int
+	Holds          []string
+}
+
+func (p *Pool) JobWorkers() []JobWorker {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, held := p.held()
+	var out []JobWorker
+	for _, w := range p.workers {
+		if !runnable(w) || !w.up {
+			continue
+		}
+		jw := JobWorker{Name: w.def.Name, Provider: w.cache.Info.Provider, Local: w.def.Local, Slots: w.slots()}
+		for _, m := range w.cache.Models {
+			if h := held[m.Name]; h != nil && m.Ready && m.Digest == h.model.Digest {
+				jw.Holds = append(jw.Holds, m.Name)
+			}
+		}
+		out = append(out, jw)
+	}
+	return out
+}
+
 // HasWorker is false while no worker is enabled or paired.
 func (p *Pool) HasWorker() bool {
 	p.mu.Lock()
@@ -423,12 +452,13 @@ var errNoWorker = errors.New("no worker")
 
 // eligible lists the workers a call for models may go to, in order: those
 // up and holding each model as the pool's copy. Once a remote worker
-// qualifies the local one stands by. Caller holds p.mu.
-func (p *Pool) eligible(models []string, skip map[*poolWorker]bool) []*poolWorker {
+// qualifies the local one stands by, unless the job names its workers in
+// only. Caller holds p.mu.
+func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []string) []*poolWorker {
 	_, held := p.held()
 	var local, remote []*poolWorker
 	for _, w := range p.workers {
-		if skip[w] || !runnable(w) {
+		if skip[w] || !runnable(w) || only != nil && !slices.Contains(only, w.def.Name) {
 			continue
 		}
 		ok := true
@@ -449,6 +479,9 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool) []*poolWorke
 			remote = append(remote, w)
 		}
 	}
+	if only != nil {
+		return append(remote, local...)
+	}
 	if len(remote) > 0 {
 		return remote
 	}
@@ -456,27 +489,27 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool) []*poolWorke
 }
 
 // Slots is how many calls for models the workers that may take them run
-// at once; 0 when none may.
-func (p *Pool) Slots(models []string) int {
+// at once; 0 when none may. A non-nil only keeps the workers it names.
+func (p *Pool) Slots(models, only []string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := 0
-	for _, w := range p.eligible(models, nil) {
+	for _, w := range p.eligible(models, nil, only) {
 		n += w.slots()
 	}
 	return n
 }
 
 // Tag runs frames through models on a worker that holds them all, waiting
-// for a free slot. A call that fails in transport goes to another worker,
-// three tries at most, and that worker is down until its next refresh; a
-// worker's refusal is final.
-func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte) (worker.TagResponse, error) {
+// for a free slot; a non-nil only keeps the workers it names. A call that
+// fails in transport goes to another worker, three tries at most, and that
+// worker is down until its next refresh; a worker's refusal is final.
+func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, error) {
 	interactive := req.Priority == worker.PriorityInteractive
 	skip := map[*poolWorker]bool{}
 	var lastErr error
 	for range 3 {
-		w, err := p.acquire(ctx, req.Models, interactive, skip)
+		w, err := p.acquire(ctx, req.Models, interactive, skip, only)
 		if err != nil {
 			if lastErr != nil && errors.Is(err, errNoWorker) {
 				return worker.TagResponse{}, lastErr
@@ -512,7 +545,7 @@ func (p *Pool) markDown(w *poolWorker, err error) {
 	p.free.Broadcast()
 }
 
-func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, skip map[*poolWorker]bool) (*poolWorker, error) {
+func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, skip map[*poolWorker]bool, only []string) (*poolWorker, error) {
 	stop := context.AfterFunc(ctx, func() {
 		p.mu.Lock()
 		p.free.Broadcast()
@@ -529,7 +562,7 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		ws := p.eligible(models, skip)
+		ws := p.eligible(models, skip, only)
 		if len(ws) == 0 {
 			return nil, fmt.Errorf("%w holds %s", errNoWorker, strings.Join(models, ", "))
 		}

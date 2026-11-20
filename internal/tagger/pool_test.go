@@ -17,7 +17,7 @@ import (
 
 func tagOne(t *testing.T, p *Pool, priority string) (worker.TagResponse, error) {
 	t.Helper()
-	return p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: priority, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)})
+	return p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: priority, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, nil)
 }
 
 type counting struct {
@@ -124,8 +124,8 @@ func TestOneNameWithTwoDigestsRunsOnTheFirst(t *testing.T) {
 			t.Errorf("wd = %+v, want it flagged as differing", s)
 		}
 	}
-	if p.Slots([]string{"wd"}) != 2 {
-		t.Errorf("slots = %d, want only a's 2", p.Slots([]string{"wd"}))
+	if p.Slots([]string{"wd"}, nil) != 2 {
+		t.Errorf("slots = %d, want only a's 2", p.Slots([]string{"wd"}, nil))
 	}
 }
 
@@ -262,4 +262,66 @@ func TestAWorkerAddedWhileRunningIsLookedAtAtOnce(t *testing.T) {
 	go p.Run(ctx, time.Hour)
 	p.Set([]WorkerDef{{Name: "a", URL: serve(t, newFake(t, wd())), Token: "tok"}})
 	waitFor(t, func() bool { ws := p.Workers(); return len(ws) == 1 && ws[0].Up })
+}
+
+func TestAJobNamingItsWorkersSharesThemTheLocalOneIncluded(t *testing.T) {
+	local := &counting{f: newFake(t, wd())}
+	left := &counting{f: newFake(t, wd())}
+	named := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	p := usePool(t, "",
+		WorkerDef{Name: LocalWorker, Local: true, URL: serve(t, local), Token: "tok"},
+		WorkerDef{Name: "left-out", URL: serve(t, left), Token: "tok"},
+		WorkerDef{Name: "gpu-box", URL: serve(t, named), Token: "tok"})
+	only := []string{LocalWorker, "gpu-box"}
+	if n := p.Slots([]string{"wd"}, only); n != 4 {
+		t.Errorf("slots of the named workers = %d, want 2 + 2", n)
+	}
+	if n := p.Slots([]string{"wd"}, nil); n != 4 {
+		t.Errorf("slots with no name = %d, want the two remote workers' only", n)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: worker.PriorityBatch, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, only); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	waitFor(t, func() bool { return named.n() == 2 && local.n() == 1 })
+	close(named.gate)
+	wg.Wait()
+	if left.n() != 0 {
+		t.Errorf("the worker left out took %d calls", left.n())
+	}
+}
+
+func TestAJobWhoseWorkersHoldNoneOfItsModelsFails(t *testing.T) {
+	p := usePool(t, "",
+		WorkerDef{Name: "a", URL: serve(t, newFake(t, wd())), Token: "tok"},
+		WorkerDef{Name: "b", URL: serve(t, newFake(t, fakeModel{name: "joytag", labels: labelsOf("a")})), Token: "tok"})
+	_, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, []string{"b"})
+	if !errors.Is(err, errNoWorker) {
+		t.Errorf("tag on b only: %v, want no worker", err)
+	}
+}
+
+func TestJobWorkersAreTheOnesUpWithWhatTheyCanRun(t *testing.T) {
+	gone := serve(t, newFake(t, wd()))
+	p := usePool(t, "",
+		WorkerDef{Name: LocalWorker, Local: true, URL: serve(t, newFake(t, wd())), Token: "tok"},
+		WorkerDef{Name: "both", URL: serve(t, newFake(t, wd(), fakeModel{name: "joytag", labels: labelsOf("a")})), Token: "tok"},
+		WorkerDef{Name: "paused", URL: serve(t, newFake(t, wd())), Token: "tok", Paused: true},
+		WorkerDef{Name: "gone", URL: gone, Token: "tok"})
+	p.markDown(p.workers[3], errors.New("gone"))
+	got := p.JobWorkers()
+	var names []string
+	for _, w := range got {
+		names = append(names, w.Name+":"+strings.Join(w.Holds, "+"))
+	}
+	if want := []string{"local:wd", "both:wd+joytag"}; !slices.Equal(names, want) {
+		t.Errorf("job workers = %v, want %v", names, want)
+	}
+	if !got[0].Local || got[1].Slots != 2 {
+		t.Errorf("job workers = %+v", got)
+	}
 }

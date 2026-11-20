@@ -53,6 +53,7 @@ type galleryData struct {
 	EnabledTaggers    []tagger.TaggerStatus
 	TaggersPresent    bool
 	TaggerReason      string
+	AutotagWorkers    []tagger.JobWorker
 	ActiveTagTerms    map[string]bool
 	InboxClusterAtIdx []*inboxCluster
 	InboxUploadActive bool
@@ -308,6 +309,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		EnabledTaggers:    enabledTaggers,
 		TaggersPresent:    taggersPresent,
 		TaggerReason:      taggerReason,
+		AutotagWorkers:    autotagWorkers(),
 		PluginSlot:        s.pluginSlot(r, config.SlotBatchBar, 0, ""),
 		ActiveTagTerms:    computeActiveTagTerms(queryStr),
 		SearchTime:        took,
@@ -862,4 +864,13 @@ func buildInboxCluster(rows []models.Image, queryStr string, whole bool) *inboxC
 		RangeQuery: clusterQ,
 		Whole:      whole,
 	}
+}
+
+// autotagWorkers are what the batch Auto-tag dialog offers, once there
+// are two to choose from.
+func autotagWorkers() []tagger.JobWorker {
+	if ws := tagger.CurrentPool().JobWorkers(); len(ws) > 1 {
+		return ws
+	}
+	return nil
 }

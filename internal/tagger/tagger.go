@@ -52,6 +52,12 @@ func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTagger
 // ids were left untagged; a handle with no thumbnails path extracts pages
 // under the system temp directory.
 func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager) (int, error) {
+	return RunOn(ctx, h, cfg, ids, taggers, nil, mgr)
+}
+
+// RunOn is RunWithTaggers on the workers named in only, all of them
+// sharing the images; nil leaves the choice to the pool.
+func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, only []string, mgr *jobs.Manager) (int, error) {
 	if len(taggers) == 0 {
 		return 0, fmt.Errorf("no tagger is enabled or available")
 	}
@@ -127,7 +133,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 
 	// One image per slot of the workers that can take the job, so each
 	// worker pulls as fast as it answers and no frame waits decoded.
-	parallel := min(max(1, pool.Slots(names)), len(ids))
+	parallel := min(max(1, pool.Slots(names, only)), len(ids))
 	if n := cfg.Tagger.CPUThreads; n > 0 {
 		parallel = min(parallel, n)
 	}
@@ -187,7 +193,7 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
 			}
 		}
-		scores, inferred, err := inferFrames(ctx, pool, priority, taggers, plan, imageID, framePaths, fileType, onPage)
+		scores, inferred, err := inferFrames(ctx, pool, only, priority, taggers, plan, imageID, framePaths, fileType, onPage)
 		if err != nil {
 			return err
 		}
@@ -253,7 +259,7 @@ feed:
 // inferFrames runs every frame through every tagger, one call per frame
 // and input, and reports whether any frame was inferred. A frame that
 // fails to read or that a model refuses is logged and left out.
-func inferFrames(ctx context.Context, pool *Pool, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
+func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) ([][]SparseScores, bool, error) {
 	type group struct {
 		input   inputKey
 		models  []string
@@ -290,7 +296,7 @@ func inferFrames(ctx context.Context, pool *Pool, priority string, taggers []Tag
 			continue
 		}
 		for g, grp := range groups {
-			resp, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]})
+			resp, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]}, only)
 			if err != nil {
 				return nil, false, err
 			}
