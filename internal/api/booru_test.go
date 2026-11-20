@@ -107,6 +107,9 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"order:score", "", "newest", "desc"},
 		{"-order:id", "", "newest", "desc"},
 		{"- ~", "- ~", "newest", "desc"},
+		{"*", "", "newest", "desc"},
+		{"** sky", "sky", "newest", "desc"},
+		{"sky*", "sky*", "newest", "desc"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -237,6 +240,8 @@ func TestBooruPosts(t *testing.T) {
 		{fmt.Sprintf("?page=b%d", id), nil},
 		{"?page=a1", nil},
 		{"?page=bx", []int64{other, id}},
+		// The search one app tests a new site with.
+		{"?tags=*&page=1&limit=30", []int64{other, id}},
 		{fmt.Sprintf("?tags=id:%d,%d", id, other), []int64{other, id}},
 	}
 	for _, tc := range cases {
