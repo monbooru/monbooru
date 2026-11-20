@@ -750,6 +750,11 @@ func translateBooruQuery(raw string, vocab booruVocabulary) booruQuery {
 // term rewrites one Danbooru term; "" drops it.
 func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 	body, neg := strings.CutPrefix(tok, "-")
+	// A wildcard alone means any post on Danbooru, and one app tests a site
+	// with tags=*; monbooru's parser reads it as a tag matching nothing.
+	if body != "" && strings.Trim(body, "*") == "" {
+		return ""
+	}
 	key, val, meta := strings.Cut(body, ":")
 	if body == "" || !meta {
 		return tok
