@@ -3352,6 +3352,10 @@ document.addEventListener('DOMContentLoaded', function() {
   setFocused(cells, cells.indexOf(target), 'center');
 });
 
+// The folder picked for the last upload: the grid refresh after it redraws
+// the form, and the next batch most likely goes to the same folder.
+var _inboxUploadFolder = '';
+
 function initInboxUpload() {
   var dz = document.getElementById('inbox-upload-drop');
   var input = document.getElementById('inbox-upload-file-input');
@@ -3364,6 +3368,8 @@ function initInboxUpload() {
   // A property: a Back's snapshot would keep a data- flag, not the listeners.
   if (!dz || !input || !list || !form || dz.inboxWired) return;
   dz.inboxWired = true;
+  var folderPicker = document.getElementById('upload-folder');
+  if (folderPicker && _inboxUploadFolder) folderPick(folderPicker, _inboxUploadFolder);
 
   // The file picker replaces input.files on every change, so picks
   // accumulate here and are copied back.
@@ -3403,7 +3409,12 @@ function initInboxUpload() {
     pickBtn.addEventListener('click', function(e) { e.preventDefault(); input.click(); });
   }
   if (resetBtn) {
-    resetBtn.addEventListener('click', function(e) { e.preventDefault(); clearPending(); });
+    resetBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      clearPending();
+      _inboxUploadFolder = '';
+      if (folderPicker) folderPick(folderPicker, '');
+    });
   }
   renderList();
 
@@ -3421,13 +3432,16 @@ function initInboxUpload() {
   // htmx:xhr:progress fires for the response download too; the latch
   // keeps its events from rewinding the counter.
   var uploadDone = false;
-  form.addEventListener('htmx:beforeRequest', function() {
+  form.addEventListener('htmx:beforeRequest', function(e) {
+    // The picker's own requests bubble up here too.
+    if (e.target !== e.currentTarget) return;
+    if (folderPicker) _inboxUploadFolder = folderPicker.querySelector('.folder-picker-input input').value.trim();
     uploadDone = false;
     if (submitBtn) submitBtn.disabled = true;
     if (result) result.innerHTML = '<div class="field-hint">Uploading...</div>';
   });
   form.addEventListener('htmx:xhr:progress', function(e) {
-    if (uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
+    if (e.target !== e.currentTarget || uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
     var pct = Math.round((e.detail.loaded / e.detail.total) * 100);
     if (pct >= 100) {
       uploadDone = true;
@@ -3437,6 +3451,7 @@ function initInboxUpload() {
     result.innerHTML = '<div class="field-hint">Uploading... ' + pct + '%</div>';
   });
   form.addEventListener('htmx:afterRequest', function(e) {
+    if (e.target !== e.currentTarget) return;
     if (submitBtn) submitBtn.disabled = false;
     if (!e.detail.successful) {
       if (result && !result.querySelector('.flash')) setFlashText(result, 'err', 'Upload failed: nothing was uploaded.');

@@ -625,6 +625,8 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /internal/search/count", s.galleryCount)
 	rt.read("GET /internal/folders/suggest", s.foldersSuggest)
 	rt.read("GET /internal/folders/children", s.folderChildren)
+	rt.read("GET "+folderPickerRoute+"/level", s.folderPickerLevel)
+	rt.read("GET "+folderPickerRoute+"/suggest", s.folderPickerSuggest)
 	rt.read("GET /internal/collection/suggest", s.collectionSuggest)
 	rt.read("GET /internal/source/suggest", s.sourceSuggest)
 	rt.read("GET /internal/name/preview", s.namePreview)
