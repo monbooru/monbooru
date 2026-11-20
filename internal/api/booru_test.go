@@ -282,6 +282,33 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=-blue_sky", []int64{other}},
 		{"?tags=rating:e", []int64{id}},
 	}
+	var md5 string
+	if err := env.database.Read.QueryRow(`SELECT md5 FROM images WHERE id = ?`, id).Scan(&md5); err != nil || md5 == "" {
+		t.Fatalf("md5 of the image: %q, %v", md5, err)
+	}
+	md5s := []struct {
+		md5  string
+		code int
+	}{
+		{md5, http.StatusOK},
+		{strings.ToUpper(md5), http.StatusOK},
+		{strings.Repeat("0", 32), http.StatusNotFound},
+	}
+	for _, tc := range md5s {
+		w := env.do("GET", base+"/posts.json?tags=-blue_sky&md5="+tc.md5)
+		if w.Code != tc.code {
+			t.Errorf("posts.json?md5=%s: %d, want %d", tc.md5, w.Code, tc.code)
+			continue
+		}
+		if tc.code == http.StatusOK {
+			var p booruPost
+			mustDecode(t, w, &p)
+			if p.ID != id {
+				t.Errorf("posts.json?md5=%s = post %d, want %d", tc.md5, p.ID, id)
+			}
+		}
+	}
+
 	for _, tc := range randoms {
 		w := env.do("GET", base+"/posts/random.json"+tc.query)
 		mustCode(t, w, http.StatusOK)
