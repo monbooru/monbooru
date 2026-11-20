@@ -18,6 +18,7 @@ import (
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -502,9 +503,11 @@ func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string,
 	if past {
 		maxDim = gallery.ViewMaxDim
 	}
+	// As the web UI does, a rendition that fails falls back to the file.
 	rendition, err := gallery.EnsureViewRendition(canonPath, g.ThumbnailsPath, id, fileType, maxDim)
-	if serverError(w, err) {
-		return "", false
+	if err != nil {
+		logx.Warnf("booru sample for image %d: %v", id, err)
+		return fileOf(w, g, id)
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	return rendition, true
