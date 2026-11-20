@@ -442,6 +442,26 @@ func TestBooruFiles(t *testing.T) {
 		}
 	}
 
+	// An app that has the bytes gets a 304, and other bytes another tag.
+	for _, path := range []string{fmt.Sprintf("/file/%d.png", id), fmt.Sprintf("/thumb/%d.jpg", id)} {
+		w := env.do("GET", base+path)
+		tag := w.Header().Get("ETag")
+		if tag == "" || w.Header().Get("Cache-Control") != "private, no-cache" {
+			t.Errorf("%s: ETag %q, Cache-Control %q", path, tag, w.Header().Get("Cache-Control"))
+			continue
+		}
+		req := httptest.NewRequest("GET", base+path, nil)
+		req.Header.Set("If-None-Match", tag)
+		again := httptest.NewRecorder()
+		env.mux.ServeHTTP(again, req)
+		if again.Code != http.StatusNotModified {
+			t.Errorf("%s with its ETag: %d, want 304", path, again.Code)
+		}
+	}
+	if a, b := env.do("GET", fmt.Sprintf("%s/file/%d.png", base, id)), env.do("GET", fmt.Sprintf("%s/thumb/%d.jpg", base, id)); a.Header().Get("ETag") == b.Header().Get("ETag") {
+		t.Error("the file and its thumbnail share an ETag")
+	}
+
 	// Past the web UI's pixel cap, the sample is its cached JPEG.
 	mustExec(t, env.database.Write, `UPDATE images SET width = 20000, height = 10000 WHERE id = ?`, id)
 	w := env.do("GET", fmt.Sprintf("%s/sample/%d.jpg", base, id))
