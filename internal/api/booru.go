@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -803,20 +802,29 @@ func booruFileType(v string) string {
 	return v
 }
 
-var booruRatioRe = regexp.MustCompile(`(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)`)
-
 // Danbooru writes a ratio as 16:9, monbooru as the number; the operators
-// and ranges around it read alike.
+// and ranges around it read alike, so each end is read as the search reads
+// a comparison.
 func booruRatio(v string) string {
-	return booruRatioRe.ReplaceAllStringFunc(v, func(m string) string {
-		w, h, _ := strings.Cut(m, ":")
-		x, _ := strconv.ParseFloat(w, 64)
-		y, _ := strconv.ParseFloat(h, 64)
-		if y == 0 {
-			return m
-		}
-		return strconv.FormatFloat(x/y, 'g', -1, 64)
-	})
+	if from, to, ok := strings.Cut(v, ".."); ok {
+		return booruRatioEnd(from) + ".." + booruRatioEnd(to)
+	}
+	return booruRatioEnd(v)
+}
+
+// A value that is not a:b is kept for the search to judge.
+func booruRatioEnd(v string) string {
+	num := strings.TrimLeft(v, "<>=")
+	w, h, ok := strings.Cut(num, ":")
+	if !ok {
+		return v
+	}
+	x, errW := strconv.ParseFloat(w, 64)
+	y, errH := strconv.ParseFloat(h, 64)
+	if errW != nil || errH != nil || y == 0 {
+		return v
+	}
+	return v[:len(v)-len(num)] + strconv.FormatFloat(x/y, 'g', -1, 64)
 }
 
 // A comma list is any of its values.
