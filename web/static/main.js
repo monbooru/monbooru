@@ -3352,9 +3352,14 @@ document.addEventListener('DOMContentLoaded', function() {
   setFocused(cells, cells.indexOf(target), 'center');
 });
 
-// The folder picked for the last upload: the grid refresh after it redraws
-// the form, and the next batch most likely goes to the same folder.
+// The upload form's folder, carried over the grid's swaps, which redraw the
+// form: the refresh after an upload, a page change. It is read as the swap
+// begins, so a folder typed, picked or emptied since is the one kept.
 var _inboxUploadFolder = '';
+document.addEventListener('htmx:beforeSwap', function(e) {
+  var field = document.getElementById('upload-folder-input');
+  if (field && e.detail.target && e.detail.target.contains(field)) _inboxUploadFolder = field.value.trim();
+});
 
 function initInboxUpload() {
   var dz = document.getElementById('inbox-upload-drop');
@@ -3436,7 +3441,6 @@ function initInboxUpload() {
   form.addEventListener('htmx:beforeRequest', function(e) {
     // The picker's own requests bubble up here too.
     if (e.target !== e.currentTarget) return;
-    if (folderPicker) _inboxUploadFolder = folderPicker.querySelector('.folder-picker-input input').value.trim();
     uploadDone = false;
     if (submitBtn) submitBtn.disabled = true;
     if (result) result.innerHTML = '<div class="field-hint">Uploading...</div>';
