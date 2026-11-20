@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"net/http"
 	"slices"
@@ -231,9 +232,13 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 		pageSize = strconv.Itoa(bq.limit)
 	}
 	page, limit := contract.PageParams(q.Get("page"), pageSize, booruPageLimit, booruMaxLimit)
-	result, err := search.Execute(r.Context(), h.searchSource(g), search.Query{
+	sq := search.Query{
 		Expr: search.Parse(bq.text), Sort: bq.sort, Order: bq.order, Page: page, Limit: limit, SkipCount: true,
-	})
+	}
+	if sq.Sort == "order" {
+		sq.OrderCollection = search.PinnedCollectionName(sq.Expr)
+	}
+	result, err := search.Execute(r.Context(), h.searchSource(g), sq)
 	if err != nil && r.Context().Err() != nil {
 		return
 	}
@@ -738,6 +743,9 @@ type booruVocabulary struct {
 	known func(key string) bool
 	// A tag whose name holds a colon, such as re:zero.
 	tag func(name string) bool
+	// The collection a Danbooru pool name means, as stored; the name
+	// itself when none matches.
+	collection func(name string) string
 }
 
 func booruVocabularyOf(g *library.Gallery) booruVocabulary {
@@ -752,6 +760,16 @@ func booruVocabularyOf(g *library.Gallery) booruVocabulary {
 		tag: func(name string) bool {
 			found, err := g.TagSvc.NamedTags([]string{name})
 			return err == nil && len(found) > 0
+		},
+		// Danbooru writes a pool name's spaces as underscores.
+		collection: func(name string) string {
+			for _, n := range []string{name, strings.ReplaceAll(name, "_", " ")} {
+				var found sql.NullString
+				if err := g.DB.Read.QueryRow(`SELECT MIN(name) FROM image_collections WHERE name = ?`, n).Scan(&found); err == nil && found.Valid {
+					return found.String
+				}
+			}
+			return name
 		},
 	}
 }
@@ -797,10 +815,22 @@ func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 	key = strings.ToLower(key)
 	switch key {
 	case "order":
-		if !neg {
+		// ordpool's order wins over order:, as on Danbooru.
+		if !neg && q.sort != "order" {
 			q.sort, q.order = booruOrder(strings.ToLower(val))
 		}
 		return ""
+	case "pool", "ordpool":
+		// A pool is a collection; ordpool lists it in its own order.
+		out := booruPool(val, vocab)
+		if key == "ordpool" && !neg && strings.HasPrefix(out, `collection:"`) {
+			q.sort, q.order = "order", search.DefaultOrder("order")
+		}
+		if neg {
+			// -pool:none is in some pool.
+			return strings.TrimPrefix("-"+out, "--")
+		}
+		return out
 	case "limit":
 		if n, err := strconv.Atoi(val); err == nil && n > 0 && !neg {
 			q.limit = n
@@ -844,6 +874,18 @@ func booruOrder(v string) (sort, order string) {
 		return "random", "desc"
 	}
 	return "newest", "desc"
+}
+
+// Danbooru's pool:any, series and collection are any pool; pool:none is in
+// none.
+func booruPool(name string, vocab booruVocabulary) string {
+	switch strings.ToLower(name) {
+	case "any", "series", "collection":
+		return "collection:any"
+	case "none":
+		return "-collection:any"
+	}
+	return `collection:"` + search.QuoteValue(vocab.collection(name)) + `"`
 }
 
 // Danbooru reads a rating by its first letter, so rating:safe is s.
