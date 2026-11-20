@@ -641,15 +641,6 @@ func TestBooruEndpointsInSettings(t *testing.T) {
 	}
 }
 
-func postBooruToken(srv *Server, id string) string {
-	form := url.Values{"token_id": {id}}
-	req := httptest.NewRequest("POST", "/settings/auth/booru-token", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	srv.settingsBooruTokenPost(w, req)
-	return w.Body.String()
-}
-
 func TestPickingTheBooruToken(t *testing.T) {
 	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
 	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
@@ -669,7 +660,7 @@ func TestPickingTheBooruToken(t *testing.T) {
 			srv := newTestServer(t)
 			setTokens(srv, []apitoken.Token{reader, writer, paired})
 			pickBooruToken(srv, "kept")
-			body := postBooruToken(srv, tc.id)
+			body := postHTMXForm(t, srv, "/settings/auth/booru-token", url.Values{"token_id": {tc.id}}).Body.String()
 			wantIn(t, body, tc.flash)
 			if got := srv.cfg.Auth.BooruTokenID; got != tc.saved {
 				t.Errorf("picked %q, want %q", got, tc.saved)
@@ -725,11 +716,7 @@ func TestTurningABooruGalleryOn(t *testing.T) {
 			srv.cfg.Auth.BooruTokenID = tok.ID
 			srv.cfg.Galleries[0].Booru = tc.before
 			form := url.Values{"gallery": {tc.gallery}, "on": {tc.on}}
-			req := httptest.NewRequest("POST", "/settings/auth/booru-gallery", strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			w := httptest.NewRecorder()
-			srv.settingsBooruGalleryPost(w, req)
-			body := w.Body.String()
+			body := postHTMXForm(t, srv, "/settings/auth/booru-gallery", form).Body.String()
 			wantIn(t, body, tc.flash)
 			if got := srv.cfg.Galleries[0].Booru; got != tc.want {
 				t.Errorf("default turned on = %v, want %v", got, tc.want)
@@ -745,14 +732,8 @@ func TestTurningABooruGalleryOn(t *testing.T) {
 	}
 }
 
-func setTokenScopes(srv *Server, id string, scopes ...string) string {
-	form := url.Values{"scope": scopes}
-	req := httptest.NewRequest("POST", "/settings/auth/tokens/"+id+"/privileges", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetPathValue("id", id)
-	w := httptest.NewRecorder()
-	srv.settingsTokenPrivilegesPost(w, req)
-	return w.Body.String()
+func setTokenScopes(t *testing.T, srv *Server, id string, scopes ...string) string {
+	return postHTMXForm(t, srv, "/settings/auth/tokens/"+id+"/privileges", url.Values{"scope": scopes}).Body.String()
 }
 
 func TestBooruEndpointsFollowTheTokens(t *testing.T) {
@@ -760,20 +741,20 @@ func TestBooruEndpointsFollowTheTokens(t *testing.T) {
 	other, _ := apitoken.New("other", config.AllScopes)
 	cases := []struct {
 		name   string
-		change func(*Server) string
+		change func(*testing.T, *Server) string
 		kept   bool
 	}{
-		{"the picked one loses read", func(s *Server) string { return setTokenScopes(s, picked.ID, config.ScopeWrite) }, false},
-		{"the picked one keeps read", func(s *Server) string { return setTokenScopes(s, picked.ID, config.ScopeRead) }, true},
-		{"the picked one is revoked", func(s *Server) string { return revokeToken(s, picked.ID) }, false},
-		{"another one is revoked", func(s *Server) string { return revokeToken(s, other.ID) }, true},
+		{"the picked one loses read", func(t *testing.T, s *Server) string { return setTokenScopes(t, s, picked.ID, config.ScopeWrite) }, false},
+		{"the picked one keeps read", func(t *testing.T, s *Server) string { return setTokenScopes(t, s, picked.ID, config.ScopeRead) }, true},
+		{"the picked one is revoked", func(_ *testing.T, s *Server) string { return revokeToken(s, picked.ID) }, false},
+		{"another one is revoked", func(_ *testing.T, s *Server) string { return revokeToken(s, other.ID) }, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)
 			setTokens(srv, []apitoken.Token{picked, other})
 			pickBooruToken(srv, picked.ID)
-			body := tc.change(srv)
+			body := tc.change(t, srv)
 			wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
 			if got := strings.Contains(body, wantBooruURL(srv, picked)); got != tc.kept {
 				t.Errorf("address shown = %v, want %v", got, tc.kept)
