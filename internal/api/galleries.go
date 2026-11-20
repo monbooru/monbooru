@@ -31,15 +31,6 @@ func (h *Handler) listGalleries(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, out)
 }
 
-// One level at a time, as the sidebar: a {hash:4} layout holds tens of
-// thousands of folders.
-const folderPageSize = 500
-
-const (
-	folderSearchLimit = 10
-	folderSearchMax   = 100
-)
-
 // Folders come from the images, so an empty folder on disk is not listed;
 // a send to a folder that does not exist yet still creates it.
 func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.FolderNode, bool) {
@@ -71,7 +62,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "folder not found: "+path)
 		return
 	}
-	offset, limit := parsePage(r, folderPageSize, folderPageSize)
+	offset, limit := parsePage(r, contract.FolderPageSize, contract.FolderPageSize)
 	kids := node.Children
 	page := kids[min(offset, len(kids)):min(offset+limit, len(kids))]
 	out := make([]contract.Folder, len(page))
@@ -87,7 +78,7 @@ func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	_, limit := contract.PageParams("", q.Get("limit"), folderSearchLimit, folderSearchMax)
+	_, limit := contract.PageParams("", q.Get("limit"), contract.FolderSearchLimit, contract.FolderSearchMax)
 	found := gallery.SearchFolders(tree, q.Get("q"), limit)
 	out := make([]contract.Folder, len(found))
 	for i, n := range found {
