@@ -573,6 +573,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("POST /settings/workers/{name}/resume", s.taggerWorkerPausePost(false))
 	rt.free("POST /settings/workers/{name}/remove", s.taggerWorkerRemovePost)
 	rt.free("GET /internal/workers", s.taggerWorkersGet)
+	rt.free("GET /internal/tagger-stats", s.taggerStatsGet)
 	rt.free("POST /settings/tagger/{name}/enable", s.settingsTaggerEnablePost)
 	rt.free("POST /settings/tagger/{name}/disable", s.settingsTaggerDisablePost)
 	rt.free("POST /settings/tagger/{name}/delete", s.settingsTaggerDeletePost)

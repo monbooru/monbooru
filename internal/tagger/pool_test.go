@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -233,6 +234,24 @@ func TestAGlanceShowsANewModelAndLeavesTheStateAlone(t *testing.T) {
 	}
 	if !ws[1].Up {
 		t.Error("a glance that timed out marked the worker down")
+	}
+}
+
+func TestAPeekReadsTheLoadedModelsAndOnlyThat(t *testing.T) {
+	f := newFake(t, wd())
+	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, f), Token: "tok"})
+	f.Mu.Lock()
+	f.Info.Loaded, f.Info.Busy = []string{"wd-swinv2"}, true
+	f.Models = append(f.Models, worker.Model{Name: "joytag", Kind: worker.KindTagger, Digest: "d-joytag", Ready: true})
+	f.Mu.Unlock()
+
+	p.Peek(context.Background())
+	w := p.Workers()[0]
+	if !slices.Equal(w.Info.Loaded, []string{"wd-swinv2"}) || !w.Info.Busy {
+		t.Errorf("after a peek: loaded %v busy %v, want wd-swinv2 and busy", w.Info.Loaded, w.Info.Busy)
+	}
+	if len(w.Models) != 1 {
+		t.Errorf("a peek read the models too: %d", len(w.Models))
 	}
 }
 

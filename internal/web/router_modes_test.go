@@ -77,6 +77,7 @@ var wantFreeRoutes = []string{
 	"POST /settings/workers/{name}/resume",
 	"POST /settings/workers/{name}/remove",
 	"GET /internal/workers",
+	"GET /internal/tagger-stats",
 	"GET /api/v1/pair/status",
 	"GET /internal/plugins/pairing",
 	"POST /api/v1/pair/remove",

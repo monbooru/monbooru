@@ -194,6 +194,36 @@ func (p *Pool) Refresh(ctx context.Context) { p.refresh(ctx, false) }
 // its state for the next Refresh to settle.
 func (p *Pool) Glance(ctx context.Context) { p.refresh(ctx, true) }
 
+// Peek reads again what the workers that are up say of themselves, for a
+// block that polls: their state and the models loaded now. What they hold
+// waits for the next Refresh, and one that does not answer keeps its state.
+func (p *Pool) Peek(ctx context.Context) {
+	p.mu.Lock()
+	var ws []*poolWorker
+	for _, w := range p.workers {
+		if w.up && !w.def.Paused && w.def.URL != "" {
+			ws = append(ws, w)
+		}
+	}
+	p.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, w := range ws {
+		wg.Go(func() {
+			p.mu.Lock()
+			client := w.client
+			p.mu.Unlock()
+			info, err := client.Info(ctx)
+			if err != nil {
+				return
+			}
+			p.mu.Lock()
+			w.cache.Info = info
+			p.mu.Unlock()
+		})
+	}
+	wg.Wait()
+}
+
 func (p *Pool) refresh(ctx context.Context, glance bool) {
 	p.mu.Lock()
 	ws := slices.Clone(p.workers)

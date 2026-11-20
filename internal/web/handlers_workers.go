@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/peer"
@@ -109,6 +111,13 @@ func (s *Server) renderWorkers(w http.ResponseWriter, oob bool) {
 
 func (s *Server) taggerWorkersGet(w http.ResponseWriter, r *http.Request) {
 	s.renderWorkers(w, false)
+}
+
+func (s *Server) taggerStatsGet(w http.ResponseWriter, r *http.Request) {
+	peek, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	tagger.CurrentPool().Peek(peek)
+	cancel()
+	s.renderTemplate(w, "partials/tagger_stats.html", gatherTaggerStats(s))
 }
 
 // The rest of the section shows or hides with the local worker, so the

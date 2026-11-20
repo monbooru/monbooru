@@ -191,3 +191,15 @@ func TestOnlyAFolderOnThisMachineOffersDelete(t *testing.T) {
 	_, body = getBody(t, srv, "/settings")
 	wantIn(t, body, "/settings/tagger/wd-swinv2/delete")
 }
+
+func TestTheStatsBlockOfTheTaggerPollsOnItsOwn(t *testing.T) {
+	srv := newTestServer(t)
+	_, page := getBody(t, srv, "/settings")
+	_, block := getBody(t, srv, "/internal/tagger-stats")
+	for _, body := range []string{page, block} {
+		wantIn(t, body, `id="tagger-stats"`)
+		wantIn(t, body, `hx-get="/internal/tagger-stats" hx-trigger="every 5s"`)
+		wantIn(t, body, "<h4>Auto-tagger</h4>")
+	}
+	wantNotIn(t, block, "<h4>Database size per gallery</h4>")
+}
