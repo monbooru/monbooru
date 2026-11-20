@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ type booruTokenOption struct {
 type booruAddress struct {
 	Gallery string
 	URL     string
+	On      bool
 }
 
 type booruEndpointsView struct {
@@ -29,7 +31,7 @@ type booruEndpointsView struct {
 
 // The tokens the layer can use, and one address per gallery for the one
 // picked, on the host this browser reached, as an app on the same network
-// reaches it.
+// reaches it. Each gallery shows whether it answers there.
 func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 	s.cfgMu.RLock()
 	auth := s.cfg.Auth
@@ -47,7 +49,7 @@ func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 	}
 	origin, key := s.browserOrigin(r), api.BooruKey(chosen.TokenHash)
 	for _, g := range s.galleries() {
-		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key)})
+		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key), On: g.Booru})
 	}
 	return v
 }
@@ -96,6 +98,33 @@ func (s *Server) settingsBooruTokenPost(w http.ResponseWriter, r *http.Request) 
 		writeInlineFlash(w, "ok", "Danbooru compatible endpoint turned off.")
 	} else {
 		writeInlineFlash(w, "ok", "Danbooru compatible endpoint token saved.")
+	}
+	s.renderBooruEndpointsOOB(w, r)
+}
+
+// An unticked box sends no on, which turns the gallery off.
+func (s *Server) settingsBooruGalleryPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	name, on := r.FormValue("gallery"), r.FormValue("on") != ""
+	err := s.withConfig(func(c *config.Config) error {
+		g := c.FindGallery(name)
+		if g == nil {
+			return fmt.Errorf("unknown gallery %q", name)
+		}
+		g.Booru = on
+		return nil
+	})
+	if err != nil {
+		writeInlineFlash(w, "err", "Could not save: "+err.Error())
+		return
+	}
+	logx.Infof("settings: booru address of gallery %s turned %s from %s", name, map[bool]string{true: "on", false: "off"}[on], session.ClientIP(r))
+	if on {
+		writeInlineFlash(w, "ok", name+" answers at its Danbooru compatible address.")
+	} else {
+		writeInlineFlash(w, "ok", name+" no longer answers at its Danbooru compatible address.")
 	}
 	s.renderBooruEndpointsOOB(w, r)
 }

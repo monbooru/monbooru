@@ -583,9 +583,13 @@ func wantBooruURL(srv *Server, tok apitoken.Token) string {
 	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 }
 
+// pickBooruToken also turns every gallery on, so its address shows.
 func pickBooruToken(srv *Server, id string) {
 	srv.cfgMu.Lock()
 	srv.cfg.Auth.BooruTokenID = id
+	for i := range srv.cfg.Galleries {
+		srv.cfg.Galleries[i].Booru = true
+	}
 	srv.cfgMu.Unlock()
 }
 
@@ -727,9 +731,6 @@ func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
 	setTokens(srv, []apitoken.Token{tok})
 	pickBooruToken(srv, tok.ID)
-	srv.cfgMu.Lock()
-	srv.cfg.Galleries[0].Booru = true
-	srv.cfgMu.Unlock()
 	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 	cases := []struct {
 		name, path string
