@@ -330,9 +330,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	if inboxFilterActive(expr) {
 		data.InboxUploadActive = true
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
-		if cx := s.active(); cx != nil {
-			data.UploadFolder = s.folderPicker(r, cx, "upload")
-		}
+		data.UploadFolder = s.folderPicker("upload")
 	}
 	data.HiddenByCeiling = hiddenByCeiling
 	var first, last int64

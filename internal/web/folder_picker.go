@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/gallery"
-	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
@@ -26,24 +25,18 @@ var folderPickerKinds = map[string]webui.FolderPicker{
 
 var errFolderGone = errors.New("folder not found")
 
-// The field for kind on the active gallery; a tree that cannot be read
-// leaves it a plain text box.
-func (s *Server) folderPicker(r *http.Request, cx *library.Gallery, kind string) webui.FolderPicker {
+// The field for kind. It reads no tree: the panel's own requests do, once
+// opened, as the sidebar reads none while its section is closed, and a page
+// render after every upload would otherwise rebuild it.
+func (s *Server) folderPicker(kind string) webui.FolderPicker {
 	p := folderPickerKinds[kind]
+	p.Listed = true
 	if kind == "upload" {
 		p.Blank = "(gallery root)"
 		if folder := strings.TrimSpace(s.cfgSnapshot().Gallery.DefaultUploadFolder); folder != "" {
 			p.Blank = "(default: " + folder + ")"
 		}
 	}
-	tree, err := cx.FolderTreeUnder(resolveCeiling(r, cx))
-	if err != nil {
-		logx.Warnf("folder picker: %v", err)
-		p.Unavailable = "the folder list failed"
-		return p
-	}
-	p.Listed = true
-	p.Held = func(path string) bool { return gallery.FindFolder(tree, path) != nil }
 	return p
 }
 
