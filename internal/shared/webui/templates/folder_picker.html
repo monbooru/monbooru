@@ -3,13 +3,11 @@
   {{- if .GalleryID}} hx-get="{{.Route}}?kind={{.Kind}}" hx-trigger="change[target.id=='{{.GalleryID}}'] from:body"
      hx-include="#{{.GalleryID}}, #{{.ID}}-input" hx-swap="outerHTML"{{end}}>
   <label for="{{.ID}}-input">{{.Label}}</label>
+  {{- if .Listed}}<button type="button" class="btn-link-accent" data-folder-browse="{{.ID}}">[browse]</button>{{end}}
   <div class="folder-picker-input">
     <input type="text" id="{{.ID}}-input" name="{{.Name}}" value="{{.Value}}" placeholder="{{.Blank}}" autocomplete="off"
       {{- if .Listed}} hx-get="{{.Route}}/suggest?kind={{.Kind}}&amp;gallery={{urlquery .Gallery}}" hx-trigger="input changed delay:200ms"
       hx-target="#{{.ID}}-suggest" hx-swap="innerHTML"{{end}}>
-    {{if .Listed}}
-    <button type="button" class="btn-link-accent" data-folder-browse="{{.ID}}">[browse]</button>
-    {{end}}
     <div class="suggest-dropdown" id="{{.ID}}-suggest"></div>
   </div>
   {{if .Listed}}
