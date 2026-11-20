@@ -19,19 +19,23 @@ func (h *Handler) serveImageFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	serveFileOf(w, r, g, id)
+	if path, ok := fileOf(w, g, id); ok {
+		http.ServeFile(w, r, path)
+	}
 }
 
-func serveFileOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
+// The ...Of helpers set the headers and answer what they cannot serve, so
+// the caller only streams the path.
+func fileOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok || !canonicalOnDisk(w, canonPath) {
-		return
+		return "", false
 	}
 	if ct := gallery.MIMEForFileType(fileType); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Content-Disposition", gallery.ContentDispositionFor(canonPath))
-	http.ServeFile(w, r, canonPath)
+	return canonPath, true
 }
 
 func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
@@ -39,10 +43,6 @@ func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	serveStillOf(w, r, g, id)
-}
-
-func serveStillOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok || !canonicalOnDisk(w, canonPath) {
 		return
@@ -93,16 +93,18 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	serveThumbnailOf(w, r, g, id)
+	if path, ok := thumbnailOf(w, g, id); ok {
+		http.ServeFile(w, r, path)
+	}
 }
 
-func serveThumbnailOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
+func thumbnailOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
 	thumbPath := filepath.Join(g.ThumbnailsPath, strconv.FormatInt(id, 10)+".jpg")
 	if _, err := os.Stat(thumbPath); err != nil {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "thumbnail not found")
-		return
+		return "", false
 	}
-	http.ServeFile(w, r, thumbPath)
+	return thumbPath, true
 }
 
 func (h *Handler) serveMangaPage(w http.ResponseWriter, r *http.Request) {

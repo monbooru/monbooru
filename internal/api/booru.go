@@ -102,9 +102,9 @@ func (h *Handler) mountBooru(mux *http.ServeMux) {
 	mux.HandleFunc(at+"autocomplete.json", h.booru(booruAutocomplete))
 	mux.HandleFunc(at+"tags.json", h.booru(booruTags))
 	mux.HandleFunc(at+"notes.json", h.booru(booruNotes))
-	mux.HandleFunc(at+"file/{name}", h.booru(booruFile(serveFileOf)))
-	mux.HandleFunc(at+"sample/{name}", h.booru(booruFile(serveSampleOf)))
-	mux.HandleFunc(at+"thumb/{name}", h.booru(booruFile(serveThumbnailOf)))
+	mux.HandleFunc(at+"file/{name}", h.booru(booruFile(fileOf)))
+	mux.HandleFunc(at+"sample/{name}", h.booru(booruFile(booruSampleOf)))
+	mux.HandleFunc(at+"thumb/{name}", h.booru(booruFile(thumbnailOf)))
 	mux.HandleFunc(at+"favicon.ico", h.booru(h.booruFavicon))
 	mux.HandleFunc(at+"{rest...}", h.booru(booruEmpty))
 }
@@ -413,29 +413,27 @@ func booruSampled(img models.Image) bool {
 		!gallery.IsVideoType(img.FileType) && gallery.NeedsViewRendition(derefInt(img.Width), derefInt(img.Height))
 }
 
-func serveSampleOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, id int64) {
+func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok {
-		return
+		return "", false
 	}
 	if fileType == models.FileTypeCBZ {
 		page, err := gallery.EnsureMangaPage(g.ThumbnailsPath, canonPath, id, 1)
 		if err != nil {
 			contract.WriteError(w, http.StatusNotFound, "not_found", "page not found")
-			return
+			return "", false
 		}
-		http.ServeFile(w, r, page)
-		return
+		return page, true
 	}
 	var width, height int
 	err := g.DB.Read.QueryRow(`SELECT COALESCE(width, 0), COALESCE(height, 0) FROM images WHERE id = ?`, id).Scan(&width, &height)
 	if serverError(w, err) {
-		return
+		return "", false
 	}
 	past := !gallery.IsVideoType(fileType) && gallery.NeedsViewRendition(width, height)
 	if !past && !gallery.IsFFmpegStill(fileType) {
-		serveFileOf(w, r, g, id)
-		return
+		return fileOf(w, g, id)
 	}
 	maxDim := 0
 	if past {
@@ -443,14 +441,14 @@ func serveSampleOf(w http.ResponseWriter, r *http.Request, g *library.Gallery, i
 	}
 	rendition, err := gallery.EnsureViewRendition(canonPath, g.ThumbnailsPath, id, fileType, maxDim)
 	if serverError(w, err) {
-		return
+		return "", false
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeFile(w, r, rendition)
+	return rendition, true
 }
 
 // The extension is only there for the apps that read the type off the URL.
-func booruFile(serve func(http.ResponseWriter, *http.Request, *library.Gallery, int64)) booruHandler {
+func booruFile(plan func(http.ResponseWriter, *library.Gallery, int64) (string, bool)) booruHandler {
 	return func(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 		stem, _, _ := strings.Cut(r.PathValue("name"), ".")
 		id, err := strconv.ParseInt(stem, 10, 64)
@@ -458,7 +456,9 @@ func booruFile(serve func(http.ResponseWriter, *http.Request, *library.Gallery, 
 			contract.WriteError(w, http.StatusNotFound, "not_found", "image not found")
 			return
 		}
-		serve(w, r, g, id)
+		if path, ok := plan(w, g, id); ok {
+			http.ServeFile(w, r, path)
+		}
 	}
 }
 
