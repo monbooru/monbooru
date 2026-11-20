@@ -43,7 +43,6 @@ COPY --from=build  /monbooru                         /usr/local/bin/monbooru
 
 ENV MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455 \
     MONBOORU_CONTAINER=1 \
-    MONBOORU_TAGGER_LOCAL_WORKER=true \
     HOME=/home/monbooru
 
 EXPOSE 8455
