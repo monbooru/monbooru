@@ -57,12 +57,21 @@ func BooruPath(gallery, key string) string { return BooruPrefix + gallery + "/" 
 func IsBooruPath(path string) bool { return strings.HasPrefix(path, BooruPrefix) }
 
 // IsBooruFile: an app's grid loads a thumbnail per post, as noisy as the
-// web UI's own.
+// web UI's own. The route is read after the key, so a gallery named file
+// is not one.
 func IsBooruFile(path string) bool {
-	if !IsBooruPath(path) {
+	rest, ok := strings.CutPrefix(path, BooruPrefix)
+	if !ok {
 		return false
 	}
-	return strings.Contains(path, "/thumb/") || strings.Contains(path, "/file/") || strings.Contains(path, "/sample/")
+	_, rest, _ = strings.Cut(rest, "/")
+	_, rest, _ = strings.Cut(rest, "/")
+	route, _, _ := strings.Cut(rest, "/")
+	switch route {
+	case "file", "sample", "thumb":
+		return true
+	}
+	return false
 }
 
 // RedactBooruPath keeps the key out of the request log.
