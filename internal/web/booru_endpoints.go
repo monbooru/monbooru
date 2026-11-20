@@ -61,6 +61,14 @@ func (s *Server) renderBooruEndpointsOOB(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// A pick its token no longer backs is dropped, so giving read back does
+// not reopen the layer unasked.
+func dropStaleBooruPick(auth *config.AuthConfig) {
+	if api.ChosenBooruToken(*auth) == nil {
+		auth.BooruTokenID = ""
+	}
+}
+
 var errBooruTokenUnfit = errors.New("that token needs the read privilege and must not belong to a pairing")
 
 // An empty token_id closes the layer. Like the token forms, the answer is

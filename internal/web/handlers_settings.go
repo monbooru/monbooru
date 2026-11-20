@@ -533,6 +533,7 @@ func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	var removed bool
 	if err := s.withConfig(func(c *config.Config) error {
 		removed = c.Auth.Tokens.Remove(id)
+		dropStaleBooruPick(&c.Auth)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -598,6 +599,7 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 	var found bool
 	if err := s.withConfig(func(c *config.Config) error {
 		found = c.Auth.Tokens.SetScopes(id, scopes)
+		dropStaleBooruPick(&c.Auth)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
