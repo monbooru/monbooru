@@ -52,7 +52,10 @@ func TestBooruPaths(t *testing.T) {
 		{"/booru/main/0123abcd/posts.json", "/booru/main/<key>/posts.json", false},
 		{"/booru/main/0123abcd/thumb/7.jpg", "/booru/main/<key>/thumb/7.jpg", true},
 		{"/booru/main/0123abcd/file/7.png", "/booru/main/<key>/file/7.png", true},
-		{"/booru/main/0123abcd/sample/7.webp", "/booru/main/<key>/sample/7.webp", true},
+		{"/booru/main/0123abcd/sample/7.jpg", "/booru/main/<key>/sample/7.jpg", true},
+		{"/booru/file/0123abcd/posts.json", "/booru/file/<key>/posts.json", false},
+		{"/booru/thumb/0123abcd/thumb/7.jpg", "/booru/thumb/<key>/thumb/7.jpg", true},
+		{"/booru/main/0123abcd/", "/booru/main/<key>/", false},
 		{"/api/v1/images/file", "/api/v1/images/file", false},
 	}
 	for _, tc := range cases {
