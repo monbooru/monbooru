@@ -199,6 +199,11 @@ func (h *Handler) booruBase(r *http.Request) string {
 
 func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 	q := r.URL.Query()
+	// As on Danbooru, an md5 looks one post up and answers it alone.
+	if md5 := strings.TrimSpace(q.Get("md5")); md5 != "" {
+		h.booruOne(w, r, g, search.FilterExpr{Key: "md5", Val: md5}, "newest")
+		return
+	}
 	// Danbooru also pages by id, b123 before it, a123 after; monbooru's id:
 	// is equality only, so such a page ends the scroll rather than
 	// repeating page 1.
