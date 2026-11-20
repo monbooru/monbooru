@@ -235,17 +235,25 @@ func booruIDPage(page string) bool {
 // Through the search, so a post the listing would hide stays hidden here.
 // posts/random is one post of those its tags find, as on Danbooru.
 func (h *Handler) booruPost(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
-	sq := search.Query{Sort: "newest", Page: 1, Limit: 1, SkipCount: true}
-	if name := strings.TrimSuffix(r.PathValue("post"), ".json"); name == "random" {
+	name := strings.TrimSuffix(r.PathValue("post"), ".json")
+	if name == "random" {
 		bq := translateBooruQuery(r.URL.Query().Get("tags"), booruVocabularyOf(g))
-		sq.Expr, sq.Sort = search.Parse(bq.text), "random"
-	} else if id, err := strconv.ParseInt(name, 10, 64); err == nil && id > 0 {
-		sq.Expr = search.FilterExpr{Key: "id", Val: strconv.FormatInt(id, 10)}
-	} else {
+		h.booruOne(w, r, g, search.Parse(bq.text), "random")
+		return
+	}
+	id, err := strconv.ParseInt(name, 10, 64)
+	if err != nil || id <= 0 {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "post not found")
 		return
 	}
-	result, err := search.Execute(r.Context(), h.booruSource(g), sq)
+	h.booruOne(w, r, g, search.FilterExpr{Key: "id", Val: strconv.FormatInt(id, 10)}, "newest")
+}
+
+// booruOne answers the first post the search finds, as an object.
+func (h *Handler) booruOne(w http.ResponseWriter, r *http.Request, g *library.Gallery, expr search.Expr, sort string) {
+	result, err := search.Execute(r.Context(), h.booruSource(g), search.Query{
+		Expr: expr, Sort: sort, Page: 1, Limit: 1, SkipCount: true,
+	})
 	if err != nil && r.Context().Err() != nil {
 		return
 	}
