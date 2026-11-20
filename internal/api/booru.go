@@ -102,9 +102,9 @@ func (h *Handler) mountBooru(mux *http.ServeMux) {
 	mux.HandleFunc(at+"autocomplete.json", h.booru(booruAutocomplete))
 	mux.HandleFunc(at+"tags.json", h.booru(booruTags))
 	mux.HandleFunc(at+"notes.json", h.booru(booruNotes))
-	mux.HandleFunc(at+"file/{name}", h.booruFile(fileOf))
-	mux.HandleFunc(at+"sample/{name}", h.booruFile(booruSampleOf))
-	mux.HandleFunc(at+"thumb/{name}", h.booruFile(thumbnailOf))
+	mux.HandleFunc(at+"file/{name}", h.booruFile("file", fileOf))
+	mux.HandleFunc(at+"sample/{name}", h.booruFile("sample", booruSampleOf))
+	mux.HandleFunc(at+"thumb/{name}", h.booruFile("thumb", thumbnailOf))
 	mux.HandleFunc(at+"favicon.ico", h.booru(h.booruFavicon))
 	mux.HandleFunc(at+"{rest...}", h.booru(booruEmpty))
 }
@@ -149,8 +149,10 @@ func (h *Handler) booruGallery(w http.ResponseWriter, r *http.Request) (*library
 // The lock is let go before the first byte, as the web UI's files do: a
 // gallery switch queued behind a phone's long video would stall every
 // request after it. The extension is only there for the apps that read
-// the type off the URL.
-func (h *Handler) booruFile(plan func(http.ResponseWriter, *library.Gallery, int64) (string, bool)) http.HandlerFunc {
+// the type off the URL. The ETag is the web UI's: SQLite reuses the
+// highest id once its row is deleted, so a URL can come back with new
+// bytes.
+func (h *Handler) booruFile(kind string, plan func(http.ResponseWriter, *library.Gallery, int64) (string, bool)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path, ok := func() (string, bool) {
 			if h.lock != nil {
@@ -166,7 +168,11 @@ func (h *Handler) booruFile(plan func(http.ResponseWriter, *library.Gallery, int
 				contract.WriteError(w, http.StatusNotFound, "not_found", "image not found")
 				return "", false
 			}
-			return plan(w, g, id)
+			path, ok := plan(w, g, id)
+			if ok {
+				SetGalleryScopedCache(w, g.Name, kind+"-"+strconv.FormatInt(id, 10), path)
+			}
+			return path, ok
 		}()
 		if ok {
 			http.ServeFile(w, r, path)
