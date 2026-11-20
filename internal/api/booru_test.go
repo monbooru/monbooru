@@ -130,20 +130,25 @@ func TestTranslateBooruQuery(t *testing.T) {
 func TestTranslateBooruPageSize(t *testing.T) {
 	vocab := booruVocabulary{known: func(string) bool { return false }, tag: func(string) bool { return false }}
 	cases := []struct {
-		in, text string
-		limit    int
+		in, text, sort string
+		limit, random  int
 	}{
-		{"sky", "sky", 0},
-		{"limit:5 sky", "sky", 5},
-		{"LIMIT:5", "", 5},
-		{"-limit:5", "", 0},
-		{"limit:0", "", 0},
-		{"limit:x", "", 0},
+		{"sky", "sky", "newest", 0, 0},
+		{"limit:5 sky", "sky", "newest", 5, 0},
+		{"LIMIT:5", "", "newest", 5, 0},
+		{"-limit:5", "", "newest", 0, 0},
+		{"limit:0", "", "newest", 0, 0},
+		{"limit:x", "", "newest", 0, 0},
+		{"random:3 sky", "sky", "random", 0, 3},
+		{"random:3 limit:2", "", "random", 2, 3},
+		{"-random:3", "", "newest", 0, 0},
+		{"random:x", "", "newest", 0, 0},
 	}
 	for _, tc := range cases {
 		got := translateBooruQuery(tc.in, vocab)
-		if got.text != tc.text || got.limit != tc.limit {
-			t.Errorf("translate(%q) = %q limit %d, want %q limit %d", tc.in, got.text, got.limit, tc.text, tc.limit)
+		if got.text != tc.text || got.sort != tc.sort || got.limit != tc.limit || got.random != tc.random {
+			t.Errorf("translate(%q) = %q sort %s limit %d random %d, want %q sort %s limit %d random %d",
+				tc.in, got.text, got.sort, got.limit, got.random, tc.text, tc.sort, tc.limit, tc.random)
 		}
 	}
 }
@@ -279,6 +284,8 @@ func TestBooruPosts(t *testing.T) {
 		{"?tags=limit:1", []int64{other}},
 		{"?tags=limit:1&page=2", []int64{id}},
 		{"?tags=limit:1&limit=2", []int64{other, id}},
+		{"?tags=random:1+blue_sky", []int64{id}},
+		{"?tags=random:1&limit=1&page=2", nil},
 	}
 	for _, tc := range cases {
 		w := env.do("GET", base+"/posts.json"+tc.query)
@@ -292,6 +299,12 @@ func TestBooruPosts(t *testing.T) {
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("posts.json%s = %v, want %v", tc.query, got, tc.want)
 		}
+	}
+
+	var drawn []booruPost
+	mustDecode(t, env.do("GET", base+"/posts.json?tags=random:1"), &drawn)
+	if len(drawn) != 1 {
+		t.Errorf("posts.json?tags=random:1 = %d posts, want 1", len(drawn))
 	}
 
 	w := env.do("GET", fmt.Sprintf("%s/posts/%d.json", base, id))
