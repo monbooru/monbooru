@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
@@ -38,10 +39,6 @@ func (s *Server) folderPicker(kind string) webui.FolderPicker {
 		}
 	}
 	return p
-}
-
-func folderEntryOf(n *gallery.FolderNode) webui.FolderEntry {
-	return webui.FolderEntry{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
 }
 
 // The picker for the request's kind and the active gallery's tree; false
@@ -80,7 +77,7 @@ func (s *Server) folderPickerLevel(w http.ResponseWriter, r *http.Request) {
 		kids := node.ChildrenPage((page-1)*contract.FolderPageSize, contract.FolderPageSize)
 		out := make([]webui.FolderEntry, len(kids))
 		for i := range kids {
-			out[i] = folderEntryOf(&kids[i])
+			out[i] = webui.FolderEntry(api.FolderOf(&kids[i]))
 		}
 		return webui.FolderPage{Total: len(node.Children), Limit: contract.FolderPageSize, Results: out}, nil
 	}
@@ -101,7 +98,7 @@ func (s *Server) folderPickerSuggest(w http.ResponseWriter, r *http.Request) {
 	found := gallery.SearchFolders(tree, r.FormValue(p.Name), contract.FolderSearchLimit)
 	rows := make([]webui.FolderRow, len(found))
 	for i, n := range found {
-		rows[i] = webui.FolderRowOf(folderEntryOf(n), "")
+		rows[i] = webui.FolderRowOf(webui.FolderEntry(api.FolderOf(n)), "")
 	}
 	s.renderTemplate(w, "webui/folder_picker_suggest", rows)
 }

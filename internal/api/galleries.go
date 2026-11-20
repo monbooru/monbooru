@@ -46,7 +46,9 @@ func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.
 	return tree, true
 }
 
-func folderOf(n *gallery.FolderNode) contract.Folder {
+// FolderOf is one folder of a listing; the web UI's folder picker reads
+// its rows the same way.
+func FolderOf(n *gallery.FolderNode) contract.Folder {
 	return contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
 }
 
@@ -66,7 +68,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	page := node.ChildrenPage(offset, limit)
 	out := make([]contract.Folder, len(page))
 	for i := range page {
-		out[i] = folderOf(&page[i])
+		out[i] = FolderOf(&page[i])
 	}
 	writePage(w, offset/limit+1, limit, len(node.Children), out)
 }
@@ -81,7 +83,7 @@ func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
 	found := gallery.SearchFolders(tree, q.Get("q"), limit)
 	out := make([]contract.Folder, len(found))
 	for i, n := range found {
-		out[i] = folderOf(n)
+		out[i] = FolderOf(n)
 	}
 	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }
