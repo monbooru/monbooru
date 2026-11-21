@@ -31,13 +31,19 @@ var validDetectors = map[string]bool{
 }
 
 type sessionPairView struct {
-	A              sessionImageView
-	B              sessionImageView
-	Distance       int
-	Source         string
-	Score          float64
-	LeftID         int64
-	SharedAncestor int64
+	A               sessionImageView
+	B               sessionImageView
+	Distance        int
+	Source          string
+	Score           float64
+	LeftID          int64
+	SharedAncestor  int64
+	LeftAOriginalID int64
+	LeftAHasTags    bool
+	LeftAHasSources bool
+	LeftBOriginalID int64
+	LeftBHasTags    bool
+	LeftBHasSources bool
 }
 
 func (v sessionPairView) ScorePercent() int { return int(math.Round(v.Score * 100)) }
@@ -116,6 +122,14 @@ func (s *Server) sessionPage(w http.ResponseWriter, r *http.Request) {
 		} else if ok {
 			pair.SharedAncestor = src
 		}
+		origA, hasTagsA, hasSourcesA, _ := cx.RelationsSvc.DuplicateCandidateDetails(pair.A.ID, pair.B.ID)
+		origB, hasTagsB, hasSourcesB, _ := cx.RelationsSvc.DuplicateCandidateDetails(pair.B.ID, pair.A.ID)
+		pair.LeftAOriginalID = origA
+		pair.LeftAHasTags = hasTagsA
+		pair.LeftAHasSources = hasSourcesA
+		pair.LeftBOriginalID = origB
+		pair.LeftBHasTags = hasTagsB
+		pair.LeftBHasSources = hasSourcesB
 	}
 	s.renderTemplate(w, "relations_session.html", sessionPageData{
 		baseData:        s.base(r, "relations", "Session - "+s.booruName()),
