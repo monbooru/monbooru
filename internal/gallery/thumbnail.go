@@ -47,6 +47,14 @@ func viewRenditionPath(dir string, imageID int64) string {
 
 func NeedsViewRendition(width, height int) bool { return int64(width)*int64(height) > viewMaxPixels }
 
+// ViewRenditionSize is the size ViewRenditionFor renders a w×h image at.
+func ViewRenditionSize(width, height int) (int, int) {
+	if NeedsViewRendition(width, height) {
+		return ScaledSize(width, height, ViewMaxDim)
+	}
+	return width, height
+}
+
 // ViewRenditionFor sizes the rendition from the image's dimensions: past the
 // pixel cap it is scaled to ViewMaxDim, otherwise it keeps the image's size.
 func ViewRenditionFor(srcPath, dstDir string, imageID int64, fileType string, width, height int) (string, error) {
@@ -552,7 +560,19 @@ func scaleImage(src image.Image, maxDim int) image.Image {
 	if w <= maxDim && h <= maxDim {
 		return src
 	}
+	nw, nh := ScaledSize(w, h, maxDim)
 
+	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	return dst
+}
+
+// ScaledSize is a w×h image's size once fit within maxDim; a smaller one
+// keeps its own.
+func ScaledSize(w, h, maxDim int) (int, int) {
+	if w <= maxDim && h <= maxDim {
+		return w, h
+	}
 	var nw, nh int
 	if w >= h {
 		nw = maxDim
@@ -561,12 +581,11 @@ func scaleImage(src image.Image, maxDim int) image.Image {
 		nh = maxDim
 		nw = w * maxDim / h
 	}
-	nh, nw = max(nh, 1), max(nw, 1)
-
-	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
-	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
-	return dst
+	return max(nw, 1), max(nh, 1)
 }
+
+// ThumbSize is the size of a w×h image's thumbnail.
+func ThumbSize(w, h int) (int, int) { return ScaledSize(w, h, thumbMaxDim) }
 
 // Orient turns img as an EXIF Orientation of o asks; 1 and unknown values
 // come back untouched.
