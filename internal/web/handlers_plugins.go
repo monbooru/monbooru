@@ -158,17 +158,32 @@ func (s *Server) pairedPeerCount() int {
 	return n
 }
 
+// pendingCounts splits the requests waiting by where they wait: a
+// worker's under Auto-Tagger, any other under Plugins.
+func (s *Server) pendingCounts() (plugins, workers int) {
+	for _, req := range s.pairs.ListPending() {
+		if req.App == contract.AppMonworker {
+			workers++
+		} else {
+			plugins++
+		}
+	}
+	return plugins, workers
+}
+
 // The answers carry the nav notice and the settings count too, so a
 // decision clears them at once rather than on the next job-status poll.
 func (s *Server) pairViewData() map[string]any {
 	n := s.pairNotice()
 	n.OOB = true
+	plugins, _ := s.pendingCounts()
 	data := map[string]any{
-		"Pending":    s.pendingOffers(),
-		"Paired":     s.pairedPeerCount(),
-		"Notice":     n,
-		"PairKey":    n.Key(),
-		"AutoPaired": s.win.list(),
+		"Pending":        s.pendingOffers(),
+		"Paired":         s.pairedPeerCount(),
+		"Notice":         n,
+		"PluginsPending": plugins,
+		"PairKey":        n.Key(),
+		"AutoPaired":     s.win.list(),
 	}
 	if closes := s.win.closesAt(); !closes.IsZero() {
 		data["WindowSecs"] = int(time.Until(closes).Round(time.Second).Seconds())

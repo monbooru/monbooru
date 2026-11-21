@@ -41,6 +41,9 @@ type workersData struct {
 	LocalFound bool
 	LocalPin   string
 	OOB        bool
+	// Swap carries the settings nav's count of requests waiting here, on
+	// every answer but the page's own render.
+	Swap bool
 }
 
 // None is no worker to tag with, running or not.
@@ -111,7 +114,7 @@ func modelDigest(v tagger.WorkerView, name string) string {
 
 func (s *Server) renderWorkers(w http.ResponseWriter, oob bool) {
 	d := s.workersView()
-	d.OOB = oob
+	d.OOB, d.Swap = oob, true
 	s.renderTemplate(w, "partials/tagger_workers.html", d)
 }
 

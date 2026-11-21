@@ -24,8 +24,8 @@
     {{if .DesktopProfile}}<a href="#desktop">Desktop</a>{{end}}
     <a href="#general">General</a>
     <a href="#galleries">Galleries</a>
-    <a href="#plugins">Plugins<span id="settings-pair-count" class="nav-count">{{with len .PairNotice.Items}} ({{.}}){{end}}</span></a>
-    <a href="#tagger">Tagger</a>
+    <a href="#plugins">Plugins<span id="settings-pair-count" class="nav-count">{{with .PluginsPending}} ({{.}}){{end}}</span></a>
+    <a href="#tagger">Tagger<span id="settings-worker-count" class="nav-count">{{with len .Workers.Pending}} ({{.}}){{end}}</span></a>
     <a href="#relations">Relations</a>
     <a href="#auth">Auth</a>
     <a href="#maintenance">Maintenance</a>

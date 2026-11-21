@@ -3,7 +3,7 @@
   <h4>Workers</h4>
   {{if .Pending}}
   <div class="pairing-pending">
-  <p class="pairing-pending-msg">A worker wants to pair.</p>
+  <p class="pairing-pending-msg">{{with len .Pending}}{{if eq . 1}}A worker wants{{else}}{{.}} workers want{{end}}{{end}} to pair.</p>
   <div class="table-scroll">
   <table class="data-table stack-table">
     <thead><tr><th>Worker</th><th>Address</th><th>Expires</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>
@@ -66,4 +66,5 @@
   <p class="field-hint">No worker. To add one, start a monworker instance with <code>MONWORKER_MONBOORU_URL</code> set to monbooru's, then approve it here.</p>
   {{end}}
 </div>
+{{if .Swap}}<span id="settings-worker-count" class="nav-count" hx-swap-oob="true">{{with len .Pending}} ({{.}}){{end}}</span>{{end}}
 {{end}}

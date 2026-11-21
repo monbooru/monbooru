@@ -137,7 +137,7 @@ func TestPairWindowButtonOpensAndClosesIt(t *testing.T) {
 	if !srv.win.closesAt().IsZero() {
 		t.Fatal("Close left the window open")
 	}
-	wantIn(t, body, "Approves monloader and workers without a click.")
+	wantIn(t, body, "Approves monloader and workers automatically.")
 }
 
 func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
@@ -148,7 +148,7 @@ func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
 	pairStatus(t, srv, id)
 
 	page := do(srv, "GET", "/settings").Body.String()
-	wantIn(t, page, "<th>Paired without a click</th>")
+	wantIn(t, page, "<th>Paired automatically</th>")
 	wantIn(t, page, `<td data-label="Source">127.0.0.1</td>`)
 	wantIn(t, page, `<td data-label="Scopes">read write</td>`)
 	wantIn(t, page, `hx-post="/settings/plugins/monloader/remove"`)
@@ -161,7 +161,7 @@ func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
 	}
 
 	wantIn(t, rr.Body.String(), `id="plugin-pairing" hx-get=`)
-	wantNotIn(t, rr.Body.String(), "Paired without a click")
+	wantNotIn(t, rr.Body.String(), "Paired automatically")
 }
 
 func TestAClickedPairingLeavesTheTrace(t *testing.T) {
@@ -183,7 +183,7 @@ func TestAClickedPairingLeavesTheTrace(t *testing.T) {
 	}
 }
 
-func TestNavSaysAppsPairedWithoutAClickUntilSettingsIsOpened(t *testing.T) {
+func TestNavSaysAppsPairedAutomaticallyUntilSettingsIsOpened(t *testing.T) {
 	p := healthPeer(t)
 	srv := newTestServer(t)
 	srv.win.open(pairWindowLength)
@@ -193,17 +193,17 @@ func TestNavSaysAppsPairedWithoutAClickUntilSettingsIsOpened(t *testing.T) {
 	pairStatus(t, srv, id)
 	poll := do(srv, "GET", "/internal/job/status").Body.String()
 	wantIn(t, poll, `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hx-swap-oob="true"`)
-	wantIn(t, poll, "[! 1 app paired without a click]")
+	wantIn(t, poll, "[! monloader paired automatically]")
 	key := srv.pairNotice().Key() + srv.autoPairNotice().Key()
 	wantNotIn(t, do(srv, "GET", "/internal/job/status?pair="+url.QueryEscape(key)).Body.String(), `id="auto-pair-notice"`)
 
 	id, _ = offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","url":"`+p.URL+`","peer_token":"w"}`)
 	pairStatus(t, srv, id)
-	wantIn(t, do(srv, "GET", "/").Body.String(), "[! 2 apps paired without a click]")
+	wantIn(t, do(srv, "GET", "/").Body.String(), "[! 2 apps paired automatically]")
 
 	page := do(srv, "GET", "/settings").Body.String()
 	wantIn(t, page, `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
-	wantIn(t, page, "Paired without a click")
+	wantIn(t, page, "Paired automatically")
 	wantIn(t, do(srv, "GET", "/").Body.String(), `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
 }
 
@@ -301,4 +301,15 @@ func pairedKey(app string) string {
 		return peer.WorkerKey(app)
 	}
 	return app
+}
+
+func TestAWorkerPairedAutomaticallyIsNamedAndLeadsToItsBlock(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	id, _ := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","label":"gpu-box","url":"`+p.URL+`","peer_token":"w"}`)
+	pairStatus(t, srv, id)
+	body := do(srv, "GET", "/").Body.String()
+	wantIn(t, body, "[! gpu-box paired automatically]")
+	wantIn(t, body, `<a id="auto-pair-notice" class="pair-notice" href="/settings#tagger"`)
 }

@@ -192,7 +192,11 @@ type autoPairNotice struct {
 }
 
 func (s *Server) autoPairNotice() autoPairNotice {
-	return autoPairNotice{Href: "/settings#plugins", Items: s.win.unseen()}
+	n := autoPairNotice{Href: "/settings#plugins", Items: s.win.unseen()}
+	if len(n.Items) > 0 && !slices.ContainsFunc(n.Items, func(a autoPairing) bool { return a.Worker() == "" }) {
+		n.Href = "/settings#tagger"
+	}
+	return n
 }
 
 func (n autoPairNotice) Text() string {
@@ -200,9 +204,9 @@ func (n autoPairNotice) Text() string {
 	case 0:
 		return ""
 	case 1:
-		return "1 app paired without a click"
+		return cmp.Or(n.Items[0].Worker(), n.Items[0].App) + " paired automatically"
 	}
-	return fmt.Sprintf("%d apps paired without a click", len(n.Items))
+	return fmt.Sprintf("%d apps paired automatically", len(n.Items))
 }
 
 func (n autoPairNotice) Title() string {
