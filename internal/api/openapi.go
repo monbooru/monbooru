@@ -970,6 +970,15 @@ func buildSpec(baseURL string) map[string]any {
 						"500": resp("The pairing could not be removed (remove_failed)", "#/components/schemas/Error"),
 					}),
 			},
+			"/pair/check": map[string]any{
+				"post": op("Check the pairing still holds", "pairCheck",
+					nil,
+					map[string]any{
+						"200": map[string]any{"description": "Still paired: {\"status\": \"approved\"}", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{"status": map[string]any{"type": "string", "enum": []string{"approved"}}})}}},
+						"401": resp("The bearer is not a paired token: offer again (unauthorized)", "#/components/schemas/Error"),
+						"403": resp("CORS: origin not allowed (forbidden)", "#/components/schemas/Error"),
+					}),
+			},
 			"/collections": map[string]any{
 				"get": op("List collections", "listCollections",
 					[]map[string]any{

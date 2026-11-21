@@ -112,3 +112,30 @@ func TestASecondWorkerUnderAPairedNameWaitsOnlyWhileTheFirstIsGone(t *testing.T)
 		t.Errorf("pending = %+v, want one re-pair", reqs)
 	}
 }
+
+func checkPairing(srv *Server, token, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", "/api/v1/pair/check", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:50002"
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	return rr
+}
+
+func TestAWorkerLearnsAtStartWhetherItsPairingStillHolds(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	_, out := pairStatus(t, srv, id)
+	mustCode(t, checkPairing(srv, out["token"], `{}`), http.StatusOK)
+	mustCode(t, checkPairing(srv, "", `{}`), http.StatusUnauthorized)
+	mustCode(t, checkPairing(srv, "not-a-token", `{}`), http.StatusUnauthorized)
+
+	mustCode(t, postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{}), http.StatusOK)
+	if rr := checkPairing(srv, out["token"], `{}`); rr.Code != http.StatusUnauthorized {
+		t.Errorf("check after a removal here: %d %s, want 401", rr.Code, rr.Body)
+	}
+}

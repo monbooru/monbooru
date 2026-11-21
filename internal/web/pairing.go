@@ -142,6 +142,26 @@ func (s *Server) pairTeardown(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, pairing.StatusBody{Status: pairing.Removed})
 }
 
+// A worker never calls monbooru but to pair, so at start it asks whether
+// its pairing still holds: a 401 tells it to offer again.
+func (s *Server) pairCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.pairCORS(w, r) {
+		return
+	}
+	secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.cfgMu.RLock()
+	var paired string
+	if tok := s.cfg.Auth.Tokens.ByHash(apitoken.Hash(secret)); tok != nil {
+		paired = tok.Paired
+	}
+	s.cfgMu.RUnlock()
+	if secret == "" || paired == "" {
+		pairRefuse(w, pairing.NoPairingToken())
+		return
+	}
+	contract.WriteJSON(w, http.StatusOK, pairing.StatusBody{Status: pairing.Approved})
+}
+
 // Any call carrying a peer's own token names where it is now, so a
 // recreated container's new IP is followed without a re-pair.
 func (s *Server) notePeerAddress(next http.HandlerFunc) http.HandlerFunc {

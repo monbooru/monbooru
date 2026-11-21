@@ -80,6 +80,7 @@ var wantFreeRoutes = []string{
 	"GET /internal/tagger-stats",
 	"GET /api/v1/pair/status",
 	"GET /internal/plugins/pairing",
+	"POST /api/v1/pair/check",
 	"POST /api/v1/pair/remove",
 	"POST /api/v1/pair/request",
 
