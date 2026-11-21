@@ -26,6 +26,8 @@ type workerModel struct {
 type workerRow struct {
 	Name, Version, URL, Provider, ModelsDir string
 	Local, Paused, Disabled                 bool
+	// Missing is the local worker turned on with no monworker to run.
+	Missing bool
 	// Dot is the footer dot's state: ok, down or paused.
 	Dot, State string
 	Models     []workerModel
@@ -48,15 +50,19 @@ type workersData struct {
 
 // None is no worker to tag with, running or not.
 func (d workersData) None() bool {
-	return !slices.ContainsFunc(d.Rows, func(r workerRow) bool { return !r.Disabled })
+	return !slices.ContainsFunc(d.Rows, func(r workerRow) bool { return !r.Disabled && !r.Missing })
 }
 
 func (s *Server) workersView() workersData {
 	cfg := s.cfgSnapshot()
 	d := workersData{LocalFound: s.local != nil && s.local.path != "", LocalPin: cfg.EnvPinned("tagger.local_worker")}
 	views := tagger.CurrentPool().Workers()
-	if d.LocalFound && !slices.ContainsFunc(views, func(v tagger.WorkerView) bool { return v.Local }) {
+	switch {
+	case slices.ContainsFunc(views, func(v tagger.WorkerView) bool { return v.Local }):
+	case d.LocalFound:
 		d.Rows = append(d.Rows, workerRow{Name: tagger.LocalWorker, Local: true, Disabled: true, Dot: "paused", State: "disabled"})
+	case cfg.Tagger.LocalWorker:
+		d.Rows = append(d.Rows, workerRow{Name: tagger.LocalWorker, Local: true, Missing: true, Dot: "down", State: "not found"})
 	}
 	first := map[string]tagger.WorkerView{}
 	for _, v := range views {

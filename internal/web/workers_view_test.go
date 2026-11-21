@@ -119,6 +119,19 @@ func TestALocalWorkerTurnedOffOffersToEnable(t *testing.T) {
 	wantIn(t, workerRowHTML(t, body, "local"), "Set by MONBOORU_TAGGER_LOCAL_WORKER")
 }
 
+func TestALocalWorkerOnWithNoMonworkerSaysSo(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	srv.local = &localWorker{}
+	_, body := getBody(t, srv, "/internal/workers")
+	row := workerRowHTML(t, body, "local")
+	for _, want := range []string{"footer-dot-down", ">not found<", "No monworker beside monbooru or on PATH.", "/settings/workers/local/disable"} {
+		wantIn(t, row, want)
+	}
+	_, page := getBody(t, srv, "/settings")
+	wantIn(t, page, `title="No worker to tag with">no worker`)
+	wantNotIn(t, page, "<h4>Taggers list</h4>")
+}
+
 func TestAWorkersRequestWaitsInTheWorkersBlock(t *testing.T) {
 	p := healthPeer(t)
 	srv := newTestServer(t)

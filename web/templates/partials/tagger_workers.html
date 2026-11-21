@@ -42,7 +42,7 @@
         <td data-label="Where">{{if .Local}}this machine{{else}}<code class="peer-address">{{.URL}}</code>{{end}}</td>
         <td data-label="Provider">{{or .Provider "-"}}</td>
         <td data-label="State">{{.State}}</td>
-        <td data-label="Models">{{range $i, $m := .Models}}{{if $i}}, {{end}}{{$m.Name}}{{with $m.Differs}} <span class="status-badge status-warn" title="Not the files {{.}} holds under this name">differs</span>{{end}}{{else}}<span class="status-dim">-</span>{{end}}</td>
+        <td data-label="Models">{{if .Missing}}<span class="field-hint">No monworker beside monbooru or on PATH.</span>{{else}}{{range $i, $m := .Models}}{{if $i}}, {{end}}{{$m.Name}}{{with $m.Differs}} <span class="status-badge status-warn" title="Not the files {{.}} holds under this name">differs</span>{{end}}{{else}}<span class="status-dim">-</span>{{end}}{{end}}</td>
         <td class="cell-action">
           {{if .Local}}
             {{if $.LocalPin}}<span class="field-hint">Set by {{$.LocalPin}}</span>
