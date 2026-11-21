@@ -105,7 +105,7 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"-rating:q,E", "-( rating:questionable OR rating:explicit )", "newest", "desc"},
 		{"rating:nope", "", "newest", "desc"},
 		{"id:1,2,3", "( id:1 OR id:2 OR id:3 )", "newest", "desc"},
-		{"id:>5", "", "newest", "desc"},
+		{"id:>5", "id:>5", "newest", "desc"},
 		{"filetype:jpg,zip", "( mime:jpeg OR mime:cbz )", "newest", "desc"},
 		{"filesize:1mb..2mb", "size:1mb..2mb", "newest", "desc"},
 		{"source:https://a.example/*", "sourceurl:https://a.example/*", "newest", "desc"},

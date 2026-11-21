@@ -951,13 +951,29 @@ func booruRating(v string) string {
 	return ""
 }
 
-// monbooru's id: is equality only, so a range is dropped rather than
-// matching nothing.
+// An id, a comparison or a lo..hi range, either end open, read alike by
+// both; anything else is dropped.
 func booruID(v string) string {
-	if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-		return v
+	num := strings.TrimLeft(v, "<>=")
+	if !slices.Contains([]string{"", "<", ">", "<=", ">=", "="}, v[:len(v)-len(num)]) {
+		return ""
 	}
-	return ""
+	ends := []string{num}
+	if from, to, ok := strings.Cut(num, ".."); ok {
+		if num != v || from == "" && to == "" {
+			return ""
+		}
+		ends = []string{from, to}
+	}
+	for _, end := range ends {
+		if end == "" && len(ends) == 2 {
+			continue
+		}
+		if n, err := strconv.ParseInt(end, 10, 64); err != nil || n <= 0 {
+			return ""
+		}
+	}
+	return v
 }
 
 // monbooru deletes a post outright and has no moderation queue, so every
