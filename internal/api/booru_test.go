@@ -150,6 +150,8 @@ func TestTranslateBooruQuery(t *testing.T) {
 		{"width:>100 date:2024-01-01..2024-02-01 artist:user_a", "width:>100 date:2024-01-01..2024-02-01 artist:user_a", "newest", "desc"},
 		{"re:zero -re:zero", "re:zero -re:zero", "newest", "desc"},
 		{"order:id", "", "id", "asc"},
+		{"order:id_desc", "", "id", "desc"},
+		{"order:created_at_asc", "", "newest", "asc"},
 		{"order:filesize_asc sky", "sky", "filesize", "asc"},
 		{"order:random", "", "random", "desc"},
 		{"order:score", "", "newest", "desc"},
@@ -774,6 +776,32 @@ func TestBooruLetsGoOfTheLockForFiles(t *testing.T) {
 		if held {
 			t.Errorf("%s: the lock was never let go", tc.path)
 		}
+	}
+}
+
+// gallery-dl pages an order:id search by a<last id>, so the first page must
+// be in id order even where an import left the ingest times against it.
+func TestBooruOrderIDPagesAnImportedGallery(t *testing.T) {
+	env, base, id := booruEnv(t)
+	other := env.createTestImage(t, "other.png", 20, 20)
+	mustExec(t, env.database.Write, `UPDATE images SET ingested_at = '2001-01-01T00:00:00Z' WHERE id = ?`, other)
+	var seen []int64
+	page := "1"
+	for range 5 {
+		w := env.do("GET", base+"/posts.json?tags=order:id&limit=1&page="+page)
+		mustCode(t, w, http.StatusOK)
+		var posts []booruPost
+		mustDecode(t, w, &posts)
+		if len(posts) == 0 {
+			break
+		}
+		for _, p := range posts {
+			seen = append(seen, p.ID)
+		}
+		page = fmt.Sprintf("a%d", posts[len(posts)-1].ID)
+	}
+	if !slices.Equal(seen, []int64{id, other}) {
+		t.Errorf("order:id paging saw %v, want %v", seen, []int64{id, other})
 	}
 }
 
