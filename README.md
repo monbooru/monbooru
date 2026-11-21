@@ -99,7 +99,7 @@ The heavy features stay out of the main process. Auto-tagging runs in [monworker
 
 ## Related applications
 
-Monbooru works offline. These optional companions add the online features and auto-tagging:
+Monbooru works offline and on its own. These optional companions add the online features and auto-tagging:
 
 ```mermaid
 ---
