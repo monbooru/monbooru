@@ -176,7 +176,8 @@ const walkMaxLegTags = 600
 // tag, bare or category-qualified, a cat:, or an OR of those - to its
 // canonical ids, one leg each; ok is false when q is no walk.
 func tagWalkLegs(src Source, q Query) ([][]int64, bool) {
-	if src.DB == nil || (q.Sort != "" && q.Sort != "newest") || containsMissingFilter(q.Expr) {
+	// The walk reads in id order, which newest mostly follows and id is.
+	if src.DB == nil || (q.Sort != "" && q.Sort != "newest" && q.Sort != "id") || containsMissingFilter(q.Expr) {
 		return nil, false
 	}
 	visible, _ := src.Tallies.VisibleCount()
