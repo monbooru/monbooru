@@ -313,10 +313,12 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 	orderBy := tagOrderBy(filter)
 
 	var total int
-	if err := s.db.Read.QueryRow(
-		"SELECT COUNT(*) FROM tags t WHERE "+where, args...,
-	).Scan(&total); err != nil {
-		return nil, 0, err
+	if !filter.SkipCount {
+		if err := s.db.Read.QueryRow(
+			"SELECT COUNT(*) FROM tags t WHERE "+where, args...,
+		).Scan(&total); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	limit := filter.Limit
