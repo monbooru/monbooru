@@ -649,39 +649,52 @@ type booruTagJSON struct {
 	Words        []string `json:"words"`
 }
 
-// The apps look tags up by name, for their categories and counts.
+// The apps look tags up by name, for their categories and counts, and list
+// them, the popular ones first under order=count. name_matches is a glob,
+// so one without a * is a name.
 func booruTags(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 	q := r.URL.Query()
+	order := q.Get("search[order]")
+	pattern := tags.NormalizeTagName(q.Get("search[name_matches]"))
+	listed := q.Get("search[name_comma]") + "," + q.Get("search[name]")
+	if !strings.Contains(pattern, "*") {
+		listed += "," + pattern
+	}
+	// Capped while collecting, so a long list costs no more than the cap.
+	var names []string
+	for _, n := range strings.Split(listed, ",") {
+		if len(names) == booruMaxNames {
+			break
+		}
+		if n = tags.NormalizeTagName(n); n != "" && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
 	var found []models.Tag
 	var err error
-	switch {
-	case q.Get("search[name_comma]") != "" || q.Get("search[name]") != "":
-		// Capped while collecting, so a long list costs no more than the cap.
-		var names []string
-		for _, n := range strings.Split(q.Get("search[name_comma]")+","+q.Get("search[name]"), ",") {
-			if len(names) == booruMaxNames {
-				break
-			}
-			if n = tags.NormalizeTagName(n); n != "" && !slices.Contains(names, n) {
-				names = append(names, n)
-			}
-		}
+	if len(names) > 0 {
 		found, err = g.TagSvc.NamedTags(names)
-	case q.Get("search[name_matches]") != "":
-		_, limit := contract.PageParams("", q.Get("limit"), booruSuggest, booruMaxLimit)
-		found, err = g.TagSvc.SuggestTags(strings.Trim(q.Get("search[name_matches]"), "*"), "", limit)
+		slices.SortStableFunc(found, booruTagOrder(order))
+	} else {
+		page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruSuggest, booruMaxLimit)
+		found, _, err = g.TagSvc.ListTags(tags.TagFilter{
+			Prefix: pattern, Type: "tag", Sort: booruTagSort(order), PageIndex: page - 1, Limit: limit, SkipCount: true,
+		})
 	}
 	if serverError(w, err) {
 		return
 	}
 	// Danbooru's names are unique; of monbooru's same name in several
 	// categories, the most used answers.
-	slices.SortStableFunc(found, func(a, b models.Tag) int {
-		return cmp.Or(strings.Compare(a.Name, b.Name), b.UsageCount-a.UsageCount)
-	})
+	best := map[string]models.Tag{}
+	for _, t := range found {
+		if b, ok := best[t.Name]; t.CategoryName != "rating" && (!ok || t.UsageCount > b.UsageCount) {
+			best[t.Name] = t
+		}
+	}
 	out := []booruTagJSON{}
-	for i, t := range found {
-		if t.CategoryName == "rating" || i > 0 && found[i-1].Name == t.Name {
+	for _, t := range found {
+		if best[t.Name].ID != t.ID {
 			continue
 		}
 		out = append(out, booruTagJSON{
@@ -690,6 +703,32 @@ func booruTags(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 		})
 	}
 	contract.WriteJSON(w, http.StatusOK, out)
+}
+
+// Danbooru's tag orders: count is the most used first, name A to Z, and
+// date, the default, the newest first.
+func booruTagSort(order string) string {
+	switch order {
+	case "count":
+		return "usage"
+	case "name":
+		return "name"
+	}
+	return "created"
+}
+
+// booruTagOrder sorts tags looked up by name in Danbooru's order, date by
+// id as Danbooru's is.
+func booruTagOrder(order string) func(a, b models.Tag) int {
+	return func(a, b models.Tag) int {
+		switch booruTagSort(order) {
+		case "usage":
+			return cmp.Or(b.UsageCount-a.UsageCount, strings.Compare(a.Name, b.Name))
+		case "name":
+			return strings.Compare(a.Name, b.Name)
+		}
+		return cmp.Compare(b.ID, a.ID)
+	}
 }
 
 type booruNoteJSON struct {
