@@ -223,7 +223,7 @@ func TestSessionPage_OrderFormKeepsTheDetector(t *testing.T) {
       <span class="field-hint">Order</span>`)
 }
 
-func TestSessionDecide_DuplicateOffersTheSideMarkedDuplicate(t *testing.T) {
+func TestSessionDecide_DuplicateKeepsFileAndDropsQueue(t *testing.T) {
 	srv := newTestServer(t)
 	original := insertBareImage(t, srv, "/tmp/decide_o.png", "png", "sha_decide_o")
 	dup := insertBareImage(t, srv, "/tmp/decide_l.png", "png", "sha_decide_l")
@@ -235,29 +235,74 @@ func TestSessionDecide_DuplicateOffersTheSideMarkedDuplicate(t *testing.T) {
 
 	w := postForm(t, srv, "/relations/session/decide", url.Values{
 		"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
-		"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"},
+		"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"}, "delete": {"0"},
 	})
 	mustCode(t, w, http.StatusNoContent)
-	if got := w.Header().Get("X-Relations-Duplicate-ID"); got != strconv.FormatInt(dup, 10) {
-		t.Errorf("offered for deletion = %s, want the image marked duplicate %d", got, dup)
+	if got := w.Header().Get("HX-Redirect"); !strings.HasPrefix(got, "/relations/session") {
+		t.Errorf("HX-Redirect = %q, want /relations/session", got)
 	}
-	if got := w.Header().Get("X-Relations-Duplicate-OriginalID"); got != strconv.FormatInt(original, 10) {
-		t.Errorf("original = %s, want the image marked original %d", got, original)
+	if n := countRows(t, srv.db(), "potential_relation_pairs WHERE (a_image_id = ? AND b_image_id = ?) OR (a_image_id = ? AND b_image_id = ?)", original, dup, dup, original); n != 0 {
+		t.Errorf("pair still in queue, want removed")
+	}
+	if n := countRows(t, srv.db(), "images WHERE id = ?", dup); n != 1 {
+		t.Errorf("dup image count = %d, want 1 (kept)", n)
 	}
 }
 
-func TestSessionDecideDuplicate_UniqueTagsHeaderFollowsTheCopy(t *testing.T) {
+func TestSessionDecide_DuplicateDeletesFile(t *testing.T) {
+	srv := newTestServer(t)
+	original := insertBareImage(t, srv, "/tmp/decide_del_o.png", "png", "sha_decide_del_o")
+	dup := insertBareImage(t, srv, "/tmp/decide_del_d.png", "png", "sha_decide_del_d")
+	queueRow(t, srv.db(), original, dup, 3)
+
+	w := postForm(t, srv, "/relations/session/decide", url.Values{
+		"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
+		"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"}, "delete": {"1"},
+	})
+	mustCode(t, w, http.StatusNoContent)
+	if n := countRows(t, srv.db(), "images WHERE id = ?", dup); n != 0 {
+		t.Errorf("dup image count = %d, want 0 (deleted)", n)
+	}
+	if n := countRows(t, srv.db(), "images WHERE id = ?", original); n != 1 {
+		t.Errorf("original image count = %d, want 1", n)
+	}
+}
+
+func TestSessionDecide_DuplicateCopiesTagsAndSources(t *testing.T) {
+	srv := newTestServer(t)
+	original := insertBareImage(t, srv, "/tmp/decide_cp_o.png", "png", "sha_decide_cp_o")
+	dup := insertBareImage(t, srv, "/tmp/decide_cp_d.png", "png", "sha_decide_cp_d")
+	tag := mustTag(t, srv.tagSvc(), "custom_tag", srv.active().GeneralCategoryID)
+	mustAddTag(t, srv.tagSvc(), dup, tag.ID, false, nil)
+	mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, dup)
+	queueRow(t, srv.db(), original, dup, 3)
+
+	w := postForm(t, srv, "/relations/session/decide", url.Values{
+		"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
+		"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"},
+		"copy_tags": {"1"}, "copy_sources": {"1"}, "delete": {"0"},
+	})
+	mustCode(t, w, http.StatusNoContent)
+	if n := countRows(t, srv.db(), "image_tags WHERE image_id = ? AND tag_id = ?", original, tag.ID); n != 1 {
+		t.Errorf("tag was not copied to original")
+	}
+	if n := countRows(t, srv.db(), "image_sources WHERE image_id = ? AND site = 'site_b'", original); n != 1 {
+		t.Errorf("source was not copied to original")
+	}
+}
+
+func TestHasUniqueTagsToCopy(t *testing.T) {
 	cases := []struct {
 		name string
 		tag  func(t *testing.T, srv *Server, dup, other, tagID int64)
-		want string
+		want bool
 	}{
 		{"only an implied row differs", func(t *testing.T, srv *Server, dup, _, tagID int64) {
 			mustExec(t, srv.db().Write, `INSERT INTO image_tags (image_id, tag_id, is_implied) VALUES (?, ?, 1)`, dup, tagID)
-		}, "0"},
+		}, false},
 		{"another member has a tag", func(t *testing.T, srv *Server, _, other, tagID int64) {
 			mustAddTag(t, srv.tagSvc(), other, tagID, false, nil)
-		}, "1"},
+		}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -269,35 +314,30 @@ func TestSessionDecideDuplicate_UniqueTagsHeaderFollowsTheCopy(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.tag(t, srv, dup, other, mustTag(t, srv.tagSvc(), "extra", srv.active().GeneralCategoryID).ID)
-			queueRow(t, srv.db(), original, dup, 3)
 
-			w := postForm(t, srv, "/relations/session/decide", url.Values{
-				"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
-				"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"},
-			})
-			mustCode(t, w, http.StatusNoContent)
-			if got := w.Header().Get("X-Relations-Duplicate-HasUniqueTags"); got != tc.want {
-				t.Errorf("HasUniqueTags = %q, want %q", got, tc.want)
+			got := srv.hasUniqueTagsToCopy(srv.active(), original, dup)
+			if got != tc.want {
+				t.Errorf("hasUniqueTagsToCopy = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestSessionDecideDuplicate_UniqueSourcesHeader(t *testing.T) {
+func TestHasUniqueSourcesToCopy(t *testing.T) {
 	cases := []struct {
 		name   string
 		source func(t *testing.T, srv *Server, original, dup int64)
-		want   string
+		want   bool
 	}{
-		{"no sources", func(*testing.T, *Server, int64, int64) {}, "0"},
+		{"no sources", func(*testing.T, *Server, int64, int64) {}, false},
 		{"the duplicate has one", func(t *testing.T, srv *Server, _, dup int64) {
 			mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, dup)
-		}, "1"},
+		}, true},
 		{"the original has it already", func(t *testing.T, srv *Server, original, dup int64) {
 			for _, id := range []int64{original, dup} {
 				mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, id)
 			}
-		}, "0"},
+		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,15 +345,10 @@ func TestSessionDecideDuplicate_UniqueSourcesHeader(t *testing.T) {
 			original := insertBareImage(t, srv, "/tmp/src_o.png", "png", "sha_src_o")
 			dup := insertBareImage(t, srv, "/tmp/src_d.png", "png", "sha_src_d")
 			tc.source(t, srv, original, dup)
-			queueRow(t, srv.db(), original, dup, 3)
 
-			w := postForm(t, srv, "/relations/session/decide", url.Values{
-				"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
-				"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"},
-			})
-			mustCode(t, w, http.StatusNoContent)
-			if got := w.Header().Get("X-Relations-Duplicate-HasUniqueSources"); got != tc.want {
-				t.Errorf("HasUniqueSources = %q, want %q", got, tc.want)
+			got := srv.hasUniqueSourcesToCopy(srv.active(), original, dup)
+			if got != tc.want {
+				t.Errorf("hasUniqueSourcesToCopy = %v, want %v", got, tc.want)
 			}
 		})
 	}
