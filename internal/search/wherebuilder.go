@@ -125,6 +125,9 @@ func columnFilterIndexHint(expr Expr, sort string) string {
 		switch sort {
 		case "filesize":
 			return " INDEXED BY idx_images_filesize_visible"
+		case "id":
+			// The rowid is the id order already.
+			return ""
 		default:
 			return " INDEXED BY idx_images_ingested_visible"
 		}
