@@ -341,10 +341,6 @@ func (h *Handler) booruCount(w http.ResponseWriter, r *http.Request, g *library.
 // and rating tags go to the rating field instead of the tag strings.
 var booruCategories = map[string]int{"general": 0, "artist": 1, "copyright": 3, "character": 4, "meta": 5}
 
-// monbooru's ratings are Danbooru's spelled out, so the first letter is
-// Danbooru's, mildest first.
-var booruRatings = []string{"general", "sensitive", "questionable", "explicit"}
-
 // The types are a real Danbooru post's: a client that casts strictly
 // empties a post with a field of another type.
 type booruPost struct {
@@ -523,15 +519,17 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 	for _, t := range imageTags {
 		if t.Category == "rating" {
 			// The highest rating wins, as monbooru's own rating: filter reads it.
-			rating = max(rating, slices.Index(booruRatings, t.Name))
+			rating = max(rating, contract.RatingRank(t.Name))
 			continue
 		}
 		c := booruCategories[t.Category]
 		byCategory[c] = append(byCategory[c], t.Name)
 		all = append(all, t.Name)
 	}
+	// monbooru's ratings are Danbooru's spelled out, so the first letter is
+	// Danbooru's.
 	if rating >= 0 {
-		p.Rating = booruRatings[rating][:1]
+		p.Rating = contract.RatingLevels[rating][:1]
 	}
 	slices.Sort(all)
 	p.TagString, p.TagCount = strings.Join(all, " "), len(all)
@@ -992,7 +990,7 @@ func booruPool(name string, vocab booruVocabulary) string {
 
 // Danbooru reads a rating by its first letter, so rating:safe is s.
 func booruRating(v string) string {
-	for _, r := range booruRatings {
+	for _, r := range contract.RatingLevels {
 		if v != "" && strings.EqualFold(v[:1], r[:1]) {
 			return r
 		}
