@@ -648,6 +648,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("POST /api/v1/pair/request", s.pairRequest)
 	rt.free("GET /api/v1/pair/status", s.pairStatus)
 	rt.free("POST /api/v1/pair/remove", s.pairTeardown)
+	rt.free("POST /api/v1/pair/check", s.pairCheck)
 	rt.free("GET /internal/plugins/pairing", s.pluginPairingFragment)
 	rt.free("POST /settings/plugins/pair/{id}/approve", s.pluginPairApprove)
 	rt.free("POST /settings/plugins/pair/{id}/deny", s.pluginPairDeny)
@@ -696,7 +697,8 @@ func (s *Server) apiResolver(name string) (*library.Gallery, bool) {
 
 func isNoisyPath(path string) bool {
 	switch path {
-	case "/internal/job/status", "/internal/monloader-status", "/health":
+	case "/internal/job/status", "/internal/monloader-status", "/health",
+		"/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status":
 		return true
 	}
 	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/")

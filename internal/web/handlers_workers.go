@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
@@ -26,6 +28,8 @@ type workerModel struct {
 type workerRow struct {
 	Name, Version, URL, Provider, ModelsDir string
 	Local, Paused, Disabled                 bool
+	// Missing is the local worker turned on with no monworker to run.
+	Missing bool
 	// Dot is the footer dot's state: ok, down or paused.
 	Dot, State string
 	Models     []workerModel
@@ -41,19 +45,35 @@ type workersData struct {
 	LocalFound bool
 	LocalPin   string
 	OOB        bool
+	// MonbooruURL is base_url when a worker on another machine can use
+	// it; LoopbackBind the bind address when it listens on loopback only.
+	MonbooruURL, LoopbackBind string
+	// Swap carries the settings nav's count of requests waiting here, on
+	// every answer but the page's own render.
+	Swap bool
 }
 
 // None is no worker to tag with, running or not.
 func (d workersData) None() bool {
-	return !slices.ContainsFunc(d.Rows, func(r workerRow) bool { return !r.Disabled })
+	return !slices.ContainsFunc(d.Rows, func(r workerRow) bool { return !r.Disabled && !r.Missing })
 }
 
 func (s *Server) workersView() workersData {
 	cfg := s.cfgSnapshot()
 	d := workersData{LocalFound: s.local != nil && s.local.path != "", LocalPin: cfg.EnvPinned("tagger.local_worker")}
+	if u, err := url.Parse(cfg.Server.BaseURL); err == nil && u.Host != "" && !desktop.IsLoopbackAddr(u.Host) {
+		d.MonbooruURL = cfg.Server.BaseURL
+	}
+	if desktop.IsLoopbackAddr(cfg.Server.BindAddress) {
+		d.LoopbackBind = cfg.Server.BindAddress
+	}
 	views := tagger.CurrentPool().Workers()
-	if d.LocalFound && !slices.ContainsFunc(views, func(v tagger.WorkerView) bool { return v.Local }) {
+	switch {
+	case slices.ContainsFunc(views, func(v tagger.WorkerView) bool { return v.Local }):
+	case d.LocalFound:
 		d.Rows = append(d.Rows, workerRow{Name: tagger.LocalWorker, Local: true, Disabled: true, Dot: "paused", State: "disabled"})
+	case cfg.Tagger.LocalWorker:
+		d.Rows = append(d.Rows, workerRow{Name: tagger.LocalWorker, Local: true, Missing: true, Dot: "down", State: "not found"})
 	}
 	first := map[string]tagger.WorkerView{}
 	for _, v := range views {
@@ -111,7 +131,7 @@ func modelDigest(v tagger.WorkerView, name string) string {
 
 func (s *Server) renderWorkers(w http.ResponseWriter, oob bool) {
 	d := s.workersView()
-	d.OOB = oob
+	d.OOB, d.Swap = oob, true
 	s.renderTemplate(w, "partials/tagger_workers.html", d)
 }
 
@@ -193,7 +213,7 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	case saveErr != nil:
 		writeFlashOOB(w, "flash-tagger", "err", "Could not save: "+saveErr.Error())
 	case notifyErr != nil:
-		writeFlashOOB(w, "flash-tagger", "warn", "Removed here, but could not reach "+name+" - remove the pairing there too.")
+		writeFlashOOB(w, "flash-tagger", "warn", "Removed here, but could not reach "+name+": it offers itself again at its next start.")
 	default:
 		writeFlashOOB(w, "flash-tagger", "", "")
 	}

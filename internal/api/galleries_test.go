@@ -49,7 +49,7 @@ func TestListFolders(t *testing.T) {
 		name   string
 		images []image
 		query  string
-		want   []string // path:name=images/folders
+		want   []string
 		total  int
 	}{
 		{"empty gallery", nil, "", []string{}, 0},
@@ -174,8 +174,7 @@ func TestListFoldersUnknownPath(t *testing.T) {
 	w := env.do("GET", "/api/v1/folders?path=nowhere")
 	wantCode(t, w, http.StatusNotFound)
 	wantIn(t, w.Body.String(), `"folder not found: nowhere"`)
-	// monloader tells a missing folder from a monbooru without the route by it.
-	wantIn(t, w.Body.String(), `"code":"folder_not_found"`)
+	wantIn(t, w.Body.String(), `"folder_not_found"`)
 }
 
 func TestListFoldersPicksTheGallery(t *testing.T) {

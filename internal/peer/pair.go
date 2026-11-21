@@ -35,6 +35,9 @@ func (r Req) OpenOutranksScopes() bool {
 		slices.ContainsFunc(r.Buttons, func(b config.PluginButton) bool { return b.Mode == config.ModeOpen })
 }
 
+// Address is where monbooru will call the peer once paired.
+func (r Req) Address() string { return CallbackURL(r.URL, r.Source) }
+
 type Store = pairing.Store[Req, *Req]
 
 func NewStore() *Store { return pairing.NewStore[Req]() }

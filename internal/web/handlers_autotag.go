@@ -319,7 +319,7 @@ func (s *Server) autotagTrigger(w http.ResponseWriter, r *http.Request) {
 		flashStatus(w, http.StatusConflict, "A job is already running.")
 		return
 	}
-	s.jobs.Update(0, len(ids), "starting (loading model may take a few seconds)…")
+	s.jobs.Update(0, len(ids), "loading models…")
 
 	s.spawnAutoTagJob(ids, selected, 0, only)
 
@@ -355,7 +355,7 @@ func (s *Server) autotagImage(w http.ResponseWriter, r *http.Request) {
 		hxErr(w, r, "A job is already running.", "job already running", http.StatusConflict)
 		return
 	}
-	s.jobs.Update(0, 1, "starting (loading model may take a few seconds)…")
+	s.jobs.Update(0, 1, "loading models…")
 
 	s.spawnAutoTagJob([]int64{id}, selected, id, nil)
 

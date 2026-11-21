@@ -1,5 +1,5 @@
 # monbooru and ffmpeg on the CUDA monworker image.
-ARG MONWORKER_VERSION=1.0.1
+ARG MONWORKER_VERSION=1.0.2
 
 FROM golang:1.27.4-trixie AS build
 WORKDIR /src

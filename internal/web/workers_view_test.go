@@ -119,6 +119,19 @@ func TestALocalWorkerTurnedOffOffersToEnable(t *testing.T) {
 	wantIn(t, workerRowHTML(t, body, "local"), "Set by MONBOORU_TAGGER_LOCAL_WORKER")
 }
 
+func TestALocalWorkerOnWithNoMonworkerSaysSo(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	srv.local = &localWorker{}
+	_, body := getBody(t, srv, "/internal/workers")
+	row := workerRowHTML(t, body, "local")
+	for _, want := range []string{"footer-dot-down", ">not found<", "No monworker beside monbooru or on PATH.", "/settings/workers/local/disable"} {
+		wantIn(t, row, want)
+	}
+	_, page := getBody(t, srv, "/settings")
+	wantIn(t, page, `title="No worker to tag with">no worker`)
+	wantNotIn(t, page, "<h4>Taggers list</h4>")
+}
+
 func TestAWorkersRequestWaitsInTheWorkersBlock(t *testing.T) {
 	p := healthPeer(t)
 	srv := newTestServer(t)
@@ -127,11 +140,19 @@ func TestAWorkersRequestWaitsInTheWorkersBlock(t *testing.T) {
 	_, body := getBody(t, srv, "/settings")
 	wantIn(t, body, `href="/settings#tagger"`)
 	wantIn(t, body, "gpu-box wants to pair")
+	wantIn(t, body, `<span id="settings-pair-count" class="nav-count"></span>`)
+	wantIn(t, body, `<span id="settings-worker-count" class="nav-count"> (1)</span>`)
 	_, workers := getBody(t, srv, "/internal/workers")
 	wantIn(t, workers, "A worker wants to pair.")
+	wantIn(t, workers, `<span id="settings-worker-count" class="nav-count" hx-swap-oob="true"> (1)</span>`)
 	wantIn(t, workers, "/settings/plugins/pair/"+id+"/approve")
 	_, panel := getBody(t, srv, "/internal/plugins/pairing")
 	wantNotIn(t, panel, id)
+
+	other := workerOffer(t, srv, p, "laptop")
+	_, workers = getBody(t, srv, "/internal/workers")
+	wantIn(t, workers, "2 workers want to pair.")
+	mustCode(t, postForm(t, srv, "/settings/plugins/pair/"+other+"/deny", url.Values{}), http.StatusOK)
 
 	w := postForm(t, srv, "/settings/plugins/pair/"+id+"/deny", url.Values{})
 	wantIn(t, w.Body.String(), `id="tagger-workers"`)
@@ -249,4 +270,37 @@ func TestTheStatsBlockListsEveryWorker(t *testing.T) {
 	_, attic, _ := strings.Cut(compact, "<th>attic</th>")
 	wantNotIn(t, attic, "Mode")
 	wantNotIn(t, compact, "WorkerPID")
+}
+
+func TestTheWorkersHintGivesMonbooruAddressAndWarnsOnLoopback(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://192.168.1.5:8455", "127.0.0.1:8455"
+	})
+	body := hintAt(srv, "192.168.1.5:8455")
+	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL=http://192.168.1.5:8455</code>")
+	wantIn(t, body, `<p class="flash flash-warn">monbooru listens on 127.0.0.1:8455 only.</p>`)
+
+	srv = newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://localhost:8455", "0.0.0.0:8455"
+	})
+	body = hintAt(srv, "localhost:8455")
+	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL</code> set to monbooru's address on your network")
+	wantNotIn(t, body, "listens on")
+}
+
+func hintAt(srv *Server, host string) string {
+	req := httptest.NewRequest("GET", "/internal/workers", nil)
+	req.Host = host
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	return rr.Body.String()
+}
+
+func TestTheLocalWorkerStandingBySaysWhy(t *testing.T) {
+	srv := newTestServer(t)
+	usePool(t,
+		tagger.WorkerDef{Name: tagger.LocalWorker, Local: true, URL: fakeWorker(t, "cpu", "a").URL, Token: "tok"},
+		tagger.WorkerDef{Name: "gpu-box", URL: fakeWorker(t, "cuda", "a").URL, Token: "tok"})
+	_, body := getBody(t, srv, "/internal/workers")
+	wantIn(t, workerRowHTML(t, body, "local"), `title="Takes calls only when no paired worker can">standby<`)
 }

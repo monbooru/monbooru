@@ -47,6 +47,7 @@ type settingsData struct {
 	CPUCount           int
 	ScheduleModes      []scheduleModeRow
 	PluginPairing      map[string]any
+	PluginsPending     int
 	PluginRows         []pluginRowView
 	PluginsDir         string
 	Themes             themeCluster
@@ -121,6 +122,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		CPUCount:           runtime.NumCPU(),
 		ScheduleModes:      scheduleModeRows(),
 		PluginPairing:      panel,
+		PluginsPending:     panel["PluginsPending"].(int),
 		PluginRows:         s.pluginRows(),
 		PluginsDir:         s.pluginsDir(),
 		Themes:             s.themeCluster(),

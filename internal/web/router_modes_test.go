@@ -80,6 +80,7 @@ var wantFreeRoutes = []string{
 	"GET /internal/tagger-stats",
 	"GET /api/v1/pair/status",
 	"GET /internal/plugins/pairing",
+	"POST /api/v1/pair/check",
 	"POST /api/v1/pair/remove",
 	"POST /api/v1/pair/request",
 
@@ -318,5 +319,16 @@ func TestImageBytesStreamWithoutTheGalleryLock(t *testing.T) {
 		}
 		close(sw.release)
 		<-done
+	}
+}
+
+func TestThePolledRoutesLogAtDebug(t *testing.T) {
+	for _, p := range []string{"/internal/job/status", "/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status"} {
+		if !isNoisyPath(p) {
+			t.Errorf("%s logs at info", p)
+		}
+	}
+	if isNoisyPath("/api/v1/pair/request") {
+		t.Error("an offer logs at debug")
 	}
 }

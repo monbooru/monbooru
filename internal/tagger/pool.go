@@ -1,6 +1,7 @@
 package tagger
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -441,6 +442,21 @@ func (p *Pool) JobWorkers() []JobWorker {
 	return out
 }
 
+// Answers is whether the paired worker named name answers with the token
+// monbooru holds, and the address it was called at.
+func (p *Pool) Answers(ctx context.Context, name string) (string, bool) {
+	p.mu.Lock()
+	i := slices.IndexFunc(p.workers, func(w *poolWorker) bool { return w.def.Name == name && !w.def.Local })
+	if i < 0 {
+		p.mu.Unlock()
+		return "", false
+	}
+	client, at := p.workers[i].client, p.workers[i].def.URL
+	p.mu.Unlock()
+	_, err := client.Info(ctx)
+	return at, err == nil
+}
+
 // HasWorker is false while no worker is enabled or paired.
 func (p *Pool) HasWorker() bool {
 	p.mu.Lock()
@@ -488,14 +504,27 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []strin
 	return local
 }
 
-// Slots is how many calls for models the workers that may take them run
-// at once; 0 when none may. A non-nil only keeps the workers it names.
-func (p *Pool) Slots(models, only []string) int {
+// Slots is how many calls the workers that may take a job's calls run at
+// once, each call carrying one group of models; 0 when none may. A non-nil
+// only keeps the workers it names.
+func (p *Pool) Slots(groups [][]string, only []string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	seen := map[*poolWorker]bool{}
 	n := 0
-	for _, w := range p.eligible(models, nil, only) {
-		n += w.slots()
+	for _, models := range groups {
+		ws := p.eligible(models, nil, only)
+		if len(ws) == 0 {
+			for _, m := range models {
+				ws = append(ws, p.eligible([]string{m}, nil, only)...)
+			}
+		}
+		for _, w := range ws {
+			if !seen[w] {
+				seen[w] = true
+				n += w.slots()
+			}
+		}
 	}
 	return n
 }
@@ -506,6 +535,9 @@ func (p *Pool) Slots(models, only []string) int {
 // worker, three tries at most, and that worker is down until its next
 // refresh; a worker's refusal is final.
 func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, string, error) {
+	if parts := p.split(req.Models, only); len(parts) > 1 {
+		return p.tagParts(ctx, req, frames, only, parts)
+	}
 	interactive := req.Priority == worker.PriorityInteractive
 	skip := map[*poolWorker]bool{}
 	var lastErr error
@@ -533,6 +565,70 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 		skip[w] = true
 	}
 	return worker.TagResponse{}, "", lastErr
+}
+
+// split cuts models no worker holds together into parts that each one
+// does, the worker holding the most of what is left taking its share
+// first; nil when one worker holds them all or one holds none.
+func (p *Pool) split(models, only []string) [][]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(models) < 2 || len(p.eligible(models, nil, only)) > 0 {
+		return nil
+	}
+	holders := map[string][]*poolWorker{}
+	for _, m := range models {
+		if holders[m] = p.eligible([]string{m}, nil, only); len(holders[m]) == 0 {
+			return nil
+		}
+	}
+	var parts [][]string
+	left := slices.Clone(models)
+	for len(left) > 0 {
+		var best *poolWorker
+		var bestPart []string
+		for _, w := range p.workers {
+			var part []string
+			for _, m := range left {
+				if slices.Contains(holders[m], w) {
+					part = append(part, m)
+				}
+			}
+			if len(part) > len(bestPart) {
+				best, bestPart = w, part
+			}
+		}
+		if best == nil {
+			return nil
+		}
+		parts = append(parts, bestPart)
+		left = slices.DeleteFunc(left, func(m string) bool { return slices.Contains(bestPart, m) })
+	}
+	return parts
+}
+
+// tagParts runs each part as its own call and answers in req's model
+// order, naming the worker of the first part.
+func (p *Pool) tagParts(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string, parts [][]string) (worker.TagResponse, string, error) {
+	got := map[string]worker.ModelScores{}
+	var by string
+	for _, part := range parts {
+		sub := req
+		sub.Models = part
+		resp, name, err := p.Tag(ctx, sub, frames, only)
+		if err != nil {
+			return worker.TagResponse{}, "", err
+		}
+		by = cmp.Or(by, name)
+		for i, m := range part {
+			got[m] = resp.Results[i]
+		}
+	}
+	var out worker.TagResponse
+	for _, m := range req.Models {
+		out.Results = append(out.Results, got[m])
+	}
+	return out, by, nil
 }
 
 func (p *Pool) markDown(w *poolWorker, err error) {
@@ -568,11 +664,17 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 			return nil, fmt.Errorf("%w holds %s", errNoWorker, strings.Join(models, ", "))
 		}
 		if interactive || p.interactive == 0 {
+			// The one with the most free slots, so a worker that also
+			// takes the job's other calls leaves this one to the rest.
+			var best *poolWorker
 			for _, w := range ws {
-				if w.inUse < w.slots() {
-					w.inUse++
-					return w, nil
+				if free := w.slots() - w.inUse; free > 0 && (best == nil || free > best.slots()-best.inUse) {
+					best = w
 				}
+			}
+			if best != nil {
+				best.inUse++
+				return best, nil
 			}
 		}
 		p.free.Wait()

@@ -187,7 +187,7 @@ func (h *Handler) runAutotagBatch(b queuedBatch) (cancelled bool) {
 		fail(err.Error())
 		return false
 	}
-	h.jobs.Update(0, len(b.ids), "starting (loading model may take a few seconds)…")
+	h.jobs.Update(0, len(b.ids), "loading models…")
 	peak := func(string) {}
 	if h.memoryMark != nil {
 		peak = h.memoryMark()
