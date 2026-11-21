@@ -957,9 +957,16 @@ func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 	return "-" + out
 }
 
+// Danbooru's id orders are the id sort: an app paging by a<id> after
+// order:id needs the first page in id order, which an imported gallery's
+// ingest times are not.
 func booruOrder(v string) (sort, order string) {
 	switch v {
-	case "id", "id_asc", "created_at_asc":
+	case "id", "id_asc":
+		return "id", "asc"
+	case "id_desc":
+		return "id", "desc"
+	case "created_at_asc":
 		return "newest", "asc"
 	case "filesize", "filesize_desc":
 		return "filesize", "desc"
