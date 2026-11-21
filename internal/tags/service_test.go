@@ -824,6 +824,19 @@ func TestListTags_WithCategoryFilter(t *testing.T) {
 	_ = tags
 }
 
+func TestListTags_ExcludeCategory(t *testing.T) {
+	_, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	custom, _ := svc.CreateCategory("custom_exclude", "#000000")
+	mustTag(t, svc, "excl_kept", catID)
+	mustTag(t, svc, "excl_left", custom.ID)
+
+	tags, _ := mustListTags(t, svc, TagFilter{Prefix: "excl_", ExcludeCategoryID: &custom.ID, Limit: 100, ShowZero: true})
+	if len(tags) != 1 || tags[0].Name != "excl_kept" {
+		t.Errorf("excluding a category listed %v, want only excl_kept", tags)
+	}
+}
+
 func TestListTags_SortByUsage(t *testing.T) {
 	database, svc := setupTestDB(t)
 	catID := generalCategoryID(t, svc)
