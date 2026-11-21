@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/db"
@@ -262,6 +263,38 @@ func walkAdjacent(ctx context.Context, src Source, q Query, legs [][]int64, curr
 		return nil, nil, false, err
 	}
 	return prev, next, true, nil
+}
+
+// idBoundStart moves a walk's first image past an ANDed id: bound on the
+// side it starts from, so a page deep in id order does not test every
+// image above it one by one.
+func idBoundStart(expr Expr, up bool, from int64) int64 {
+	WalkAndedLeaves(expr, func(e Expr) {
+		f, ok := e.(FilterExpr)
+		if !ok || f.Key != "id" {
+			return
+		}
+		op, val := parseCompOp(f.Val)
+		n, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return
+		}
+		start := from
+		switch {
+		case up && op == ">":
+			start = n + 1
+		case up && op == ">=":
+			start = n
+		case !up && op == "<":
+			start = n - 1
+		case !up && op == "<=":
+			start = n
+		}
+		if up && start > from || !up && start < from {
+			from = start
+		}
+	})
+	return from
 }
 
 // walkStart is the first image a walk from cursor may yield, or the

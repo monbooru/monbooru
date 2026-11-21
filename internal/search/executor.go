@@ -237,7 +237,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			from = cmp.Or(q.After, q.Before)
 		}
 		residual, residualArgs := buildWherePerRow(q.Expr, src)
-		w := newTagWalk(database, walkLegs, up, walkStart(from, up))
+		w := newTagWalk(database, walkLegs, up, idBoundStart(q.Expr, up, walkStart(from, up)))
 		if images, walked, err = walkPage(ctx, database, w, residual, residualArgs, limit); err != nil {
 			return nil, err
 		}
