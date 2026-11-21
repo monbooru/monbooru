@@ -328,7 +328,7 @@ func TestBooruPosts(t *testing.T) {
 		{"?limit=1", []int64{other}},
 		{"?limit=1&page=2", []int64{id}},
 		{fmt.Sprintf("?page=b%d", id), nil},
-		{"?page=a1", nil},
+		{"?page=a1", []int64{other}},
 		{"?page=bx", []int64{other, id}},
 		// The search one app tests a new site with.
 		{"?tags=*&page=1&limit=30", []int64{other, id}},

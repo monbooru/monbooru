@@ -218,20 +218,23 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 		h.booruOne(w, r, g, search.FilterExpr{Key: "md5", Val: md5}, "newest", false)
 		return
 	}
-	// Danbooru also pages by id, b123 before it, a123 after; monbooru's id:
-	// is equality only, so such a page ends the scroll rather than
-	// repeating page 1.
-	if booruIDPage(q.Get("page")) {
-		contract.WriteJSON(w, http.StatusOK, []booruPost{})
-		return
-	}
 	bq := translateBooruQuery(q.Get("tags"), booruVocabularyOf(g))
+	pageNum := q.Get("page")
+	// Danbooru also pages by id, b123 before it and a123 after, in id
+	// order whatever the search's; a page after comes back newest first.
+	before, after := booruIDPage(pageNum)
+	switch {
+	case before != "":
+		bq.text, bq.sort, bq.order, pageNum = strings.TrimSpace(bq.text+" id:<"+before), "id", "desc", "1"
+	case after != "":
+		bq.text, bq.sort, bq.order, pageNum = strings.TrimSpace(bq.text+" id:>"+after), "id", "asc", "1"
+	}
 	// As on Danbooru, the limit parameter wins over the limit: metatag.
 	pageSize := q.Get("limit")
 	if pageSize == "" && bq.limit > 0 {
 		pageSize = strconv.Itoa(bq.limit)
 	}
-	page, limit := contract.PageParams(q.Get("page"), pageSize, booruPageLimit, booruMaxLimit)
+	page, limit := contract.PageParams(pageNum, pageSize, booruPageLimit, booruMaxLimit)
 	sq := search.Query{
 		Expr: search.Parse(bq.text), Sort: bq.sort, Order: bq.order, Page: page, Limit: limit, SkipCount: true,
 	}
@@ -251,6 +254,9 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 	if bq.random > 0 {
 		images = images[:min(len(images), max(bq.random-(page-1)*limit, 0))]
 	}
+	if after != "" {
+		slices.Reverse(images)
+	}
 	posts, err := booruPostsOf(h.booruBase(r), g, images)
 	if serverError(w, err) {
 		return
@@ -258,12 +264,22 @@ func (h *Handler) booruPosts(w http.ResponseWriter, r *http.Request, g *library.
 	contract.WriteJSON(w, http.StatusOK, posts)
 }
 
-func booruIDPage(page string) bool {
-	if len(page) < 2 || page[0] != 'a' && page[0] != 'b' {
-		return false
+// booruIDPage reads page=b123 or a123 into the id it pages before or
+// after.
+func booruIDPage(page string) (before, after string) {
+	if len(page) < 2 {
+		return "", ""
 	}
-	_, err := strconv.ParseInt(page[1:], 10, 64)
-	return err == nil
+	if _, err := strconv.ParseInt(page[1:], 10, 64); err != nil {
+		return "", ""
+	}
+	switch page[0] {
+	case 'b':
+		return page[1:], ""
+	case 'a':
+		return "", page[1:]
+	}
+	return "", ""
 }
 
 // Through the search, so a post the listing would hide stays hidden here.
