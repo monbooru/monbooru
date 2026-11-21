@@ -174,6 +174,7 @@ func TestListFoldersUnknownPath(t *testing.T) {
 	w := env.do("GET", "/api/v1/folders?path=nowhere")
 	wantCode(t, w, http.StatusNotFound)
 	wantIn(t, w.Body.String(), `"folder not found: nowhere"`)
+	wantIn(t, w.Body.String(), `"folder_not_found"`)
 }
 
 func TestListFoldersPicksTheGallery(t *testing.T) {

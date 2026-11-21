@@ -1016,7 +1016,7 @@ func buildSpec(baseURL string) map[string]any {
 					},
 					map[string]any{
 						"200": resp("One level, in path order; only folders holding a visible image, or a folder under them, are listed", "#/components/schemas/PaginatedFolders"),
-						"404": resp("No visible image sits at or under path", "#/components/schemas/Error"),
+						"404": resp("No visible image sits at or under path (folder_not_found)", "#/components/schemas/Error"),
 						"500": resp("The folders could not be read", "#/components/schemas/Error"),
 					}),
 			},
