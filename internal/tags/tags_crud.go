@@ -212,6 +212,10 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 		where += " AND t.category_id = ?"
 		args = append(args, *filter.CategoryID)
 	}
+	if filter.ExcludeCategoryID != nil {
+		where += " AND t.category_id != ?"
+		args = append(args, *filter.ExcludeCategoryID)
+	}
 	if filter.Prefix != "" {
 		pat := db.EscapeLike(filter.Prefix)
 		if strings.Contains(filter.Prefix, "*") {
