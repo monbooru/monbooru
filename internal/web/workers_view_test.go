@@ -295,3 +295,12 @@ func hintAt(srv *Server, host string) string {
 	srv.Handler().ServeHTTP(rr, req)
 	return rr.Body.String()
 }
+
+func TestTheLocalWorkerStandingBySaysWhy(t *testing.T) {
+	srv := newTestServer(t)
+	usePool(t,
+		tagger.WorkerDef{Name: tagger.LocalWorker, Local: true, URL: fakeWorker(t, "cpu", "a").URL, Token: "tok"},
+		tagger.WorkerDef{Name: "gpu-box", URL: fakeWorker(t, "cuda", "a").URL, Token: "tok"})
+	_, body := getBody(t, srv, "/internal/workers")
+	wantIn(t, workerRowHTML(t, body, "local"), `title="Takes calls only when no paired worker can">standby<`)
+}
