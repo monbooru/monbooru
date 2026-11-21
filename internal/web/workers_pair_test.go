@@ -134,7 +134,9 @@ func TestAWorkerLearnsAtStartWhetherItsPairingStillHolds(t *testing.T) {
 	mustCode(t, checkPairing(srv, "", `{}`), http.StatusUnauthorized)
 	mustCode(t, checkPairing(srv, "not-a-token", `{}`), http.StatusUnauthorized)
 
-	mustCode(t, postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{}), http.StatusOK)
+	rm := postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{})
+	mustCode(t, rm, http.StatusOK)
+	wantIn(t, rm.Body.String(), "could not reach gpu-box: it offers itself again at its next start.")
 	if rr := checkPairing(srv, out["token"], `{}`); rr.Code != http.StatusUnauthorized {
 		t.Errorf("check after a removal here: %d %s, want 401", rr.Code, rr.Body)
 	}

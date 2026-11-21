@@ -213,7 +213,7 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	case saveErr != nil:
 		writeFlashOOB(w, "flash-tagger", "err", "Could not save: "+saveErr.Error())
 	case notifyErr != nil:
-		writeFlashOOB(w, "flash-tagger", "warn", "Removed here, but could not reach "+name+" - remove the pairing there too.")
+		writeFlashOOB(w, "flash-tagger", "warn", "Removed here, but could not reach "+name+": it offers itself again at its next start.")
 	default:
 		writeFlashOOB(w, "flash-tagger", "", "")
 	}
