@@ -676,7 +676,7 @@ func booruTags(w http.ResponseWriter, r *http.Request, g *library.Gallery) {
 		// Ratings are left out in the query, so a page stays full.
 		var rating int64
 		rating, _, err = tags.CategoryIDByName(g.DB, "rating")
-		page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruSuggest, booruMaxLimit)
+		page, limit := contract.PageParams(q.Get("page"), q.Get("limit"), booruPageLimit, booruMaxLimit)
 		if err == nil {
 			found, _, err = g.TagSvc.ListTags(tags.TagFilter{
 				Prefix: pattern, Type: "tag", Sort: booruTagSort(order), PageIndex: page - 1, Limit: limit,
