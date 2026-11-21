@@ -278,7 +278,7 @@ func TestTheWorkersHintGivesMonbooruAddressAndWarnsOnLoopback(t *testing.T) {
 	})
 	body := hintAt(srv, "192.168.1.5:8455")
 	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL=http://192.168.1.5:8455</code>")
-	wantIn(t, body, "monbooru listens on 127.0.0.1:8455 only, which another machine cannot reach")
+	wantIn(t, body, `<p class="flash flash-warn">monbooru listens on 127.0.0.1:8455 only.</p>`)
 
 	srv = newTestServerWith(t, false, func(c *config.Config) {
 		c.Server.BaseURL, c.Server.BindAddress = "http://localhost:8455", "0.0.0.0:8455"

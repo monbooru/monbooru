@@ -63,12 +63,14 @@
     </tbody>
   </table>
   </div>
-  <p class="field-hint">To add a worker on another machine, start a monworker instance with {{template "workers_monbooru_url" .}}, then approve it here.{{template "workers_loopback" .}}</p>
+  <p class="field-hint">To add a worker on another machine, start a monworker instance with {{template "workers_monbooru_url" .}}, then approve it here.</p>
+  {{template "workers_loopback" .}}
   {{else}}
-  <p class="field-hint">No worker. To add one, start a monworker instance with {{template "workers_monbooru_url" .}}, then approve it here.{{template "workers_loopback" .}}</p>
+  <p class="field-hint">No worker. To add one, start a monworker instance with {{template "workers_monbooru_url" .}}, then approve it here.</p>
+  {{template "workers_loopback" .}}
   {{end}}
 </div>
 {{if .Swap}}<span id="settings-worker-count" class="nav-count" hx-swap-oob="true">{{with len .Pending}} ({{.}}){{end}}</span>{{end}}
 {{end}}
 {{define "workers_monbooru_url"}}{{with .MonbooruURL}}<code>MONWORKER_MONBOORU_URL={{.}}</code>{{else}}<code>MONWORKER_MONBOORU_URL</code> set to monbooru's address on your network{{end}}{{end}}
-{{define "workers_loopback"}}{{with .LoopbackBind}} monbooru listens on {{.}} only, which another machine cannot reach: set <code>server.bind_address</code> to <code>0.0.0.0</code> and its port first.{{end}}{{end}}
+{{define "workers_loopback"}}{{with .LoopbackBind}}<p class="flash flash-warn">monbooru listens on {{.}} only.</p>{{end}}{{end}}
