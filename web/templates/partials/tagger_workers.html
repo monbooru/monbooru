@@ -1,5 +1,5 @@
 {{define "partials/tagger_workers.html"}}
-<div id="tagger-workers" class="settings-sub" hx-get="/internal/workers" hx-trigger="every 5s" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
+<div id="tagger-workers" class="settings-sub" hx-get="/internal/workers" hx-trigger="every 5s [!confirmOpen()]" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <h4>Workers</h4>
   {{if .Pending}}
   <div class="pairing-pending">

@@ -1,5 +1,5 @@
 {{define "partials/plugin_pairing.html"}}
-<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
+<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s [!confirmOpen()]" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <div class="settings-sub-head">
     <h4>Pairing requests</h4>
     {{if .WindowLeft}}
