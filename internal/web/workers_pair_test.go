@@ -9,6 +9,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
+	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
 func workerOffer(t *testing.T, srv *Server, p *httptest.Server, name string) string {
@@ -78,5 +79,36 @@ func TestAWorkersTokenOpensNoRouteButItsOwnRemoval(t *testing.T) {
 	mustCode(t, rr, http.StatusOK)
 	if cfg := srv.cfgSnapshot(); len(cfg.Workers) != 0 || cfg.Auth.Tokens.Paired(peer.WorkerKey("gpu-box")) != nil {
 		t.Errorf("after its removal: workers %+v", cfg.Workers)
+	}
+}
+
+func TestASecondWorkerUnderAPairedNameWaitsOnlyWhileTheFirstIsGone(t *testing.T) {
+	f := &worker.Fake{Token: "tok-gpu-box", Info: worker.Info{Slots: 1}}
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			f.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(first.Close)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, first, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	pairStatus(t, srv, id)
+
+	second := `{"app":"monworker","label":"gpu-box","url":"http://localhost:1","requested_scopes":[],"peer_token":"tok-2","version":"v1.0.0"}`
+	req := httptest.NewRequest("POST", "/api/v1/pair/request", strings.NewReader(second))
+	req.RemoteAddr = "127.0.0.1:50001"
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "already paired") {
+		t.Fatalf("second gpu-box while the first answers: %d %s", rr.Code, rr.Body)
+	}
+
+	first.Close()
+	if _, st := offerFrom(t, srv, "127.0.0.1:50001", second); st != pairing.Pending {
+		t.Fatalf("second gpu-box once the first is gone: %q, want a pending re-pair", st)
+	}
+	if reqs := srv.pairs.ListPending(); len(reqs) != 1 || !reqs[0].Repair {
+		t.Errorf("pending = %+v, want one re-pair", reqs)
 	}
 }

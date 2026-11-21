@@ -442,6 +442,21 @@ func (p *Pool) JobWorkers() []JobWorker {
 	return out
 }
 
+// Answers is whether the paired worker named name answers with the token
+// monbooru holds, and the address it was called at.
+func (p *Pool) Answers(ctx context.Context, name string) (string, bool) {
+	p.mu.Lock()
+	i := slices.IndexFunc(p.workers, func(w *poolWorker) bool { return w.def.Name == name && !w.def.Local })
+	if i < 0 {
+		p.mu.Unlock()
+		return "", false
+	}
+	client, at := p.workers[i].client, p.workers[i].def.URL
+	p.mu.Unlock()
+	_, err := client.Info(ctx)
+	return at, err == nil
+}
+
 // HasWorker is false while no worker is enabled or paired.
 func (p *Pool) HasWorker() bool {
 	p.mu.Lock()

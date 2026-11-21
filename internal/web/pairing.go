@@ -74,6 +74,18 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Scopes, req.Buttons = nil, nil
+		// Two machines under one name would take each other's place.
+		if s.pairedWith(req.Paired()) {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			at, answers := s.pool.Answers(ctx, req.WorkerName())
+			cancel()
+			if answers {
+				msg := fmt.Sprintf("a worker named %s is already paired and answers at %s; set MONWORKER_NAME to another name", req.WorkerName(), at)
+				logx.Infof("pairing: refused %s from %s: %s", req.Paired(), session.ClientIP(r), msg)
+				pairRefuse(w, &pairing.Refusal{Status: http.StatusConflict, Code: "name_taken", Msg: msg})
+				return
+			}
+		}
 	}
 	req.Repair = s.pairedWith(req.Paired())
 	req.Auto = s.autoApproves(r, req)

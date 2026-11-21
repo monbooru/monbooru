@@ -6,13 +6,13 @@
   <p class="pairing-pending-msg">A worker wants to pair.</p>
   <div class="table-scroll">
   <table class="data-table stack-table">
-    <thead><tr><th>Worker</th><th>Source</th><th>Expires</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>
+    <thead><tr><th>Worker</th><th>Address</th><th>Expires</th><th class="cell-action">Approve</th><th class="cell-action">Deny</th></tr></thead>
     <tbody>
       {{range .Pending}}
       <tr>
         <td class="stack-head"><strong>{{.WorkerName}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}
           {{if .Repair}}<span class="status-badge status-warn">re-pair</span>{{end}}</td>
-        <td data-label="Source">{{.Source}}</td>
+        <td data-label="Address"><code class="peer-address">{{.Address}}</code></td>
         <td data-label="Expires">{{minutesLeft .ExpiresAt}}</td>
         <td class="cell-action">
           <form hx-post="/settings/plugins/pair/{{.ID}}/approve" hx-target="#tagger-workers" hx-swap="outerHTML" style="display:inline">
