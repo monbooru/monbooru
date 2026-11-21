@@ -494,6 +494,10 @@ var danbooruMediaAssetTypes = map[string]string{
 	"pixel_hash": "string", "status": "string", "updated_at": "string", "variants": "array",
 }
 
+var danbooruVariantTypes = map[string]string{
+	"type": "string", "url": "string", "width": "number", "height": "number", "file_ext": "string",
+}
+
 func jsonKind(v any) string {
 	switch v.(type) {
 	case nil:
@@ -535,6 +539,10 @@ func TestBooruPostMatchesDanbooruTypes(t *testing.T) {
 	compare("", post, danbooruPostTypes)
 	if asset, ok := post["media_asset"].(map[string]any); ok {
 		compare("media_asset.", asset, danbooruMediaAssetTypes)
+		variants, _ := asset["variants"].([]any)
+		for _, v := range variants {
+			compare("media_asset.variants[].", v.(map[string]any), danbooruVariantTypes)
+		}
 	}
 }
 
@@ -769,6 +777,43 @@ func TestBooruDuration(t *testing.T) {
 		}
 		if !strings.Contains(string(b), tc.want) {
 			t.Errorf("%s: post has no %s in %s", tc.name, tc.want, b)
+		}
+	}
+}
+
+func TestBooruVariants(t *testing.T) {
+	post := func(w, h int, ext string, large bool) booruPost {
+		p := booruPost{ImageWidth: w, ImageHeight: h, FileExt: ext, HasLarge: large,
+			FileURL: "f", LargeFileURL: "f", PreviewFileURL: "t"}
+		if large {
+			p.LargeFileURL = "s"
+		}
+		return p
+	}
+	cases := []struct {
+		name  string
+		post  booruPost
+		video bool
+		want  string
+	}{
+		{"a small image", post(40, 30, "png", false), false,
+			"180x180 t 40x30 jpg, 360x360 t 40x30 jpg, 720x720 f 40x30 png, original f 40x30 png"},
+		{"a wide image", post(1200, 600, "png", false), false,
+			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 f 1200x600 png, original f 1200x600 png"},
+		{"an image past the pixel cap", post(20000, 10000, "png", true), false,
+			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 s 4000x2000 jpg, sample s 4000x2000 jpg, original f 20000x10000 png"},
+		{"a format phones do not decode", post(600, 900, "jxl", true), false,
+			"180x180 t 200x300 jpg, 360x360 t 200x300 jpg, 720x720 s 600x900 jpg, sample s 600x900 jpg, original f 600x900 jxl"},
+		{"a video", post(1920, 1080, "mp4", false), true,
+			"180x180 t 300x168 jpg, 360x360 t 300x168 jpg, 720x720 t 300x168 jpg, original f 1920x1080 mp4"},
+	}
+	for _, tc := range cases {
+		var got []string
+		for _, v := range booruVariants(tc.post, tc.video) {
+			got = append(got, fmt.Sprintf("%s %s %dx%d %s", v.Type, v.URL, v.Width, v.Height, v.FileExt))
+		}
+		if s := strings.Join(got, ", "); s != tc.want {
+			t.Errorf("%s:\n got %s\nwant %s", tc.name, s, tc.want)
 		}
 	}
 }
