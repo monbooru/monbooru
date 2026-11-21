@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"math"
@@ -13,7 +14,9 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/library"
+	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/relations"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -31,13 +34,17 @@ var validDetectors = map[string]bool{
 }
 
 type sessionPairView struct {
-	A              sessionImageView
-	B              sessionImageView
-	Distance       int
-	Source         string
-	Score          float64
-	LeftID         int64
-	SharedAncestor int64
+	A                 sessionImageView
+	B                 sessionImageView
+	Distance          int
+	Source            string
+	Score             float64
+	LeftID            int64
+	SharedAncestor    int64
+	AHasUniqueTags    bool
+	BHasUniqueTags    bool
+	AHasUniqueSources bool
+	BHasUniqueSources bool
 }
 
 func (v sessionPairView) ScorePercent() int { return int(math.Round(v.Score * 100)) }
@@ -116,6 +123,10 @@ func (s *Server) sessionPage(w http.ResponseWriter, r *http.Request) {
 		} else if ok {
 			pair.SharedAncestor = src
 		}
+		pair.AHasUniqueTags = s.hasUniqueTagsToCopy(cx, pair.B.ID, pair.A.ID)
+		pair.BHasUniqueTags = s.hasUniqueTagsToCopy(cx, pair.A.ID, pair.B.ID)
+		pair.AHasUniqueSources = s.hasUniqueSourcesToCopy(cx, pair.B.ID, pair.A.ID)
+		pair.BHasUniqueSources = s.hasUniqueSourcesToCopy(cx, pair.A.ID, pair.B.ID)
 	}
 	s.renderTemplate(w, "relations_session.html", sessionPageData{
 		baseData:        s.base(r, "relations", "Session - "+s.booruName()),
@@ -355,42 +366,84 @@ func (s *Server) sessionDecidePost(w http.ResponseWriter, r *http.Request) {
 	if err := cx.RelationsSvc.DropQueuedPair(a, b); err != nil {
 		logx.Warnf("session queue drop: %v", err)
 	}
-	if decision == "duplicate" && writeDuplicatePostDecideHeaders(w, cx, left, right) {
-		return
+	if decision == "duplicate" {
+		var gid int64
+		_ = cx.DB.Read.QueryRow(`
+			SELECT group_id FROM dup_group_members WHERE image_id = ? LIMIT 1`, left).Scan(&gid)
+		if gid > 0 {
+			if r.FormValue("copy_tags") == "1" {
+				if _, err := cx.RelationsSvc.CopyTagsFromDuplicatesToOriginal(gid); err != nil {
+					logx.Warnf("session dup copy tags: %v", err)
+				}
+			}
+			if r.FormValue("copy_sources") == "1" {
+				if _, err := cx.RelationsSvc.CopySourcesFromDuplicatesToOriginal(gid); err != nil {
+					logx.Warnf("session dup copy sources: %v", err)
+				}
+			}
+		}
+		if r.FormValue("delete") == "1" {
+			if _, err := cx.DeleteImages(context.Background(), []int64{right}, library.DeleteOptions{}, nil); err != nil {
+				logx.Warnf("session dup delete: %v", err)
+			}
+		}
 	}
 	sessionRedirect(w, r)
 }
 
-func writeDuplicatePostDecideHeaders(w http.ResponseWriter, cx *library.Gallery, left, right int64) bool {
-	var gid, original int64
-	if err := cx.DB.Read.QueryRow(`
-		SELECT g.id, g.original_image_id
-		FROM dup_group_members ma
-		JOIN dup_group_members mb ON ma.group_id = mb.group_id
-		JOIN dup_groups g ON g.id = ma.group_id
-		WHERE ma.image_id = ? AND mb.image_id = ?
-		LIMIT 1`, left, right,
-	).Scan(&gid, &original); err != nil {
-		logx.Debugf("dup post-decide group lookup: %v", err)
-		return false
+func (s *Server) hasUniqueTagsToCopy(cx *library.Gallery, original, dup int64) bool {
+	rc := int64(0)
+	if s != nil {
+		if svc := s.tagSvc(); svc != nil {
+			rc = svc.RatingCategoryID()
+		}
 	}
-	nonOriginal := right
-	withTags, err := cx.RelationsSvc.GroupsWithTagsToCopy([]int64{gid})
-	if err != nil {
-		logx.Debugf("dup post-decide unique tags: %v", err)
-	}
-	withSources, err := cx.RelationsSvc.GroupsWithSourcesToCopy([]int64{gid})
-	if err != nil {
-		logx.Debugf("dup post-decide unique sources: %v", err)
-	}
-	w.Header().Set("X-Relations-Post-Decision", "duplicate-cleanup")
-	w.Header().Set("X-Relations-Duplicate-ID", strconv.FormatInt(nonOriginal, 10))
-	w.Header().Set("X-Relations-Duplicate-OriginalID", strconv.FormatInt(original, 10))
-	w.Header().Set("X-Relations-Duplicate-GroupID", strconv.FormatInt(gid, 10))
-	w.Header().Set("X-Relations-Duplicate-HasUniqueTags", map[bool]string{true: "1", false: "0"}[withTags[gid]])
-	w.Header().Set("X-Relations-Duplicate-HasUniqueSources", map[bool]string{true: "1", false: "0"}[withSources[gid]])
-	w.WriteHeader(http.StatusNoContent)
-	return true
+	var exists int
+	err := cx.DB.Read.QueryRow(`
+		WITH dup_imgs AS (
+			SELECT member.image_id FROM dup_group_members m JOIN dup_group_members member ON member.group_id = m.group_id WHERE m.image_id = ?1
+			UNION SELECT ?1
+		),
+		orig AS (
+			SELECT COALESCE((SELECT g.original_image_id FROM dup_group_members m JOIN dup_groups g ON g.id = m.group_id WHERE m.image_id = ?2), ?2) AS id
+		)
+		SELECT 1
+		FROM image_tags it
+		JOIN dup_imgs d ON d.image_id = it.image_id
+		LEFT JOIN tags t ON t.id = it.tag_id
+		JOIN orig o ON 1=1
+		WHERE d.image_id != o.id
+		  AND it.is_implied = 0
+		  AND (?3 = 0 OR t.category_id != ?3)
+		  AND (NOT EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source = '`+models.TagSourceMonbooru+`')
+		       OR EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source != '`+models.TagSourceMonbooru+`'))
+		  AND NOT EXISTS (SELECT 1 FROM image_tags oit WHERE oit.image_id = o.id AND oit.tag_id = it.tag_id)
+		LIMIT 1`, dup, original, rc,
+	).Scan(&exists)
+	return err == nil && exists == 1
+}
+
+func (s *Server) hasUniqueSourcesToCopy(cx *library.Gallery, original, dup int64) bool {
+	var exists int
+	err := cx.DB.Read.QueryRow(`
+		WITH dup_imgs AS (
+			SELECT member.image_id FROM dup_group_members m JOIN dup_group_members member ON member.group_id = m.group_id WHERE m.image_id = ?1
+			UNION SELECT ?1
+		),
+		orig AS (
+			SELECT COALESCE((SELECT g.original_image_id FROM dup_group_members m JOIN dup_groups g ON g.id = m.group_id WHERE m.image_id = ?2), ?2) AS id
+		)
+		SELECT 1
+		FROM image_sources s
+		JOIN dup_imgs d ON d.image_id = s.image_id
+		JOIN orig o ON 1=1
+		WHERE d.image_id != o.id
+		  AND lower(s.site) != '`+contract.SourcePTR+`'
+		  AND NOT EXISTS (SELECT 1 FROM image_sources os WHERE os.image_id = o.id AND os.site = s.site AND os.post_id = s.post_id)
+		  AND (s.url = '' OR NOT EXISTS (SELECT 1 FROM image_sources os WHERE os.image_id = o.id AND os.url = s.url))
+		LIMIT 1`, dup, original,
+	).Scan(&exists)
+	return err == nil && exists == 1
 }
 
 func sessionRedirect(w http.ResponseWriter, r *http.Request) {

@@ -64,7 +64,9 @@
     {{- $secondSide = "A" -}}
   {{- end -}}
   <section class="session-pair" data-a="{{.Pair.A.ID}}" data-b="{{.Pair.B.ID}}"
-           data-a-type="{{.Pair.A.FileType}}" data-b-type="{{.Pair.B.FileType}}">
+           data-a-type="{{.Pair.A.FileType}}" data-b-type="{{.Pair.B.FileType}}"
+           data-a-tags="{{.Pair.AHasUniqueTags}}" data-b-tags="{{.Pair.BHasUniqueTags}}"
+           data-a-sources="{{.Pair.AHasUniqueSources}}" data-b-sources="{{.Pair.BHasUniqueSources}}">
     <div class="session-cells">
       <div class="session-cell" data-side="{{$firstSide}}">
         <h4 class="session-role" data-role="left">Left</h4>
@@ -130,7 +132,7 @@
       {{if .TagPairs}}<input type="hidden" name="detector" value="{{.Detector}}">{{end}}
 
       <div class="session-buttons">
-        <button type="submit" name="type" value="duplicate"
+        <button type="button" id="session-btn-duplicate"
                 data-prompt-sentence="{right} is the same image as {left} ({left} is the original)."
                 title="Right is the same image as left (1)">1 Same image (Duplicate)</button>
         <button type="submit" name="type" value="alternate"
@@ -180,7 +182,7 @@
     </dialog>
 
     <dialog id="session-postdecide-delete-dialog">
-      <h4 class="dlg-title"><span id="postdecide-dup-id">#?</span> has been marked as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
+      <h4 class="dlg-title">Mark <span id="postdecide-dup-id">#?</span> as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
       <p>Delete <span id="postdecide-dup-id-body">#?</span> from the gallery now?</p>
       <p class="field-hint">The original stays; the duplicate leaves the gallery and its file is removed from disk. This cannot be undone.</p>
       <div class="field" id="postdecide-copy-tags-label" hidden>
@@ -447,86 +449,94 @@
 
   var postdecideDlg = document.getElementById('session-postdecide-delete-dialog');
   var pdFlash = document.getElementById('postdecide-flash');
-  var pdState = { dupID: 0, originalID: 0, groupID: 0 };
-  window.onSessionDecideResponse = function(evt) {
-    var detail = evt.detail || {};
-    var xhr = detail.xhr;
-    if (!detail.successful || !xhr) return;
-    if (xhr.getResponseHeader('X-Relations-Post-Decision') === 'duplicate-cleanup') {
-      pdState.dupID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-ID') || '0', 10);
-      pdState.originalID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-OriginalID') || '0', 10);
-      pdState.groupID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-GroupID') || '0', 10);
-      var hasUnique = xhr.getResponseHeader('X-Relations-Duplicate-HasUniqueTags') === '1';
-      var hasSources = xhr.getResponseHeader('X-Relations-Duplicate-HasUniqueSources') === '1';
-      var dupHeaderEl = document.getElementById('postdecide-dup-id');
-      var dupBodyEl = document.getElementById('postdecide-dup-id-body');
-      var origEl = document.getElementById('postdecide-original-id');
-      var copyLabel = document.getElementById('postdecide-copy-tags-label');
-      var copyBox = document.getElementById('postdecide-copy-tags');
-      if (dupHeaderEl) dupHeaderEl.textContent = '#' + pdState.dupID;
-      if (dupBodyEl) dupBodyEl.textContent = '#' + pdState.dupID;
-      if (origEl) origEl.textContent = '#' + pdState.originalID;
-      if (copyBox) copyBox.checked = false;
-      if (copyLabel) copyLabel.hidden = !hasUnique;
-      var sourcesLabel = document.getElementById('postdecide-copy-sources-label');
-      var sourcesBox = document.getElementById('postdecide-copy-sources');
-      if (sourcesBox) sourcesBox.checked = false;
-      if (sourcesLabel) sourcesLabel.hidden = !hasSources;
-      if (pdFlash) pdFlash.innerHTML = '';
-      if (postdecideDlg) postdecideDlg.showModal();
-      return;
-    }
-    if (xhr.status === 204) {
-      window.location.reload();
-    }
-  };
-  function pdDone() {
-    if (postdecideDlg) postdecideDlg.close();
-    window.location.reload();
+  var btnDuplicate = document.getElementById('session-btn-duplicate');
+
+  function openDuplicateDialog() {
+    if (!postdecideDlg || !pair) return;
+    var leftID = currentLeftID();
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+    var rightID = (leftID === aID) ? bID : aID;
+    var dupHeaderEl = document.getElementById('postdecide-dup-id');
+    var dupBodyEl = document.getElementById('postdecide-dup-id-body');
+    var origEl = document.getElementById('postdecide-original-id');
+    if (dupHeaderEl) dupHeaderEl.textContent = '#' + rightID;
+    if (dupBodyEl) dupBodyEl.textContent = '#' + rightID;
+    if (origEl) origEl.textContent = '#' + leftID;
+
+    var hasTags = (rightID === aID) ? (pair.dataset.aTags === 'true') : (pair.dataset.bTags === 'true');
+    var hasSources = (rightID === aID) ? (pair.dataset.aSources === 'true') : (pair.dataset.bSources === 'true');
+
+    var copyTagsLabel = document.getElementById('postdecide-copy-tags-label');
+    var copyTagsBox = document.getElementById('postdecide-copy-tags');
+    if (copyTagsBox) copyTagsBox.checked = false;
+    if (copyTagsLabel) copyTagsLabel.hidden = !hasTags;
+
+    var copySourcesLabel = document.getElementById('postdecide-copy-sources-label');
+    var copySourcesBox = document.getElementById('postdecide-copy-sources');
+    if (copySourcesBox) copySourcesBox.checked = false;
+    if (copySourcesLabel) copySourcesLabel.hidden = !hasSources;
+
+    if (pdFlash) pdFlash.innerHTML = '';
+    postdecideDlg.showModal();
   }
-  // A refused copy answers 200 with an error body, so the body decides.
-  function pdCopy(what, next) {
-    var box = document.getElementById('postdecide-copy-' + what);
-    if (!box || !box.checked || pdState.groupID <= 0) { next(); return; }
-    postForm('/relations/dup-group/' + pdState.groupID + '/copy-' + what, {}, {
+
+  if (btnDuplicate) {
+    btnDuplicate.addEventListener('click', openDuplicateDialog);
+  }
+
+  function submitDuplicateDecision(deleteNow) {
+    var copyTagsBox = document.getElementById('postdecide-copy-tags');
+    var copySourcesBox = document.getElementById('postdecide-copy-sources');
+    var leftID = currentLeftID();
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+
+    var formOrder = form.querySelector('input[name="order"]');
+    var formDetector = form.querySelector('input[name="detector"]');
+
+    var params = {
+      a: aID,
+      b: bID,
+      left: leftID,
+      order: formOrder ? formOrder.value : '',
+      type: 'duplicate',
+      delete: deleteNow ? '1' : '0',
+      copy_tags: (copyTagsBox && copyTagsBox.checked) ? '1' : '0',
+      copy_sources: (copySourcesBox && copySourcesBox.checked) ? '1' : '0',
+    };
+    if (formDetector) params.detector = formDetector.value;
+
+    if (postdecideDlg) postdecideDlg.close();
+
+    postForm('/relations/session/decide', params, {
       hx: true, flashId: 'postdecide-flash',
       onOK: function(res) {
-        res.text().then(function(t) {
-          if (t.indexOf('flash-err') !== -1) { pdFlash.innerHTML = t; return; }
-          next();
-        });
+        var hxRedirect = res.headers.get('HX-Redirect');
+        if (hxRedirect) {
+          window.location.href = hxRedirect;
+        } else {
+          window.location.reload();
+        }
       },
+      onErr: function(msg) {
+        if (postdecideDlg && !postdecideDlg.open) postdecideDlg.showModal();
+        if (pdFlash) pdFlash.innerHTML = '<div class="flash flash-err">' + msg + '</div>';
+      }
     });
   }
-  function pdCopyChecked(next) {
-    pdCopy('tags', function() { pdCopy('sources', next); });
-  }
+
   var pdKeep = document.getElementById('postdecide-keep');
   if (pdKeep) pdKeep.addEventListener('click', function() {
-    // Keep honours the copy boxes too: they are a choice about the tags
-    // and sources, not the file.
-    pdCopyChecked(pdDone);
+    submitDuplicateDecision(false);
   });
   var pdDelete = document.getElementById('postdecide-delete');
   if (pdDelete) pdDelete.addEventListener('click', function() {
-    pdCopyChecked(function() {
-      postForm('/relations/duplicates/marked/delete-one', {image_id: String(pdState.dupID)}, {
-        hx: true, flashId: 'postdecide-flash',
-        onOK: function(res) {
-          // A raw fetch does not process HX-Trigger, so the flash is stashed
-          // for the reload by hand.
-          var f = JSON.parse(res.headers.get('HX-Trigger') || '{}')['action-flash'];
-          if (f) stashActionFlash(f.text, f.kind);
-          pdDone();
-        },
-      });
-    });
+    submitDuplicateDecision(true);
   });
-  // Esc keeps the file but, as a cancel, skips the copies.
+
+  // Esc or [X] closes dialog without doing anything (nothing to undo).
   if (postdecideDlg) postdecideDlg.addEventListener('cancel', function(e) {
     e.preventDefault();
     postdecideDlg.close();
-    window.location.reload();
   });
   if (postdecideDlg) postdecideDlg.addEventListener('keydown', function(e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -540,6 +550,20 @@
       if (pdKeep) pdKeep.click();
     }
   });
+
+  window.onSessionDecideResponse = function(evt) {
+    var detail = evt.detail || {};
+    var xhr = detail.xhr;
+    if (!detail.successful || !xhr) return;
+    if (xhr.status === 204) {
+      var hxRedirect = xhr.getResponseHeader('HX-Redirect');
+      if (hxRedirect) {
+        window.location.href = hxRedirect;
+      } else {
+        window.location.reload();
+      }
+    }
+  };
 
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
@@ -558,7 +582,12 @@
     else if (e.key === 'c' || e.key === 'C') { openCompare(); return; }
     else if (e.key === 'Escape') { e.preventDefault(); window.location.href = '/relations'; return; }
     if (btnIndex < 0) return;
-    var btn = form.querySelectorAll('button[type="submit"]')[btnIndex];
+    if (btnIndex === 0) {
+      e.preventDefault();
+      openDuplicateDialog();
+      return;
+    }
+    var btn = form.querySelectorAll('button[type="submit"]')[btnIndex - 1];
     if (btn) btn.click();
   });
 })();
