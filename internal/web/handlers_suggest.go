@@ -56,37 +56,6 @@ func (s *Server) suggestLabels(q db.Querier, logLabel, query string, args ...any
 	return slices.DeleteFunc(out, func(v string) bool { return v == "" })
 }
 
-// The NOCASE range seeks the index where LIKE 'prefix%' would walk all of
-// it, and folds case the way the folder: filter does.
-func (s *Server) foldersSuggest(w http.ResponseWriter, r *http.Request) {
-	prefix := strings.TrimSpace(r.URL.Query().Get("prefix"))
-	var folders []string
-	if prefix == "" {
-		folders = s.suggestLabels(s.db().Read, "folders",
-			`SELECT DISTINCT folder_path FROM images INDEXED BY idx_images_folder_nocase_visible
-			 WHERE is_missing = 0 AND folder_path != ''
-			 ORDER BY folder_path COLLATE NOCASE LIMIT 10`)
-	} else {
-		lo, hi := nocasePrefixRange(prefix)
-		folders = s.suggestLabels(s.db().Read, "folders",
-			`SELECT DISTINCT folder_path FROM images INDEXED BY idx_images_folder_nocase_visible
-			 WHERE is_missing = 0
-			   AND folder_path >= ? COLLATE NOCASE
-			   AND folder_path < ? COLLATE NOCASE
-			 ORDER BY folder_path COLLATE NOCASE LIMIT 10`,
-			lo, hi)
-	}
-	if len(folders) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	items := make([]suggestItem, len(folders))
-	for i, fp := range folders {
-		items[i] = suggestItem{Name: fp}
-	}
-	s.renderSuggestList(w, `data-folder-path`, `onclick="applyLabelSuggest(this, 'folderPath')"`, items)
-}
-
 func (s *Server) collectionSuggest(w http.ResponseWriter, r *http.Request) {
 	s.renderLabelSuggest(w, r, s.queryCollectionLabels)
 }

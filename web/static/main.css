@@ -1389,7 +1389,6 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .series-input-wrap input { width: 100%; }
 .suggest-dropdown.series-suggest-dropdown,
 .suggest-dropdown.tag-suggest-dropdown,
-.suggest-dropdown.folder-suggest-dropdown,
 #search-suggest {
   position: absolute;
   top: 100%;
@@ -1400,7 +1399,6 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 #search-suggest { z-index: 100; }
 .series-suggest-dropdown .suggest-list,
 .tag-suggest-dropdown .suggest-list,
-.folder-suggest-dropdown .suggest-list,
 #search-suggest .suggest-list {
   position: static;
   width: 100%;
