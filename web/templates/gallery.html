@@ -187,11 +187,11 @@
   <form id="batch-place-form" onsubmit="event.preventDefault(); confirmBatchPlace();">
     <input type="hidden" id="batch-place-scope">
     <div class="field">
-      {{template "dest_row" dict "Prefix" "batch-place" "NamePlaceholder" "(keep each name)" "NameHint" "Blank = the name it has."}}
-      {{template "partials/name_tokens.html" (dict "Targets" "batch-place-folder batch-place-name" "Batch" true "Folder" true)}}
+      {{template "dest_row" dict "Prefix" "batch-place" "Folder" .PlaceFolder "NamePlaceholder" "(keep each name)" "NameHint" "Blank = the name it has."}}
+      {{template "partials/name_tokens.html" (dict "Targets" "batch-place-folder-input batch-place-name" "Batch" true "Folder" true)}}
       <div id="batch-place-preview"
            hx-get="/internal/name/preview"
-           hx-trigger="input delay:200ms from:#batch-place-folder, input delay:200ms from:#batch-place-name, preview"
+           hx-trigger="input delay:200ms from:#batch-place-folder-input, change from:#batch-place-folder-input, input delay:200ms from:#batch-place-name, preview"
            hx-vals='js:{...namePreviewVals("batch-place", "place-batch")}'></div>
       <button type="button" class="name-preview-more" id="batch-place-check"
               onclick="checkBatchPlaceCollisions()">check every image for name clashes</button>
@@ -389,9 +389,9 @@ function confirmBatchDelete() {
 // spans folders.
 function openBatchPlaceDialog(scope) {
   openBatchDialog('batch-place', scope, {
-    clearIds: ['batch-place-folder', 'batch-place-name', 'batch-place-suggest', 'batch-place-preview'],
+    clearIds: ['batch-place-folder-input', 'batch-place-name', 'batch-place-folder-suggest', 'batch-place-preview'],
     beforeShow: function() {
-      document.getElementById('batch-place-folder').value = '{folder}';
+      document.getElementById('batch-place-folder-input').value = '{folder}';
       delete document.getElementById('batch-place-preview').dataset.rows;
       var n = scopeCount(document.getElementById('batch-place-scope').value);
       document.getElementById('batch-place-check').textContent = n === null
@@ -403,7 +403,7 @@ function openBatchPlaceDialog(scope) {
 }
 
 function batchPlaceParams() {
-  return ['folder=' + encodeURIComponent(document.getElementById('batch-place-folder').value),
+  return ['folder=' + encodeURIComponent(document.getElementById('batch-place-folder-input').value),
           'name=' + encodeURIComponent(document.getElementById('batch-place-name').value)];
 }
 

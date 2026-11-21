@@ -19,14 +19,7 @@
 {{define "dest_row"}}
       <div class="dest-row">
         <div class="dest-part">
-          <label for="{{.Prefix}}-folder">folder</label>
-          <input type="text" name="folder" id="{{.Prefix}}-folder" autocomplete="off"
-                 hx-get="/internal/folders/suggest"
-                 hx-trigger="input changed delay:200ms"
-                 hx-target="#{{.Prefix}}-suggest"
-                 hx-vals='js:{prefix: document.getElementById("{{.Prefix}}-folder").value}'
-                 onkeydown="handleSuggestKey(event, '{{.Prefix}}-suggest', '{{.Prefix}}-folder')">
-          <div id="{{.Prefix}}-suggest" class="suggest-dropdown folder-suggest-dropdown"></div>
+          {{template "webui/folder_picker" .Folder}}
         </div>
         <span class="dest-sep" aria-hidden="true">/</span>
         <div class="dest-part">

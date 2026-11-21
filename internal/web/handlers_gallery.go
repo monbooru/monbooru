@@ -60,6 +60,7 @@ type galleryData struct {
 	InboxUploadActive bool
 	AcceptFileTypes   string
 	UploadFolder      webui.FolderPicker
+	PlaceFolder       webui.FolderPicker
 	SimilarityPercent map[int64]int
 	SortSelectOOB     bool
 	PluginSlot        pluginSlotView
@@ -332,6 +333,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
 		data.UploadFolder = s.folderPicker("upload")
 	}
+	data.PlaceFolder = s.folderPicker("batch-place")
 	data.HiddenByCeiling = hiddenByCeiling
 	var first, last int64
 	if n := len(result.Results); n > 0 && search.CursorPaging(sq) {

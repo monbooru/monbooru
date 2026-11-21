@@ -2616,7 +2616,7 @@ function namePreviewVals(prefix, scope) {
   var slot = document.getElementById(prefix + '-preview');
   var rows = parseInt(slot && slot.dataset.rows, 10) || 5;
   var vals = {
-    folder: document.getElementById(prefix + '-folder').value,
+    folder: document.getElementById(prefix + '-folder-input').value,
     name: document.getElementById(prefix + '-name').value,
     scope: scope,
     rows: rows,
@@ -3160,8 +3160,6 @@ function handleSuggestKey(e, dropdownId, inputId) {
 var suggestPairs = {
   'search-suggest': {input: 'search-input', blurOnSubmit: true, clearOnEmpty: true},
   'tag-suggest-dropdown': {input: 'tag-input', clearOnEmpty: true},
-  'batch-place-suggest': {input: 'batch-place-folder'},
-  'place-image-suggest': {input: 'place-image-folder'},
   'batch-tag-suggest': {input: 'batch-tag-input', clearOnEmpty: true},
   'batch-strip-suggest': {input: 'batch-strip-input', clearOnEmpty: true},
   'source-suggest': {input: 'source-site-input'},

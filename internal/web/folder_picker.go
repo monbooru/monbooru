@@ -22,6 +22,14 @@ var folderPickerKinds = map[string]webui.FolderPicker{
 		Route: folderPickerRoute, Kind: "upload", ID: "upload-folder", Name: "folder", Label: "Folder",
 		NewHint: "Not in the gallery yet; the upload creates it.",
 	},
+	// The move dialogs take a name template, so a folder they do not hold
+	// yet may be one the tokens build: no hint for it.
+	"batch-place": {
+		Route: folderPickerRoute, Kind: "batch-place", ID: "batch-place-folder", Name: "folder", Label: "folder", Blank: "(gallery root)",
+	},
+	"place-image": {
+		Route: folderPickerRoute, Kind: "place-image", ID: "place-image-folder", Name: "folder", Label: "folder", Blank: "(gallery root)",
+	},
 }
 
 var errFolderGone = errors.New("folder not found")
