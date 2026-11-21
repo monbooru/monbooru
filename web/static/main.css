@@ -2581,6 +2581,9 @@ body.reader-body {
 .peer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .peer-address { color: var(--fg-dim); }
 .worker-table .worker-name { white-space: nowrap; }
+.worker-actions { display: inline-grid; grid-template-columns: repeat(2, 5.5em); gap: 6px; }
+.worker-act-state { grid-column: 1; }
+.worker-act-remove { grid-column: 2; }
 .peer-line { margin-top: 4px; font-size: 12px; }
 .peer-label { display: inline-block; min-width: 64px; color: var(--fg-dim); }
 #plugins .peer-row .field { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 12px; }

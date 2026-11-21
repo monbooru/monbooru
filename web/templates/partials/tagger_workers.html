@@ -44,17 +44,19 @@
         <td data-label="State"{{if eq .State "standby"}} title="Takes calls only when no paired worker can"{{end}}>{{.State}}</td>
         <td data-label="Models">{{if .Missing}}<span class="field-hint">No monworker beside monbooru or on PATH.</span>{{else}}{{range $i, $m := .Models}}{{if $i}}, {{end}}{{$m.Name}}{{with $m.Differs}} <span class="status-badge status-warn" title="Not the files {{.}} holds under this name">differs</span>{{end}}{{else}}<span class="status-dim">-</span>{{end}}{{end}}</td>
         <td class="cell-action">
+          {{if and .Local $.LocalPin}}<span class="field-hint">Set by {{$.LocalPin}}</span>
+          {{else}}<div class="worker-actions">
           {{if .Local}}
-            {{if $.LocalPin}}<span class="field-hint">Set by {{$.LocalPin}}</span>
-            {{else if .Disabled}}<button type="button" class="btn-sm btn-success" hx-post="/settings/workers/local/enable" hx-swap="none">Enable</button>
-            {{else}}<button type="button" class="btn-sm" hx-post="/settings/workers/local/disable" hx-swap="none">Disable</button>{{end}}
+            {{if .Disabled}}<button type="button" class="btn-sm btn-success worker-act-state" hx-post="/settings/workers/local/enable" hx-swap="none">Enable</button>
+            {{else}}<button type="button" class="btn-sm worker-act-state" hx-post="/settings/workers/local/disable" hx-swap="none">Disable</button>{{end}}
           {{else}}
-            {{if .Paused}}<button type="button" class="btn-sm" hx-post="/settings/workers/{{.Name}}/resume" hx-target="#tagger-workers" hx-swap="outerHTML">Resume</button>
-            {{else}}<button type="button" class="btn-sm" hx-post="/settings/workers/{{.Name}}/pause" hx-target="#tagger-workers" hx-swap="outerHTML">Pause</button>{{end}}
-            <button type="button" class="btn-sm btn-danger" hx-post="/settings/workers/{{.Name}}/remove" hx-target="#tagger-workers" hx-swap="outerHTML"
+            {{if .Paused}}<button type="button" class="btn-sm worker-act-state" hx-post="/settings/workers/{{.Name}}/resume" hx-target="#tagger-workers" hx-swap="outerHTML">Resume</button>
+            {{else}}<button type="button" class="btn-sm worker-act-state" hx-post="/settings/workers/{{.Name}}/pause" hx-target="#tagger-workers" hx-swap="outerHTML">Pause</button>{{end}}
+            <button type="button" class="btn-sm btn-danger worker-act-remove" hx-post="/settings/workers/{{.Name}}/remove" hx-target="#tagger-workers" hx-swap="outerHTML"
                     hx-confirm="Remove the worker {{.Name}}?" data-confirm-ok="Remove"
                     data-confirm-danger="{{.Name}} must pair again before monbooru can tag with it.">Remove</button>
           {{end}}
+          </div>{{end}}
         </td>
       </tr>
       {{end}}
