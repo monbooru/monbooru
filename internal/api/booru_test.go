@@ -615,6 +615,45 @@ func TestBooruLookups(t *testing.T) {
 	}
 }
 
+func TestBooruTagList(t *testing.T) {
+	env, base, _ := booruEnv(t)
+	second := env.createTestImage(t, "second.png", 20, 20)
+	body, _ := json.Marshal(map[string]any{"tags": []string{"blue_sky", "sky_b"}})
+	mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", second), body), http.StatusOK)
+	cases := []struct {
+		query string
+		want  []string
+	}{
+		// How the apps list the popular tags.
+		{"search[order]=count&limit=3", []string{"blue_sky", "greyscale", "lowres"}},
+		{"search[order]=count&limit=3&page=2", []string{"char_a", "sky_b", "user_a"}},
+		{"search[order]=name&limit=2", []string{"blue_sky", "char_a"}},
+		{"search[name_matches]=b*", []string{"blue_sky"}},
+		{"search[name_matches]=*b*&search[order]=count", []string{"blue_sky", "sky_b"}},
+		{"search[name_matches]=*_b", []string{"sky_b"}},
+		{"search[name_matches]=sky_b", []string{"sky_b"}},
+		{"search[name_matches]=sky", nil},
+		{"search[name_matches]=Blue Sky", []string{"blue_sky"}},
+		{"search[name_comma]=user_a,blue_sky&search[order]=count", []string{"blue_sky", "user_a"}},
+		{"search[name_comma]=user_a,blue_sky&search[order]=name", []string{"blue_sky", "user_a"}},
+		// Ratings stay out, as they are a metatag on Danbooru.
+		{"search[name_matches]=expl*", nil},
+	}
+	for _, tc := range cases {
+		w := env.do("GET", base+"/tags.json?"+strings.ReplaceAll(tc.query, " ", "%20"))
+		mustCode(t, w, http.StatusOK)
+		var got []booruTagJSON
+		mustDecode(t, w, &got)
+		var names []string
+		for _, tag := range got {
+			names = append(names, tag.Name)
+		}
+		if !slices.Equal(names, tc.want) {
+			t.Errorf("tags.json?%s = %v, want %v", tc.query, names, tc.want)
+		}
+	}
+}
+
 func TestBooruTagNamesCap(t *testing.T) {
 	env, base, _ := booruEnv(t)
 	filler := func(n int) []string {
