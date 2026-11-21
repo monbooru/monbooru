@@ -971,8 +971,11 @@ func buildSpec(baseURL string) map[string]any {
 					}),
 			},
 			"/pair/check": map[string]any{
-				"post": op("Check the pairing still holds", "pairCheck",
+				"post": opBody("Check the pairing still holds", "pairCheck",
 					nil,
+					jsonBodySchema(false, objectSchema(nil, map[string]any{
+						"url": map[string]any{"type": "string", "description": "Where monbooru reaches the client now, as in the offer; monbooru follows it on the host the check came from"},
+					})),
 					map[string]any{
 						"200": map[string]any{"description": "Still paired: {\"status\": \"approved\"}", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{"status": map[string]any{"type": "string", "enum": []string{"approved"}}})}}},
 						"401": resp("The bearer is not a paired token: offer again (unauthorized)", "#/components/schemas/Error"),

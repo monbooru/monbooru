@@ -139,3 +139,19 @@ func TestAWorkerLearnsAtStartWhetherItsPairingStillHolds(t *testing.T) {
 		t.Errorf("check after a removal here: %d %s, want 401", rr.Code, rr.Body)
 	}
 }
+
+func TestAWorkerThatMovedIsCalledWhereItSaysAtItsCheck(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	_, out := pairStatus(t, srv, id)
+	mustCode(t, checkPairing(srv, out["token"], `{"app":"monworker","label":"gpu-box","url":"http://localhost:61234"}`), http.StatusOK)
+	cfg := srv.cfgSnapshot()
+	if len(cfg.Workers) != 1 || cfg.Workers[0].URL != "http://127.0.0.1:61234" {
+		t.Errorf("workers = %+v, want gpu-box at its new port", cfg.Workers)
+	}
+	if tok := cfg.Auth.Tokens.Paired(peer.WorkerKey("gpu-box")); tok == nil || tok.PeerURL != "http://127.0.0.1:61234" {
+		t.Errorf("token = %+v, want it pointing at the new port", tok)
+	}
+}

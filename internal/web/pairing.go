@@ -3,6 +3,7 @@ package web
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -159,6 +160,10 @@ func (s *Server) pairCheck(w http.ResponseWriter, r *http.Request) {
 		pairRefuse(w, pairing.NoPairingToken())
 		return
 	}
+	// It also says where it listens now: a new port, or a new host.
+	var body pairing.RequestBody
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+	s.repointPeer(secret, body.URL, session.ClientIP(r))
 	contract.WriteJSON(w, http.StatusOK, pairing.StatusBody{Status: pairing.Approved})
 }
 
@@ -167,20 +172,22 @@ func (s *Server) pairCheck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) notePeerAddress(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			s.repointPeer(secret, session.ClientIP(r))
+			s.repointPeer(secret, "", session.ClientIP(r))
 		}
 		next(w, r)
 	}
 }
 
-func (s *Server) repointPeer(secret, source string) {
+// repointPeer moves the peer holding secret to advertised, else to the
+// address it has, on the host it called from.
+func (s *Server) repointPeer(secret, advertised, source string) {
 	s.cfgMu.RLock()
 	var app, was string
 	if tok := s.cfg.Auth.Tokens.ByHash(apitoken.Hash(secret)); tok != nil {
 		app, was = tok.Paired, tok.PeerURL
 	}
 	s.cfgMu.RUnlock()
-	moved := peer.CallbackURL(was, source)
+	moved := peer.CallbackURL(cmp.Or(advertised, was), source)
 	if app == "" || moved == was {
 		return
 	}
