@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,36 @@ func TestFolderPickerOnTheUploadForm(t *testing.T) {
 			for _, s := range tc.wantNot {
 				wantNotIn(t, w.Body.String(), s)
 			}
+		})
+	}
+}
+
+func TestFolderPickerInTheMoveDialogsAndSettings(t *testing.T) {
+	srv := newTestServer(t)
+	id := seedImage(t, srv, filepath.Join(mkFolder(t, srv, "art"), "a.png"), 8, 8)
+	srv.cfgMu.Lock()
+	srv.cfg.Gallery.DefaultUploadFolder = "art/{year}"
+	srv.cfgMu.Unlock()
+	cases := []struct {
+		name, path string
+		want       []string
+	}{
+		{"the batch move", "/",
+			[]string{`id="batch-place-folder-input" name="folder"`, `hx-get="/internal/folder-picker/level?kind=batch-place`, `change from:#batch-place-folder-input`}},
+		{"the image move", "/images/" + strconv.FormatInt(id, 10),
+			[]string{`id="place-image-folder-input" name="folder"`, `hx-get="/internal/folder-picker/level?kind=place-image`, `change from:#place-image-folder-input`}},
+		{"the default upload folder, holding its template", "/settings",
+			[]string{`id="default-upload-folder-input" name="default_upload_folder" value="art/{year}"`, `hx-get="/internal/folder-picker/level?kind=default-upload`, `change from:#default-upload-folder-input`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(srv, "GET", tc.path)
+			mustCode(t, w, http.StatusOK)
+			for _, s := range tc.want {
+				wantIn(t, w.Body.String(), s)
+			}
+			// A template names folders the tokens build, so no hint says it is new.
+			wantNotIn(t, w.Body.String(), "Not in the gallery yet")
 		})
 	}
 }
@@ -67,6 +98,11 @@ func TestFolderPickerListsTheActiveGallery(t *testing.T) {
 		{"no suggestion the ceiling hides", "/suggest?kind=upload&folder=nsfw", [][2]string{ceiling}, http.StatusOK,
 			nil, []string{`data-folder-suggest`}},
 		{"an unknown kind", "/level?kind=nope&path=", nil, http.StatusNotFound, nil, nil},
+		// Every field lists the same tree, and suggests from its own name.
+		{"the batch move's level", "/level?kind=batch-place&path=art", nil, http.StatusOK, []string{`data-folder-pick="art/sky"`}, nil},
+		{"the image move's level", "/level?kind=place-image&path=", nil, http.StatusOK, []string{`data-folder-pick="safe"`}, nil},
+		{"the default folder's suggestions", "/suggest?kind=default-upload&default_upload_folder=sk", nil, http.StatusOK,
+			[]string{`data-folder-suggest="art/sky"`}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
