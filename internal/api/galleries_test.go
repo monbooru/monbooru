@@ -49,7 +49,7 @@ func TestListFolders(t *testing.T) {
 		name   string
 		images []image
 		query  string
-		want   []string // path:name=images/folders
+		want   []string
 		total  int
 	}{
 		{"empty gallery", nil, "", []string{}, 0},

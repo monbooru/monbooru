@@ -13,7 +13,6 @@ func addSourceRow(t *testing.T, database *db.DB, imageID int64, site, postID, ur
 		imageID, site, postID, url)
 }
 
-// dupTrio groups orig with b and c and checks orig stays the original.
 func dupTrio(t *testing.T) (database *db.DB, svc *Service, orig, b, c, gid int64) {
 	t.Helper()
 	database, svc = setupTestDB(t)
@@ -139,8 +138,8 @@ func TestCopySourcesMarksASimilarityMatch(t *testing.T) {
 func TestCopySourcesLeavesPTRSources(t *testing.T) {
 	cases := []struct {
 		name    string
-		sources []string // sites on the duplicate
-		want    string   // sites copied, in order
+		sources []string
+		want    string
 	}{
 		{"a PTR origin stays", []string{"ptr"}, ""},
 		{"whatever its case", []string{"PTR"}, ""},
@@ -203,7 +202,7 @@ func TestCopySourcesScalesNotesToTheOriginal(t *testing.T) {
 		name         string
 		origW, origH any
 		dupW, dupH   any
-		want         string // x,y,w,h on the original; empty when no note is copied
+		want         string
 	}{
 		{"same size", 1000, 500, 1000, 500, "10,20,30,40"},
 		{"the original is twice as large", 2000, 1000, 1000, 500, "20,40,60,80"},

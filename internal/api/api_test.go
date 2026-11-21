@@ -1392,7 +1392,7 @@ func TestEnrichImage_RefreshesASourceCopiedFromADuplicate(t *testing.T) {
 	if err := env.database.Read.QueryRow(`SELECT group_id FROM dup_group_members WHERE image_id = ?`, orig).Scan(&gid); err != nil {
 		t.Fatal(err)
 	}
-	// The duplicate's post serves the duplicate's file, not the original's.
+
 	dupMD5 := strings.Repeat("d", 32)
 	mustExec(t, env.database.Write, `INSERT INTO image_sources (image_id, site, post_id, url, md5) VALUES (?, 'site_b', '7', 'https://b.example/7', ?)`, dup, dupMD5)
 	if added, err := svc.CopySourcesFromDuplicatesToOriginal(gid); err != nil || added != 1 {
