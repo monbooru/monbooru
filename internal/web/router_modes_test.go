@@ -321,3 +321,14 @@ func TestImageBytesStreamWithoutTheGalleryLock(t *testing.T) {
 		<-done
 	}
 }
+
+func TestThePolledRoutesLogAtDebug(t *testing.T) {
+	for _, p := range []string{"/internal/job/status", "/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status"} {
+		if !isNoisyPath(p) {
+			t.Errorf("%s logs at info", p)
+		}
+	}
+	if isNoisyPath("/api/v1/pair/request") {
+		t.Error("an offer logs at debug")
+	}
+}

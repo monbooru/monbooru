@@ -695,7 +695,8 @@ func (s *Server) apiResolver(name string) (*library.Gallery, bool) {
 
 func isNoisyPath(path string) bool {
 	switch path {
-	case "/internal/job/status", "/internal/monloader-status", "/health":
+	case "/internal/job/status", "/internal/monloader-status", "/health",
+		"/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status":
 		return true
 	}
 	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/")
