@@ -75,6 +75,7 @@ var galleryCallsOutsideADoor = []string{
 	"gallery.RewrittenBy",
 	"gallery.SanitizeReceivedName",
 	"gallery.ScanEmptyDirs",
+	"gallery.SearchFolders",
 	"gallery.SourcesForImage",
 	"gallery.SourceSimilarityMatched",
 	"gallery.SuppressesIngest",

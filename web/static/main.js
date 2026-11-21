@@ -3352,6 +3352,15 @@ document.addEventListener('DOMContentLoaded', function() {
   setFocused(cells, cells.indexOf(target), 'center');
 });
 
+// The upload form's folder, carried over the grid's swaps, which redraw the
+// form: the refresh after an upload, a page change. It is read as the swap
+// begins, so a folder typed, picked or emptied since is the one kept.
+var _inboxUploadFolder = '';
+document.addEventListener('htmx:beforeSwap', function(e) {
+  var field = document.getElementById('upload-folder-input');
+  if (field && e.detail.target && e.detail.target.contains(field)) _inboxUploadFolder = field.value.trim();
+});
+
 function initInboxUpload() {
   var dz = document.getElementById('inbox-upload-drop');
   var input = document.getElementById('inbox-upload-file-input');
@@ -3364,6 +3373,8 @@ function initInboxUpload() {
   // A property: a Back's snapshot would keep a data- flag, not the listeners.
   if (!dz || !input || !list || !form || dz.inboxWired) return;
   dz.inboxWired = true;
+  var folderPicker = document.getElementById('upload-folder');
+  if (folderPicker && _inboxUploadFolder) folderPick(folderPicker, _inboxUploadFolder);
 
   // The file picker replaces input.files on every change, so picks
   // accumulate here and are copied back.
@@ -3382,7 +3393,8 @@ function initInboxUpload() {
     input.files = _pending.files;
     var empty = files.length === 0;
     if (submitBtn) submitBtn.disabled = empty;
-    if (resetBtn) resetBtn.disabled = empty;
+    // A folder kept from the last upload is something to clear too.
+    if (resetBtn) resetBtn.disabled = empty && !_inboxUploadFolder;
   }
 
   function appendFiles(incoming) {
@@ -3403,7 +3415,12 @@ function initInboxUpload() {
     pickBtn.addEventListener('click', function(e) { e.preventDefault(); input.click(); });
   }
   if (resetBtn) {
-    resetBtn.addEventListener('click', function(e) { e.preventDefault(); clearPending(); });
+    resetBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      _inboxUploadFolder = '';
+      if (folderPicker) folderPick(folderPicker, '');
+      clearPending();
+    });
   }
   renderList();
 
@@ -3421,13 +3438,15 @@ function initInboxUpload() {
   // htmx:xhr:progress fires for the response download too; the latch
   // keeps its events from rewinding the counter.
   var uploadDone = false;
-  form.addEventListener('htmx:beforeRequest', function() {
+  form.addEventListener('htmx:beforeRequest', function(e) {
+    // The picker's own requests bubble up here too.
+    if (e.target !== e.currentTarget) return;
     uploadDone = false;
     if (submitBtn) submitBtn.disabled = true;
     if (result) result.innerHTML = '<div class="field-hint">Uploading...</div>';
   });
   form.addEventListener('htmx:xhr:progress', function(e) {
-    if (uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
+    if (e.target !== e.currentTarget || uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
     var pct = Math.round((e.detail.loaded / e.detail.total) * 100);
     if (pct >= 100) {
       uploadDone = true;
@@ -3437,6 +3456,7 @@ function initInboxUpload() {
     result.innerHTML = '<div class="field-hint">Uploading... ' + pct + '%</div>';
   });
   form.addEventListener('htmx:afterRequest', function(e) {
+    if (e.target !== e.currentTarget) return;
     if (submitBtn) submitBtn.disabled = false;
     if (!e.detail.successful) {
       if (result && !result.querySelector('.flash')) setFlashText(result, 'err', 'Upload failed: nothing was uploaded.');

@@ -31,15 +31,6 @@ func (h *Handler) listGalleries(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, out)
 }
 
-// One level at a time, as the sidebar: a {hash:4} layout holds tens of
-// thousands of folders.
-const folderPageSize = 500
-
-const (
-	folderSearchLimit = 10
-	folderSearchMax   = 100
-)
-
 // Folders come from the images, so an empty folder on disk is not listed;
 // a send to a folder that does not exist yet still creates it.
 func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.FolderNode, bool) {
@@ -55,7 +46,9 @@ func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.
 	return tree, true
 }
 
-func folderOf(n *gallery.FolderNode) contract.Folder {
+// FolderOf is one folder of a listing; the web UI's folder picker reads
+// its rows the same way.
+func FolderOf(n *gallery.FolderNode) contract.Folder {
 	return contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
 }
 
@@ -71,47 +64,26 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 		contract.WriteError(w, http.StatusNotFound, contract.CodeFolderNotFound, "folder not found: "+path)
 		return
 	}
-	offset, limit := parsePage(r, folderPageSize, folderPageSize)
-	kids := node.Children
-	page := kids[min(offset, len(kids)):min(offset+limit, len(kids))]
+	offset, limit := parsePage(r, contract.FolderPageSize, contract.FolderPageSize)
+	page := node.ChildrenPage(offset, limit)
 	out := make([]contract.Folder, len(page))
 	for i := range page {
-		out[i] = folderOf(&page[i])
+		out[i] = FolderOf(&page[i])
 	}
-	writePage(w, offset/limit+1, limit, len(kids), out)
+	writePage(w, offset/limit+1, limit, len(node.Children), out)
 }
 
-// Folders whose path holds q, any case, those starting with it first, in
-// path order. A walk of the cached tree: no query per keystroke.
 func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
 	tree, ok := h.folderTree(w, r)
 	if !ok {
 		return
 	}
 	q := r.URL.Query()
-	_, limit := contract.PageParams("", q.Get("limit"), folderSearchLimit, folderSearchMax)
-	needle := strings.ToLower(strings.TrimSpace(q.Get("q")))
-	starts, holds := []contract.Folder{}, []contract.Folder{}
-	var walk func(nodes []gallery.FolderNode) bool
-	walk = func(nodes []gallery.FolderNode) bool {
-		for i := range nodes {
-			n := &nodes[i]
-			path := strings.ToLower(n.Path)
-			switch {
-			case strings.HasPrefix(path, needle):
-				starts = append(starts, folderOf(n))
-			case len(holds) < limit && strings.Contains(path, needle):
-				holds = append(holds, folderOf(n))
-			}
-			if len(starts) >= limit || !walk(n.Children) {
-				return false
-			}
-		}
-		return true
+	_, limit := contract.PageParams("", q.Get("limit"), contract.FolderSearchLimit, contract.FolderSearchMax)
+	found := gallery.SearchFolders(tree, q.Get("q"), limit)
+	out := make([]contract.Folder, len(found))
+	for i, n := range found {
+		out[i] = FolderOf(n)
 	}
-	if root := gallery.FindFolder(tree, ""); needle != "" && root != nil {
-		walk(root.Children)
-	}
-	out := append(starts, holds...)
-	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out[:min(len(out), limit)]})
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }
