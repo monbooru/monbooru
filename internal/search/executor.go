@@ -18,7 +18,7 @@ import (
 
 type Query struct {
 	Expr        Expr
-	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity"
+	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity" | "id"
 	Order       string // "asc" | "desc"
 	RandomSeed  int64
 	Page        int // 1-based
@@ -1206,6 +1206,9 @@ func buildOrder(sort, order string, randomSeed int64) string {
 		// total.
 		dir := sqlDir(order, "ASC")
 		return "ORDER BY i.series " + dir + ", i.series_order IS NULL, i.series_order " + dir + ", i.id " + dir
+	case "id":
+		// The Danbooru layer pages by id, as Danbooru does.
+		return "ORDER BY i.id " + sqlDir(order, "DESC")
 	case "random":
 		if randomSeed != 0 {
 			// %d emits only digits, so the seed interpolation is
