@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
@@ -43,6 +45,9 @@ type workersData struct {
 	LocalFound bool
 	LocalPin   string
 	OOB        bool
+	// MonbooruURL is base_url when a worker on another machine can use
+	// it; LoopbackBind the bind address when it listens on loopback only.
+	MonbooruURL, LoopbackBind string
 	// Swap carries the settings nav's count of requests waiting here, on
 	// every answer but the page's own render.
 	Swap bool
@@ -56,6 +61,12 @@ func (d workersData) None() bool {
 func (s *Server) workersView() workersData {
 	cfg := s.cfgSnapshot()
 	d := workersData{LocalFound: s.local != nil && s.local.path != "", LocalPin: cfg.EnvPinned("tagger.local_worker")}
+	if u, err := url.Parse(cfg.Server.BaseURL); err == nil && u.Host != "" && !desktop.IsLoopbackAddr(u.Host) {
+		d.MonbooruURL = cfg.Server.BaseURL
+	}
+	if desktop.IsLoopbackAddr(cfg.Server.BindAddress) {
+		d.LoopbackBind = cfg.Server.BindAddress
+	}
 	views := tagger.CurrentPool().Workers()
 	switch {
 	case slices.ContainsFunc(views, func(v tagger.WorkerView) bool { return v.Local }):

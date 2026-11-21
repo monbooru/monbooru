@@ -271,3 +271,27 @@ func TestTheStatsBlockListsEveryWorker(t *testing.T) {
 	wantNotIn(t, attic, "Mode")
 	wantNotIn(t, compact, "WorkerPID")
 }
+
+func TestTheWorkersHintGivesMonbooruAddressAndWarnsOnLoopback(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://192.168.1.5:8455", "127.0.0.1:8455"
+	})
+	body := hintAt(srv, "192.168.1.5:8455")
+	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL=http://192.168.1.5:8455</code>")
+	wantIn(t, body, "monbooru listens on 127.0.0.1:8455 only, which another machine cannot reach")
+
+	srv = newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://localhost:8455", "0.0.0.0:8455"
+	})
+	body = hintAt(srv, "localhost:8455")
+	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL</code> set to monbooru's address on your network")
+	wantNotIn(t, body, "listens on")
+}
+
+func hintAt(srv *Server, host string) string {
+	req := httptest.NewRequest("GET", "/internal/workers", nil)
+	req.Host = host
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	return rr.Body.String()
+}
