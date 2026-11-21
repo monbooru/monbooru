@@ -27,7 +27,7 @@ import (
 
 // The booru layer answers like a read-only Danbooru server, so booru client
 // apps can browse a gallery. Each gallery has its own address,
-// /booru/{gallery}/{key}/, keyed by the one token Settings picks: the apps
+// /booru/{gallery}/{key}/, keyed by the endpoint's own token: the apps
 // send no credentials when they load images or notes, so the key in the
 // path is the only auth.
 
