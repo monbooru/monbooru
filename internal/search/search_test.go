@@ -4833,6 +4833,31 @@ func TestExecute_IDFilter(t *testing.T) {
 	}
 }
 
+func TestExecute_IDRange(t *testing.T) {
+	database, env := setupSearchDB(t)
+	a := ingestTestImageWithID(t, database, env, "a.png")
+	b := ingestTestImageWithID(t, database, env, "b.png")
+	c := ingestTestImageWithID(t, database, env, "c.png")
+	id := func(n int64) string { return strconv.FormatInt(n, 10) }
+	cases := []struct {
+		query string
+		want  []int64
+	}{
+		{"id:>" + id(a), []int64{b, c}},
+		{"id:>=" + id(b), []int64{b, c}},
+		{"id:<" + id(c), []int64{a, b}},
+		{"id:<=" + id(a), []int64{a}},
+		{"id:" + id(a) + ".." + id(b), []int64{a, b}},
+		{"id:" + id(b) + "..", []int64{b, c}},
+		{"id:.." + id(b), []int64{a, b}},
+		{"-id:" + id(b), []int64{a, c}},
+		{"id:>nope", nil},
+	}
+	for _, tc := range cases {
+		checkSearchIDs(t, database, tc.query, tc.want)
+	}
+}
+
 func TestExecute_BatchFilter(t *testing.T) {
 	database, env := setupSearchDB(t)
 	a := ingestTestImageWithID(t, database, env, "a.png")
