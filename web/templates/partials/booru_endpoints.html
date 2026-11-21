@@ -1,0 +1,45 @@
+{{define "partials/booru_endpoints.html"}}
+<div id="booru-endpoints"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{if .View.Exists}}
+  {{with .View.Unreachable}}<div class="flash flash-warn">{{.}}</div>{{end}}
+  {{with .View.Addresses}}
+  <div class="table-scroll">
+  <table class="data-table stack-table booru-table">
+    <thead><tr><th>Gallery</th><th>On</th><th>Address</th></tr></thead>
+    <tbody>
+      {{range .}}
+      <tr>
+        <td class="stack-head"><strong>{{.Gallery}}</strong></td>
+        <td data-label="On">
+          <form hx-post="/settings/auth/booru-gallery" hx-target="#flash-auth" hx-swap="innerHTML" hx-trigger="change">
+            <input type="hidden" name="gallery" value="{{.Gallery}}">
+            <input type="checkbox" name="on" value="1" aria-label="{{.Gallery}} answers at its address"{{if .On}} checked{{end}}>
+          </form>
+        </td>
+        <td data-label="Address">
+          {{if .On}}
+          <button type="button" class="mono-small sha-copyable" data-copy="{{.URL}}" title="Click to copy">{{.URL}}</button>
+          <span class="copy-flash" hidden>copied</span>
+          {{else}}
+          <span class="field-hint">Off</span>
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{end}}
+  <button type="button" class="btn-sm btn-danger" style="margin-top:8px"
+          hx-delete="/settings/auth/booru-endpoint"
+          hx-target="#flash-auth" hx-swap="innerHTML"
+          hx-confirm="Remove the Danbooru compatible endpoint?"
+          data-confirm-ok="Remove"
+          data-confirm-danger="Its token is revoked and the Danbooru compatible addresses are disabled.">Remove endpoint</button>
+  {{else}}
+  <button type="button" class="btn-link-accent"
+          hx-post="/settings/auth/booru-endpoint"
+          hx-target="#flash-auth" hx-swap="innerHTML">[+ create danbooru compatible endpoint]</button>
+  {{end}}
+</div>
+{{end}}

@@ -98,6 +98,7 @@ var Expansions = map[string][]string{
 	"ratio":      {">=", "<=", ">", "<", "=", ".."},
 	"tagcount":   {">=", "<=", ">", "<", "=", ".."},
 	"duration":   {">=", "<=", ">", "<", "=", ".."},
+	"id":         {">=", "<=", ">", "<", "=", ".."},
 	"mime":       {"jpeg", "png", "webp", "avif", "jxl", "gif", "mp4", "webm", "cbz"},
 	"via":        {"ingest", "upload", "extract", "generate"},
 	"relation":   {"duplicate", "original", "alternate", "version", "derivative", "source", "collection", "any", "none"},
@@ -110,6 +111,7 @@ var Expansions = map[string][]string{
 var ordinalKeys = map[string]bool{
 	"width": true, "height": true, "date": true, "size": true,
 	"ratio": true, "tagcount": true, "duration": true, "pages": true,
+	"id": true,
 }
 
 func IsOrdinal(key string) bool { return ordinalKeys[key] }
@@ -219,6 +221,7 @@ var ExpansionDescriptions = map[string]map[string]string{
 		"..": "range",
 	},
 	"tagcount": numericComparisons,
+	"id":       numericComparisons,
 	"duration": {
 		">=": "at least N seconds",
 		"<=": "at most N seconds",

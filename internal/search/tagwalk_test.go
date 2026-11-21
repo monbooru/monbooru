@@ -128,6 +128,70 @@ func TestExecute_TheTagWalkPagesAsTheSortIndexDoes(t *testing.T) {
 	}
 }
 
+func TestExecute_TheTagWalkPagesByIDAsSQLDoes(t *testing.T) {
+	database, _ := setupSearchDB(t)
+	seedWalkFixture(t, database)
+	var mid int64
+	if err := database.Read.QueryRow(`SELECT id FROM images ORDER BY id LIMIT 1 OFFSET 45`).Scan(&mid); err != nil {
+		t.Fatal(err)
+	}
+	m := fmt.Sprint(mid)
+	cases := []struct {
+		query, order string
+	}{
+		{"walk_a", "desc"},
+		{"walk_a", "asc"},
+		{"walk_a id:<" + m, "desc"},
+		{"walk_a id:<=" + m, "desc"},
+		{"walk_a walk_b id:>" + m, "asc"},
+		{"walk_a id:>=" + m, "asc"},
+		// A bound on the far side leaves the walk's start alone.
+		{"walk_b id:>" + m, "desc"},
+		{"walk_b id:<" + m, "asc"},
+		{"walk_c -id:<" + m, "desc"},
+	}
+	for _, tc := range cases {
+		q := Query{Expr: Parse(tc.query), Sort: "id", Order: tc.order, Page: 1, Limit: 4, SkipCount: true}
+		if _, ok := tagWalkLegs(testSource(database), q); !ok {
+			t.Fatalf("%s: not a walk", tc.query)
+		}
+		full := sqlOrderIDs(t, database, q)
+		want := full[:min(4, len(full))]
+		if got := pageIDs(mustExecute(t, database, q)); !slices.Equal(got, want) {
+			t.Errorf("%s %s = %v, want %v", tc.query, tc.order, got, want)
+		}
+	}
+}
+
+func TestIDBoundStart(t *testing.T) {
+	cases := []struct {
+		query string
+		up    bool
+		want  int64
+	}{
+		{"walk_a", false, 100},
+		{"walk_a id:<50", false, 49},
+		{"walk_a id:<=50", false, 50},
+		{"walk_a id:<500", false, 100},
+		{"walk_a id:>50", true, 51},
+		{"walk_a id:>=50", true, 50},
+		{"walk_a id:>5", true, 10},
+		{"walk_a id:>50", false, 100},
+		{"walk_a -id:<50", false, 100},
+		{"walk_a id:<x", false, 100},
+		{"walk_a id:<60 id:<50", false, 49},
+	}
+	for _, tc := range cases {
+		from := int64(100)
+		if tc.up {
+			from = 10
+		}
+		if got := idBoundStart(Parse(tc.query), tc.up, from); got != tc.want {
+			t.Errorf("%s up=%v from %d = %d, want %d", tc.query, tc.up, from, got, tc.want)
+		}
+	}
+}
+
 func TestTagWalkLegs_LeavesOtherShapesToSQL(t *testing.T) {
 	database, _ := setupSearchDB(t)
 	seedWalkFixture(t, database)

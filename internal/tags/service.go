@@ -103,6 +103,11 @@ type TagFilter struct {
 	Stale         string
 	FoldedOnly    bool
 	DistinctOnly  bool
+	// SkipCount leaves the total 0, for a caller that only reads the page:
+	// counting walks the whole catalog.
+	SkipCount bool
+	// ExcludeCategoryID leaves one category out.
+	ExcludeCategoryID *int64
 }
 
 type Service struct {

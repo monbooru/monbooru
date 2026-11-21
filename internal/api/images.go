@@ -1223,6 +1223,12 @@ func (h *Handler) deleteImage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) searchSource(g *library.Gallery) search.Source {
+	src := g.Source()
+	src.LookupBackends = h.cfg().LookupBackends(g.Name)
+	return src
+}
+
 func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
 	g, ok := h.resolveGallery(w, r)
 	if !ok {
@@ -1255,9 +1261,7 @@ func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
 		sq.OrderCollection = search.PinnedCollectionName(expr)
 	}
 
-	src := g.Source()
-	src.LookupBackends = h.cfg().LookupBackends(g.Name)
-	result, err := search.Execute(r.Context(), src, sq)
+	result, err := search.Execute(r.Context(), h.searchSource(g), sq)
 	if err != nil && r.Context().Err() != nil {
 		return
 	}

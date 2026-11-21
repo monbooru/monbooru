@@ -57,6 +57,8 @@ type settingsData struct {
 	Desktop            desktop.Integration
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
+	BooruEndpoints     booruEndpointsView
+	TokenRevokeNotes   map[string]string
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +134,8 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Desktop:            s.desktopIntegration(),
 		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
+		BooruEndpoints:     s.booruEndpoints(r),
+		TokenRevokeNotes:   tokenRevokeNotes(),
 	})
 }
 
@@ -533,6 +537,7 @@ func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	var removed bool
 	if err := s.withConfig(func(c *config.Config) error {
 		removed = c.Auth.Tokens.Remove(id)
+		closeBooruEndpointIfGone(c)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -552,9 +557,11 @@ func (s *Server) renderAuthTokensOOB(w http.ResponseWriter, r *http.Request) {
 	tokens := slices.Clone(s.cfg.Auth.Tokens)
 	s.cfgMu.RUnlock()
 	s.renderTemplate(w, "webui/auth_tokens", map[string]any{
-		"Tokens": tokens,
-		"OOB":    true,
+		"Tokens":      tokens,
+		"RevokeNotes": tokenRevokeNotes(),
+		"OOB":         true,
 	})
+	s.renderBooruEndpointsOOB(w, r)
 }
 
 func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Request) {
@@ -578,9 +585,10 @@ func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Reque
 		config.ScopeDelete: "delete - destructive actions",
 	}
 	s.renderTemplate(w, "webui/token_privileges_dialog", map[string]any{
-		"ID":     id,
-		"Scopes": webui.ScopeRows(config.AllScopes, scopes, descs),
-		"Paired": paired,
+		"ID":        id,
+		"Scopes":    webui.ScopeRows(config.AllScopes, scopes, descs),
+		"Paired":    paired,
+		"ManagedBy": s.tokenManagedBy(id),
 	})
 }
 
@@ -591,6 +599,10 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 	id := r.PathValue("id")
 	if s.tokenPeer(id) != "" {
 		writeInlineFlash(w, "err", "This token is managed by a pairing; its privileges can't be changed.")
+		return
+	}
+	if by := s.tokenManagedBy(id); by != "" {
+		writeInlineFlash(w, "err", "This token is managed by "+by+"; its privileges can't be changed.")
 		return
 	}
 	scopes := apitoken.Filter(r.Form["scope"], config.AllScopes)

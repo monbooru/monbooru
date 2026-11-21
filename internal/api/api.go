@@ -32,6 +32,7 @@ type Handler struct {
 	fetchStatus func(galleryName string, imageID int64, state, message string)
 	memoryMark  func() func(scope string)
 	done        <-chan struct{}
+	favicon     func() string
 
 	autotagMu       sync.Mutex
 	autotagQueue    []queuedAutotag
@@ -72,8 +73,16 @@ func (h *Handler) WithDone(done <-chan struct{}) *Handler {
 	return h
 }
 
+// WithFavicon gives the booru layer the web UI's icon URL, which the theme
+// in use decides.
+func (h *Handler) WithFavicon(url func() string) *Handler {
+	h.favicon = url
+	return h
+}
+
 // WithGalleryLock hands the upload routes the gallery lock their caller
-// holds around every other route, to take once their body is read.
+// holds around every other route, to take once their body is read. The
+// booru layer takes it itself too, to let go before a file's bytes.
 func (h *Handler) WithGalleryLock(lock func() (unlock func())) *Handler {
 	h.lock = lock
 	return h
@@ -207,6 +216,8 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/relations", h.auth(h.addRelation))
 	mux.HandleFunc("DELETE /api/v1/relations", h.auth(h.removeRelation))
 
+	h.mountBooru(mux)
+
 	mux.HandleFunc("GET /api/v1/openapi.json", h.openAPIJSON)
 	mux.HandleFunc("GET /api/v1/docs", h.openAPIDocs)
 
@@ -278,8 +289,7 @@ func corsAllowed(cfg *config.Config, r *http.Request, origin string) bool {
 }
 
 // Empty unless Host is a literal address: Host is client-supplied, so a
-// rebound or forged name would vouch for itself. The scheme comes from
-// base_url, which a TLS-terminating proxy hides from the listener.
+// rebound or forged name would vouch for itself.
 func requestOrigin(cfg *config.Config, r *http.Request) string {
 	name := r.Host
 	if h, _, err := net.SplitHostPort(name); err == nil {
@@ -289,8 +299,15 @@ func requestOrigin(cfg *config.Config, r *http.Request) string {
 	if name != "localhost" && net.ParseIP(name) == nil {
 		return ""
 	}
+	return ReachedOrigin(cfg.Server.BaseURL, r)
+}
+
+// ReachedOrigin is the origin on the host the request reached. The scheme
+// comes from base_url, which a TLS-terminating proxy hides from the
+// listener.
+func ReachedOrigin(baseURL string, r *http.Request) string {
 	scheme := "http"
-	if strings.HasPrefix(cfg.Server.BaseURL, "https://") {
+	if strings.HasPrefix(baseURL, "https://") {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host

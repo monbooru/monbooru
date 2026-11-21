@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
@@ -575,6 +576,233 @@ func TestPairedTokenPrivilegesLocked(t *testing.T) {
 		t.Fatalf("paired token scopes changed to %q; want them unchanged (manage via pairing)", got)
 	}
 	wantIn(t, w.Body.String(), "pairing")
+}
+
+func wantBooruURL(srv *Server, tok apitoken.Token) string {
+	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+}
+
+// newBooruEndpointToken is a token as creating the endpoint makes it.
+func newBooruEndpointToken() apitoken.Token {
+	tok, _ := apitoken.New(booruTokenName, []string{config.ScopeRead})
+	tok.Class = api.BooruClass
+	return tok
+}
+
+// shareBooruGalleries turns every gallery on, so its address shows.
+func shareBooruGalleries(srv *Server) {
+	srv.cfgMu.Lock()
+	for i := range srv.cfg.Galleries {
+		srv.cfg.Galleries[i].Booru = true
+	}
+	srv.cfgMu.Unlock()
+}
+
+func TestBooruEndpointInSettings(t *testing.T) {
+	tok := newBooruEndpointToken()
+	cases := []struct {
+		name         string
+		tokens       []apitoken.Token
+		want, absent []string
+	}{
+		{"no endpoint", nil,
+			[]string{"[+ create danbooru compatible endpoint]"},
+			[]string{"Remove endpoint"}},
+		{"an endpoint", []apitoken.Token{tok},
+			[]string{"Remove endpoint", "the Danbooru compatible addresses are disabled", `status-badge status-ok">danbooru</span>`, booruRevokeNote},
+			[]string{"[+ create danbooru compatible endpoint]"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, tc.tokens)
+			shareBooruGalleries(srv)
+			body := do(srv, "GET", "/settings").Body.String()
+			for _, want := range tc.want {
+				wantIn(t, body, want)
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(body, absent) {
+					t.Errorf("the page shows %s", absent)
+				}
+			}
+			if got := strings.Contains(body, wantBooruURL(srv, tok)); got != (len(tc.tokens) > 0) {
+				t.Errorf("address shown = %v", got)
+			}
+		})
+	}
+
+	// Without an endpoint there is no gallery to turn on.
+	srv := newTestServer(t)
+	body := postHTMXForm(t, srv, "/settings/auth/booru-gallery", url.Values{"gallery": {"default"}, "on": {"1"}}).Body.String()
+	wantIn(t, body, "create the Danbooru compatible endpoint first")
+	if srv.cfg.Galleries[0].Booru {
+		t.Error("a gallery turned on without an endpoint")
+	}
+}
+
+func TestCreatingTheBooruEndpoint(t *testing.T) {
+	srv := newTestServer(t)
+	body := postHTMXForm(t, srv, "/settings/auth/booru-endpoint", url.Values{}).Body.String()
+	wantIn(t, body, "endpoint created")
+	tok := srv.cfg.Auth.Tokens.ByClass(api.BooruClass)
+	if tok == nil || len(tok.Scopes) != 1 || !tok.HasScope(config.ScopeRead) {
+		t.Fatalf("the endpoint's token = %+v, want one locked to read", tok)
+	}
+	// Both blocks redraw: the token shows in API Tokens, the block offers
+	// its galleries, none of them on yet.
+	wantIn(t, body, `id="auth-tokens" hx-swap-oob="true"`)
+	wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+	wantIn(t, body, "Remove endpoint")
+	if srv.cfg.Galleries[0].Booru {
+		t.Error("a new endpoint shares a gallery unasked")
+	}
+
+	body = postHTMXForm(t, srv, "/settings/auth/booru-endpoint", url.Values{}).Body.String()
+	wantIn(t, body, "already exists")
+	if n := len(srv.cfg.Auth.Tokens); n != 1 {
+		t.Errorf("%d tokens after creating twice, want 1", n)
+	}
+}
+
+func TestRemovingTheBooruEndpoint(t *testing.T) {
+	cases := []struct {
+		name, flash string
+		remove      func(*testing.T, *Server, apitoken.Token) string
+	}{
+		{"its button", "endpoint removed", func(t *testing.T, s *Server, _ apitoken.Token) string {
+			return removeBooruEndpoint(t, s)
+		}},
+		{"revoking its token", "Token revoked", func(_ *testing.T, s *Server, tok apitoken.Token) string { return revokeToken(s, tok.ID) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			tok := newBooruEndpointToken()
+			reader, _ := apitoken.New("reader", []string{config.ScopeRead})
+			setTokens(srv, []apitoken.Token{reader, tok})
+			shareBooruGalleries(srv)
+			body := tc.remove(t, srv, tok)
+			wantIn(t, body, tc.flash)
+			wantIn(t, body, "[+ create danbooru compatible endpoint]")
+			if srv.cfg.Auth.Tokens.ByClass(api.BooruClass) != nil || srv.cfg.Auth.Tokens.ByID(reader.ID) == nil {
+				t.Errorf("tokens left: %+v, want only reader", srv.cfg.Auth.Tokens)
+			}
+			// A new endpoint starts with none shared.
+			if srv.cfg.Galleries[0].Booru {
+				t.Error("the gallery still answers")
+			}
+		})
+	}
+
+	wantIn(t, removeBooruEndpoint(t, newTestServer(t)), "There is no Danbooru compatible endpoint")
+}
+
+func removeBooruEndpoint(t *testing.T, srv *Server) string {
+	return sendForm(t, srv, "DELETE", "/settings/auth/booru-endpoint", url.Values{}, [2]string{"HX-Request", "true"}).Body.String()
+}
+
+func TestBooruEndpointTokenPrivilegesLocked(t *testing.T) {
+	srv := newTestServer(t)
+	tok := newBooruEndpointToken()
+	setTokens(srv, []apitoken.Token{tok})
+	req := httptest.NewRequest("GET", "/settings/auth/tokens/"+tok.ID+"/privileges", nil)
+	req.SetPathValue("id", tok.ID)
+	w := httptest.NewRecorder()
+	srv.settingsTokenPrivilegesGet(w, req)
+	wantIn(t, w.Body.String(), "Managed by the Danbooru compatible endpoint.")
+
+	body := setTokenScopes(t, srv, tok.ID, config.ScopeRead, config.ScopeWrite)
+	wantIn(t, body, "managed by the Danbooru compatible endpoint")
+	if got := srv.cfg.Auth.Tokens.ByID(tok.ID).Scopes; len(got) != 1 {
+		t.Errorf("scopes = %v, want read only", got)
+	}
+}
+
+func setTokenScopes(t *testing.T, srv *Server, id string, scopes ...string) string {
+	return postHTMXForm(t, srv, "/settings/auth/tokens/"+id+"/privileges", url.Values{"scope": scopes}).Body.String()
+}
+
+func TestBooruAddressesAPhoneCannotReach(t *testing.T) {
+	tok := newBooruEndpointToken()
+	cases := []struct {
+		name, bind, host, want string
+	}{
+		{"reachable", "0.0.0.0:8455", "192.0.2.1:8455", ""},
+		{"listening on this computer only", "127.0.0.1:8455", "localhost:8455", "only answers this computer"},
+		{"a page opened on localhost", "0.0.0.0:8455", "localhost:8455", "use localhost"},
+		{"a page opened on 127.0.0.1", "0.0.0.0:8455", "127.0.0.1:8455", "use localhost"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServerWith(t, false, func(c *config.Config) { c.Server.BindAddress = tc.bind })
+			setTokens(srv, []apitoken.Token{tok})
+			shareBooruGalleries(srv)
+			req := httptest.NewRequest("GET", "/settings", nil)
+			req.Host = tc.host
+			got := srv.booruEndpoints(req).Unreachable
+			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+				t.Errorf("warning %q, want one with %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTurningABooruGalleryOn(t *testing.T) {
+	tok := newBooruEndpointToken()
+	cases := []struct {
+		name, gallery, on string
+		before, want      bool
+		flash             string
+	}{
+		{"on", "default", "1", false, true, "answers at its Danbooru compatible address"},
+		{"off", "default", "", true, false, "no longer answers"},
+		{"not an unknown gallery", "no_such", "1", false, false, "Could not save"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			setTokens(srv, []apitoken.Token{tok})
+			srv.cfg.Galleries[0].Booru = tc.before
+			form := url.Values{"gallery": {tc.gallery}, "on": {tc.on}}
+			body := postHTMXForm(t, srv, "/settings/auth/booru-gallery", form).Body.String()
+			wantIn(t, body, tc.flash)
+			if got := srv.cfg.Galleries[0].Booru; got != tc.want {
+				t.Errorf("default turned on = %v, want %v", got, tc.want)
+			}
+			if tc.flash == "Could not save" {
+				return
+			}
+			wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
+			if got := strings.Contains(body, wantBooruURL(srv, tok)); got != tc.want {
+				t.Errorf("address shown = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The layer checks its own key, so a login in the web UI does not turn
+// the apps away.
+func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
+	srv := newTestServer(t)
+	setTestPassword(t, srv, "s3cret")
+	tok := newBooruEndpointToken()
+	setTokens(srv, []apitoken.Token{tok})
+	shareBooruGalleries(srv)
+	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+	cases := []struct {
+		name, path string
+		code       int
+	}{
+		{"its address", path + "/posts.json", http.StatusOK},
+		{"a wrong key", api.BooruPath(srv.cfg.Galleries[0].Name, strings.Repeat("0", 32)) + "/posts.json", http.StatusUnauthorized},
+		{"the web UI still", "/", http.StatusSeeOther},
+	}
+	for _, tc := range cases {
+		if w := do(srv, "GET", tc.path); w.Code != tc.code {
+			t.Errorf("%s: %d, want %d", tc.name, w.Code, tc.code)
+		}
+	}
 }
 
 func TestHealth_AnswersWithPasswordAuthOn(t *testing.T) {

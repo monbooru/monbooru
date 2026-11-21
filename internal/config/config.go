@@ -242,6 +242,9 @@ type Gallery struct {
 	GalleryPath    string `toml:"gallery_path"`
 	DBPath         string `toml:"-"`
 	ThumbnailsPath string `toml:"-"`
+	// Answers at its Danbooru compatible address; off until Settings turns
+	// it on.
+	Booru bool `toml:"booru,omitempty"`
 }
 
 type GalleryConfig struct {

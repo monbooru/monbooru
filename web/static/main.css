@@ -1736,6 +1736,10 @@ section#tagger .tagger-table .tagger-row-desc { display: block; margin-top: 2px;
 .gallery-path-cell .gallery-leaves { display: block; font-size: 11px; color: var(--fg-dim); }
 .gallery-table th:nth-child(5),
 .gallery-table td:nth-child(5) { width: 1%; white-space: nowrap; }
+/* The address column takes the rest, so ticking a gallery on does not
+   move the columns. */
+.booru-table th:nth-child(-n+2),
+.booru-table td:nth-child(-n+2) { width: 1%; white-space: nowrap; }
 .gallery-actions { display: flex; gap: 4px; align-items: center; }
 .gallery-action-spacer { visibility: hidden; }
 @media (max-width: 600px) {

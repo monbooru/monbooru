@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/registry"
 	"github.com/monbooru/monbooru/internal/shared/logx"
@@ -170,7 +171,7 @@ func (s *Server) serveThemeMascot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveThemeFile(w http.ResponseWriter, r *http.Request, e webui.Theme, path, kind string) {
 	if path != "" && !e.Builtin {
 		// An archive gives every theme it unpacks one mtime.
-		setGalleryScopedCache(w, "custom", kind+"-"+url.PathEscape(e.Name), path)
+		api.SetGalleryScopedCache(w, "custom", kind+"-"+url.PathEscape(e.Name), path)
 	}
 	webui.ServeThemeFile(w, r, e, path, registry.FS)
 }

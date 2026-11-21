@@ -282,7 +282,7 @@ model_path = "/models"
 	}
 	stock := cfg.FindGallery("stock")
 	if stock == nil || stock.DBPath != "/data/stock/monbooru.db" {
-		t.Errorf("stock DBPath = %q", stock)
+		t.Errorf("stock = %+v", stock)
 	}
 }
 

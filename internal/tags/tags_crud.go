@@ -212,6 +212,10 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 		where += " AND t.category_id = ?"
 		args = append(args, *filter.CategoryID)
 	}
+	if filter.ExcludeCategoryID != nil {
+		where += " AND t.category_id != ?"
+		args = append(args, *filter.ExcludeCategoryID)
+	}
 	if filter.Prefix != "" {
 		pat := db.EscapeLike(filter.Prefix)
 		if strings.Contains(filter.Prefix, "*") {
@@ -313,10 +317,12 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 	orderBy := tagOrderBy(filter)
 
 	var total int
-	if err := s.db.Read.QueryRow(
-		"SELECT COUNT(*) FROM tags t WHERE "+where, args...,
-	).Scan(&total); err != nil {
-		return nil, 0, err
+	if !filter.SkipCount {
+		if err := s.db.Read.QueryRow(
+			"SELECT COUNT(*) FROM tags t WHERE "+where, args...,
+		).Scan(&total); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	limit := filter.Limit
