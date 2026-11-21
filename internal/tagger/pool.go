@@ -488,14 +488,21 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []strin
 	return local
 }
 
-// Slots is how many calls for models the workers that may take them run
-// at once; 0 when none may. A non-nil only keeps the workers it names.
-func (p *Pool) Slots(models, only []string) int {
+// Slots is how many calls the workers that may take a job's calls run at
+// once, each call carrying one group of models; 0 when none may. A non-nil
+// only keeps the workers it names.
+func (p *Pool) Slots(groups [][]string, only []string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	seen := map[*poolWorker]bool{}
 	n := 0
-	for _, w := range p.eligible(models, nil, only) {
-		n += w.slots()
+	for _, models := range groups {
+		for _, w := range p.eligible(models, nil, only) {
+			if !seen[w] {
+				seen[w] = true
+				n += w.slots()
+			}
+		}
 	}
 	return n
 }
@@ -568,11 +575,17 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 			return nil, fmt.Errorf("%w holds %s", errNoWorker, strings.Join(models, ", "))
 		}
 		if interactive || p.interactive == 0 {
+			// The one with the most free slots, so a worker that also
+			// takes the job's other calls leaves this one to the rest.
+			var best *poolWorker
 			for _, w := range ws {
-				if w.inUse < w.slots() {
-					w.inUse++
-					return w, nil
+				if free := w.slots() - w.inUse; free > 0 && (best == nil || free > best.slots()-best.inUse) {
+					best = w
 				}
+			}
+			if best != nil {
+				best.inUse++
+				return best, nil
 			}
 		}
 		p.free.Wait()

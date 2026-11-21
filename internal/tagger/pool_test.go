@@ -125,8 +125,8 @@ func TestOneNameWithTwoDigestsRunsOnTheFirst(t *testing.T) {
 			t.Errorf("wd = %+v, want it flagged as differing", s)
 		}
 	}
-	if p.Slots([]string{"wd"}, nil) != 2 {
-		t.Errorf("slots = %d, want only a's 2", p.Slots([]string{"wd"}, nil))
+	if p.Slots([][]string{{"wd"}}, nil) != 2 {
+		t.Errorf("slots = %d, want only a's 2", p.Slots([][]string{{"wd"}}, nil))
 	}
 }
 
@@ -274,10 +274,10 @@ func TestAJobNamingItsWorkersSharesThemTheLocalOneIncluded(t *testing.T) {
 		WorkerDef{Name: "left-out", URL: serve(t, left), Token: "tok"},
 		WorkerDef{Name: "gpu-box", URL: serve(t, named), Token: "tok"})
 	only := []string{LocalWorker, "gpu-box"}
-	if n := p.Slots([]string{"wd"}, only); n != 4 {
+	if n := p.Slots([][]string{{"wd"}}, only); n != 4 {
 		t.Errorf("slots of the named workers = %d, want 2 + 2", n)
 	}
-	if n := p.Slots([]string{"wd"}, nil); n != 4 {
+	if n := p.Slots([][]string{{"wd"}}, nil); n != 4 {
 		t.Errorf("slots with no name = %d, want the two remote workers' only", n)
 	}
 	var wg sync.WaitGroup
@@ -324,5 +324,39 @@ func TestJobWorkersAreTheOnesUpWithWhatTheyCanRun(t *testing.T) {
 	}
 	if !got[0].Local || got[1].Slots != 2 {
 		t.Errorf("job workers = %+v", got)
+	}
+}
+
+func TestACallGoesToTheWorkerWithTheMostFreeSlots(t *testing.T) {
+	busy := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	other := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	p := usePool(t, "",
+		WorkerDef{Name: "a", URL: serve(t, busy), Token: "tok"},
+		WorkerDef{Name: "b", URL: serve(t, other), Token: "tok"})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	waitFor(t, func() bool { return busy.n()+other.n() == 2 })
+	if busy.n() != 1 || other.n() != 1 {
+		t.Errorf("calls a %d, b %d, want one each", busy.n(), other.n())
+	}
+	close(busy.gate)
+	close(other.gate)
+	wg.Wait()
+}
+
+func TestAJobsSlotsCountEveryWorkerThatTakesOneOfItsCalls(t *testing.T) {
+	joytag := fakeModel{name: "joytag", labels: labelsOf("a")}
+	pixai := fakeModel{name: "pixai", size: 16, labels: labelsOf("a")}
+	p := usePool(t, "",
+		WorkerDef{Name: "all", URL: serve(t, newFake(t, wd(), joytag, pixai)), Token: "tok"},
+		WorkerDef{Name: "two", URL: serve(t, newFake(t, wd(), joytag)), Token: "tok"})
+	if n := p.Slots([][]string{{"wd", "joytag"}, {"pixai"}}, nil); n != 4 {
+		t.Errorf("slots = %d, want both workers' 2 + 2", n)
 	}
 }

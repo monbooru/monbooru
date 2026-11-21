@@ -142,13 +142,12 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	}
 
 	plan := make([]plannedTagger, len(taggers))
-	names := make([]string, len(taggers))
 	for i, t := range taggers {
 		if plan[i], err = planTagger(cfg.Paths.DataPath, t, catIDs, generalCatID, inferredCats); err != nil {
 			return Result{}, err
 		}
-		names[i] = t.Name
 	}
+	groups := callGroups(taggers, plan)
 	// A person waiting on one image passes the batch jobs at the workers.
 	priority := worker.PriorityBatch
 	if len(ids) == 1 {
@@ -157,7 +156,11 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 
 	// One image per slot of the workers that can take the job, so each
 	// worker pulls as fast as it answers and no frame waits decoded.
-	parallel := min(max(1, pool.Slots(names, only)), len(ids))
+	calls := make([][]string, len(groups))
+	for i, g := range groups {
+		calls[i] = g.models
+	}
+	parallel := min(max(1, pool.Slots(calls, only)), len(ids))
 	if n := cfg.Tagger.CPUThreads; n > 0 {
 		parallel = min(parallel, n)
 	}
@@ -219,7 +222,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
 			}
 		}
-		scores, inferred, by, err := inferFrames(ctx, pool, only, priority, taggers, plan, imageID, framePaths, fileType, onPage)
+		scores, inferred, by, err := inferFrames(ctx, pool, only, priority, groups, len(plan), imageID, framePaths, fileType, onPage)
 		if err != nil {
 			return err
 		}
@@ -291,28 +294,34 @@ feed:
 // and input, and reports whether any frame was inferred and which worker
 // answered the first call. A frame that fails to read or that a model
 // refuses is logged and left out.
-func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, taggers []TaggerStatus, plan []plannedTagger, imageID int64, framePaths []string, fileType string, onPage func(int)) (_ [][]SparseScores, _ bool, by string, _ error) {
-	type group struct {
-		input   inputKey
-		models  []string
-		taggers []int
-	}
-	var groups []group
+// callGroup is one call per frame: the taggers that take the same input.
+type callGroup struct {
+	input   inputKey
+	models  []string
+	taggers []int
+}
+
+func callGroups(taggers []TaggerStatus, plan []plannedTagger) []callGroup {
+	var groups []callGroup
 	for tIdx, p := range plan {
-		g := slices.IndexFunc(groups, func(g group) bool { return g.input == p.input })
+		g := slices.IndexFunc(groups, func(g callGroup) bool { return g.input == p.input })
 		if g < 0 {
-			groups = append(groups, group{input: p.input})
+			groups = append(groups, callGroup{input: p.input})
 			g = len(groups) - 1
 		}
 		groups[g].models = append(groups[g].models, taggers[tIdx].Name)
 		groups[g].taggers = append(groups[g].taggers, tIdx)
 	}
+	return groups
+}
+
+func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, groups []callGroup, nTaggers int, imageID int64, framePaths []string, fileType string, onPage func(int)) (_ [][]SparseScores, _ bool, by string, _ error) {
 	inputs := make([]inputKey, len(groups))
 	for i, g := range groups {
 		inputs[i] = g.input
 	}
 
-	scores := make([][]SparseScores, len(plan))
+	scores := make([][]SparseScores, nTaggers)
 	inferred := false
 	for fIdx, fp := range framePaths {
 		if err := ctx.Err(); err != nil {
