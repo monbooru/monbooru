@@ -4858,6 +4858,30 @@ func TestExecute_IDRange(t *testing.T) {
 	}
 }
 
+// The id sort ignores ingested_at, which an imported gallery keeps out of
+// id order.
+func TestExecute_IDSort(t *testing.T) {
+	database, env := setupSearchDB(t)
+	a := ingestTestImageWithID(t, database, env, "a.png")
+	b := ingestTestImageWithID(t, database, env, "b.png")
+	c := ingestTestImageWithID(t, database, env, "c.png")
+	mustExec(t, database.Write, `UPDATE images SET ingested_at = '2001-01-01T00:00:00Z' WHERE id = ?`, c)
+	cases := []struct {
+		order string
+		want  []int64
+	}{
+		{"desc", []int64{c, b, a}},
+		{"asc", []int64{a, b, c}},
+		{"", []int64{c, b, a}},
+	}
+	for _, tc := range cases {
+		res := mustExecute(t, database, Query{Sort: "id", Order: tc.order, Page: 1, Limit: 40})
+		if got := resultIDs(res); !slices.Equal(got, tc.want) {
+			t.Errorf("id sort %q = %v, want %v", tc.order, got, tc.want)
+		}
+	}
+}
+
 func TestExecute_BatchFilter(t *testing.T) {
 	database, env := setupSearchDB(t)
 	a := ingestTestImageWithID(t, database, env, "a.png")
