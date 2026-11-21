@@ -808,7 +808,7 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"duration": comp("(i.duration_seconds IS NOT NULL AND i.duration_seconds %s ?)", parseFloatValue),
 	"hash":     (*whereBuilder).buildHashFilter,
 	"md5":      (*whereBuilder).buildMD5Filter,
-	"id":       intEq("i.id"),
+	"id":       comp("i.id %s ?", parseIntValue),
 	// A token, not a time range: two batches can land in the same minute.
 	"batch":      intEq("i.upload_batch"),
 	"phash":      (*whereBuilder).buildPhashFilter,
@@ -844,7 +844,7 @@ func comp(sqlTemplate string, parseVal func(string) (any, bool)) func(*whereBuil
 	}
 }
 
-// Equality only: through comp, id:>5 would start matching.
+// Equality only: through comp, batch:>5 would start matching.
 func intEq(col string) func(*whereBuilder, FilterExpr) string {
 	return func(b *whereBuilder, e FilterExpr) string {
 		n, ok := parseIntValue(e.Val)
