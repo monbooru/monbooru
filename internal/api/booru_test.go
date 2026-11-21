@@ -471,8 +471,7 @@ func TestBooruPosts(t *testing.T) {
 	}
 }
 
-// The JSON type of each field of a real Danbooru post. media_asset carries
-// no variants here, which the apps fall back from to the three URLs.
+// The JSON type of each field of a real Danbooru post.
 var danbooruPostTypes = map[string]string{
 	"approver_id": "null", "bit_flags": "number", "created_at": "string", "down_score": "number",
 	"fav_count": "number", "file_ext": "string", "file_size": "number", "file_url": "string",
@@ -492,7 +491,7 @@ var danbooruPostTypes = map[string]string{
 var danbooruMediaAssetTypes = map[string]string{
 	"created_at": "string", "duration": "null", "file_ext": "string", "file_key": "string", "file_size": "number",
 	"id": "number", "image_height": "number", "image_width": "number", "is_public": "bool", "md5": "string",
-	"pixel_hash": "string", "status": "string", "updated_at": "string",
+	"pixel_hash": "string", "status": "string", "updated_at": "string", "variants": "array",
 }
 
 func jsonKind(v any) string {

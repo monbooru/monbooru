@@ -383,7 +383,7 @@ type booruPost struct {
 	MediaAsset          booruMediaAsset `json:"media_asset"`
 }
 
-// A video's length is only read from here.
+// A video's length and the sized variants are only read from here.
 type booruMediaAsset struct {
 	ID          int64         `json:"id"`
 	CreatedAt   string        `json:"created_at"`
@@ -398,6 +398,42 @@ type booruMediaAsset struct {
 	FileKey     string        `json:"file_key"`
 	IsPublic    bool          `json:"is_public"`
 	PixelHash   string        `json:"pixel_hash"`
+	// One app opens a post on its 720x720 variant and, with none listed,
+	// on the thumbnail.
+	Variants []booruVariant `json:"variants"`
+}
+
+type booruVariant struct {
+	Type    string `json:"type"`
+	URL     string `json:"url"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+	FileExt string `json:"file_ext"`
+}
+
+// Danbooru's sizes, each served by the nearest monbooru has: the thumbnail
+// for the small ones, the sample or the file for 720x720, but a video's
+// thumbnail, as Danbooru's is a still.
+func booruVariants(p booruPost, video bool) []booruVariant {
+	w, h := p.ImageWidth, p.ImageHeight
+	tw, th := gallery.ThumbSize(w, h)
+	thumb := booruVariant{URL: p.PreviewFileURL, Width: tw, Height: th, FileExt: "jpg"}
+	large := booruVariant{URL: p.FileURL, Width: w, Height: h, FileExt: p.FileExt}
+	if p.HasLarge {
+		sw, sh := gallery.ViewRenditionSize(w, h)
+		large = booruVariant{URL: p.LargeFileURL, Width: sw, Height: sh, FileExt: "jpg"}
+	}
+	view := large
+	if video {
+		view = thumb
+	}
+	out := []booruVariant{thumb, thumb, view}
+	out[0].Type, out[1].Type, out[2].Type = "180x180", "360x360", "720x720"
+	if p.HasLarge {
+		large.Type = "sample"
+		out = append(out, large)
+	}
+	return append(out, booruVariant{Type: "original", URL: p.FileURL, Width: w, Height: h, FileExt: p.FileExt})
 }
 
 // booruSeconds always carries a decimal point: Go writes 5.0 as 5, which
@@ -465,6 +501,7 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 	p.MediaAsset = booruMediaAsset{
 		ID: img.ID, CreatedAt: created, UpdatedAt: created, MD5: img.MD5, FileExt: ext, FileSize: img.FileSize,
 		ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight, Duration: (*booruSeconds)(img.DurationSec), Status: "active", IsPublic: true,
+		Variants: booruVariants(p, gallery.IsVideoType(img.FileType)),
 	}
 
 	byCategory := map[int][]string{}
