@@ -2933,6 +2933,10 @@ func TestColumnFilterIndexHint_NegatedWorkflowTerm(t *testing.T) {
 		{FilterExpr{Key: "comfyui", Val: "KSampler"}, "newest", ""},
 		{NotExpr{Expr: FilterExpr{Key: "comfyui", Val: ""}}, "newest", ""},
 		{NotExpr{Expr: FilterExpr{Key: "source", Val: "none"}}, "newest", ""},
+		// The id sort reads the rowid in order, so no index is pinned.
+		{NotExpr{Expr: FilterExpr{Key: "comfyui", Val: "KSampler"}}, "id", ""},
+		{FilterExpr{Key: "type", Val: "image"}, "id", ""},
+		{FilterExpr{Key: "type", Val: "image"}, "newest", " INDEXED BY idx_images_ingested_visible"},
 	} {
 		if got := columnFilterIndexHint(tc.expr, tc.sort); got != tc.want {
 			t.Errorf("%#v under %s: hint = %q, want %q", tc.expr, tc.sort, got, tc.want)
