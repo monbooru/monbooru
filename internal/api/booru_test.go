@@ -637,6 +637,26 @@ func TestBooruTagList(t *testing.T) {
 	}
 }
 
+// Danbooru lists 20 a page when the app names no limit.
+func TestBooruTagListPageSize(t *testing.T) {
+	env, base, id := booruEnv(t)
+	var names []string
+	for i := range 30 {
+		names = append(names, fmt.Sprintf("filler_%02d", i))
+	}
+	body, _ := json.Marshal(map[string]any{"tags": names})
+	mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", id), body), http.StatusOK)
+	for query, want := range map[string]int{"": booruPageLimit, "?limit=25": 25, "?limit=500": 30 + 5} {
+		w := env.do("GET", base+"/tags.json"+query)
+		mustCode(t, w, http.StatusOK)
+		var got []booruTagJSON
+		mustDecode(t, w, &got)
+		if len(got) != want {
+			t.Errorf("tags.json%s = %d tags, want %d", query, len(got), want)
+		}
+	}
+}
+
 func TestBooruTagNamesCap(t *testing.T) {
 	env, base, _ := booruEnv(t)
 	filler := func(n int) []string {
