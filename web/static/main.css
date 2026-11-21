@@ -1447,13 +1447,17 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .dest-row input[type="text"] { width: 100%; max-width: none; }
 .dest-part > label { display: block; font-size: 11px; color: var(--fg-dim); margin-bottom: 3px; }
 .dest-sep { color: var(--fg-dim); padding-bottom: 4px; }
-/* In a destination row the folder tree opens over what follows, so the
-   name field beside it stays put. */
+/* In a destination row the folder tree opens over what follows, so nothing
+   moves or resizes when it opens. */
 .dest-part .folder-picker, #settings-page .dest-part .folder-picker { margin: 0; }
 .dest-part .folder-picker > label { font-size: 11px; color: var(--fg-dim); margin-bottom: 3px; }
 .dest-part .folder-picker > [data-folder-browse] { font-size: 11px; }
 .dest-part .folder-picker-input, .dest-part .folder-picker-panel { max-width: none; }
-.dest-part .folder-picker-panel { position: absolute; top: 100%; left: 0; right: 0; z-index: 150; background: var(--bg-surface); }
+/* Shorter than elsewhere, scrolling past six folders or so, so it fits the
+   dialogs. */
+.dest-part .folder-picker-panel { position: absolute; top: 100%; left: 0; right: 0; z-index: 150; max-height: 150px; background: var(--bg-surface); }
+/* Room under the row for the open tree, the same in both move dialogs. */
+#place-image-form > .field, #batch-place-form > .field { min-height: 205px; }
 .dest-hints { display: flex; gap: 6px; flex-wrap: wrap; }
 .dest-hints > .field-hint { flex: 1 1 190px; }
 .name-preview-err { margin-top: 6px; font-size: 12px; color: var(--error); }
