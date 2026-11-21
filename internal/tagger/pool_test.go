@@ -360,3 +360,29 @@ func TestAJobsSlotsCountEveryWorkerThatTakesOneOfItsCalls(t *testing.T) {
 		t.Errorf("slots = %d, want both workers' 2 + 2", n)
 	}
 }
+
+func TestACallNoWorkerHoldsWholeIsSplitOverTheWorkersThatHoldItsParts(t *testing.T) {
+	joytag := fakeModel{name: "joytag", labels: labelsOf("a")}
+	a := &counting{f: newFake(t, wd())}
+	b := &counting{f: newFake(t, joytag)}
+	p := usePool(t, "",
+		WorkerDef{Name: "a", URL: serve(t, a), Token: "tok"},
+		WorkerDef{Name: "b", URL: serve(t, b), Token: "tok"})
+	if n := p.Slots([][]string{{"wd", "joytag"}}, nil); n != 4 {
+		t.Errorf("slots = %d, want a's 2 + b's 2", n)
+	}
+	resp, by, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"joytag", "wd"}, Priority: worker.PriorityBatch, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.n() != 1 || b.n() != 1 || by == "" {
+		t.Errorf("calls a %d, b %d, by %q, want one each", a.n(), b.n(), by)
+	}
+	var got []string
+	for _, r := range resp.Results {
+		got = append(got, r.Model)
+	}
+	if want := []string{"joytag", "wd"}; !slices.Equal(got, want) {
+		t.Errorf("results = %v, want %v", got, want)
+	}
+}
