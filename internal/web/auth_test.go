@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -583,98 +582,24 @@ func wantBooruURL(srv *Server, tok apitoken.Token) string {
 	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 }
 
-// pickBooruToken also turns every gallery on, so its address shows.
-func pickBooruToken(srv *Server, id string) {
+// newBooruEndpointToken is a token as creating the endpoint makes it.
+func newBooruEndpointToken() apitoken.Token {
+	tok, _ := apitoken.New(booruTokenName, []string{config.ScopeRead})
+	tok.Class = api.BooruClass
+	return tok
+}
+
+// shareBooruGalleries turns every gallery on, so its address shows.
+func shareBooruGalleries(srv *Server) {
 	srv.cfgMu.Lock()
-	srv.cfg.Auth.BooruTokenID = id
 	for i := range srv.cfg.Galleries {
 		srv.cfg.Galleries[i].Booru = true
 	}
 	srv.cfgMu.Unlock()
 }
 
-func TestBooruEndpointsInSettings(t *testing.T) {
-	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
-	other, _ := apitoken.New("other", []string{config.ScopeRead})
-	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
-	paired, _ := apitoken.New("monloader (paired)", config.AllScopes)
-	paired.Paired = "monloader"
-	all := []apitoken.Token{reader, other, writer, paired}
-	cases := []struct {
-		name    string
-		tokens  []apitoken.Token
-		picked  string
-		offered []apitoken.Token
-		shown   *apitoken.Token
-	}{
-		{"nothing to pick without a token", nil, "", nil, nil},
-		{"read tokens offered, none picked", all, "", []apitoken.Token{reader, other}, nil},
-		{"the picked one's addresses only", all, other.ID, []apitoken.Token{reader, other}, &other},
-		{"a picked token since revoked", []apitoken.Token{reader}, other.ID, []apitoken.Token{reader}, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := newTestServer(t)
-			setTokens(srv, tc.tokens)
-			pickBooruToken(srv, tc.picked)
-			w := do(srv, "GET", "/settings")
-			mustCode(t, w, http.StatusOK)
-			body := w.Body.String()
-			wantIn(t, body, "Danbooru compatible endpoint")
-			for _, tok := range all {
-				offered := slices.ContainsFunc(tc.offered, func(o apitoken.Token) bool { return o.ID == tok.ID })
-				if got := strings.Contains(body, `<option value="`+tok.ID+`"`); got != offered {
-					t.Errorf("%s offered = %v, want %v", tok.Name, got, offered)
-				}
-				shown := tc.shown != nil && tc.shown.ID == tok.ID
-				if got := strings.Contains(body, wantBooruURL(srv, tok)); got != shown {
-					t.Errorf("%s's address shown = %v, want %v", tok.Name, got, shown)
-				}
-			}
-			if tc.shown != nil {
-				wantIn(t, body, `<option value="`+tc.shown.ID+`" selected>`)
-			}
-			if len(tc.offered) == 0 {
-				wantIn(t, body, "Create a token with the read privilege")
-			}
-		})
-	}
-}
-
-func TestPickingTheBooruToken(t *testing.T) {
-	reader, _ := apitoken.New("reader", []string{config.ScopeRead})
-	writer, _ := apitoken.New("writer", []string{config.ScopeWrite})
-	paired, _ := apitoken.New("monloader (paired)", config.AllScopes)
-	paired.Paired = "monloader"
-	cases := []struct {
-		name, id, saved, flash string
-	}{
-		{"a read token", reader.ID, reader.ID, "token saved"},
-		{"none turns it off", "", "", "turned off"},
-		{"not one without read", writer.ID, "kept", "Could not save"},
-		{"not a paired one", paired.ID, "kept", "Could not save"},
-		{"not an unknown id", "nope", "kept", "Could not save"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := newTestServer(t)
-			setTokens(srv, []apitoken.Token{reader, writer, paired})
-			pickBooruToken(srv, "kept")
-			body := postHTMXForm(t, srv, "/settings/auth/booru-token", url.Values{"token_id": {tc.id}}).Body.String()
-			wantIn(t, body, tc.flash)
-			if got := srv.cfg.Auth.BooruTokenID; got != tc.saved {
-				t.Errorf("picked %q, want %q", got, tc.saved)
-			}
-			if tc.saved == reader.ID {
-				wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
-				wantIn(t, body, wantBooruURL(srv, reader))
-			}
-		})
-	}
-}
-
 func TestBooruAddressesAPhoneCannotReach(t *testing.T) {
-	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	tok := newBooruEndpointToken()
 	cases := []struct {
 		name, bind, host, want string
 	}{
@@ -687,7 +612,7 @@ func TestBooruAddressesAPhoneCannotReach(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServerWith(t, false, func(c *config.Config) { c.Server.BindAddress = tc.bind })
 			setTokens(srv, []apitoken.Token{tok})
-			pickBooruToken(srv, tok.ID)
+			shareBooruGalleries(srv)
 			req := httptest.NewRequest("GET", "/settings", nil)
 			req.Host = tc.host
 			got := srv.booruEndpoints(req).Unreachable
@@ -699,7 +624,7 @@ func TestBooruAddressesAPhoneCannotReach(t *testing.T) {
 }
 
 func TestTurningABooruGalleryOn(t *testing.T) {
-	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	tok := newBooruEndpointToken()
 	cases := []struct {
 		name, gallery, on string
 		before, want      bool
@@ -713,7 +638,6 @@ func TestTurningABooruGalleryOn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)
 			setTokens(srv, []apitoken.Token{tok})
-			srv.cfg.Auth.BooruTokenID = tok.ID
 			srv.cfg.Galleries[0].Booru = tc.before
 			form := url.Values{"gallery": {tc.gallery}, "on": {tc.on}}
 			body := postHTMXForm(t, srv, "/settings/auth/booru-gallery", form).Body.String()
@@ -732,49 +656,14 @@ func TestTurningABooruGalleryOn(t *testing.T) {
 	}
 }
 
-func setTokenScopes(t *testing.T, srv *Server, id string, scopes ...string) string {
-	return postHTMXForm(t, srv, "/settings/auth/tokens/"+id+"/privileges", url.Values{"scope": scopes}).Body.String()
-}
-
-func TestBooruEndpointsFollowTheTokens(t *testing.T) {
-	picked, _ := apitoken.New("picked", config.AllScopes)
-	other, _ := apitoken.New("other", config.AllScopes)
-	cases := []struct {
-		name   string
-		change func(*testing.T, *Server) string
-		kept   bool
-	}{
-		{"the picked one loses read", func(t *testing.T, s *Server) string { return setTokenScopes(t, s, picked.ID, config.ScopeWrite) }, false},
-		{"the picked one keeps read", func(t *testing.T, s *Server) string { return setTokenScopes(t, s, picked.ID, config.ScopeRead) }, true},
-		{"the picked one is revoked", func(_ *testing.T, s *Server) string { return revokeToken(s, picked.ID) }, false},
-		{"another one is revoked", func(_ *testing.T, s *Server) string { return revokeToken(s, other.ID) }, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := newTestServer(t)
-			setTokens(srv, []apitoken.Token{picked, other})
-			pickBooruToken(srv, picked.ID)
-			body := tc.change(t, srv)
-			wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
-			if got := strings.Contains(body, wantBooruURL(srv, picked)); got != tc.kept {
-				t.Errorf("address shown = %v, want %v", got, tc.kept)
-			}
-			// Dropped, not just shut: read given back must not reopen it.
-			if got := srv.cfg.Auth.BooruTokenID == picked.ID; got != tc.kept {
-				t.Errorf("pick kept = %v, want %v", got, tc.kept)
-			}
-		})
-	}
-}
-
 // The layer checks its own key, so a login in the web UI does not turn
 // the apps away.
 func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	srv := newTestServer(t)
 	setTestPassword(t, srv, "s3cret")
-	tok, _ := apitoken.New("reader", []string{config.ScopeRead})
+	tok := newBooruEndpointToken()
 	setTokens(srv, []apitoken.Token{tok})
-	pickBooruToken(srv, tok.ID)
+	shareBooruGalleries(srv)
 	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
 	cases := []struct {
 		name, path string

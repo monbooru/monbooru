@@ -50,9 +50,18 @@ func BooruKey(tokenHash string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// BooruToken says whether Settings may pick a token for the layer: a
-// paired token belongs to an app, not to a person adding a booru.
-func BooruToken(t apitoken.Token) bool { return t.Paired == "" && t.HasScope(config.ScopeRead) }
+// BooruClass marks the token Settings makes for the endpoint, one at most.
+const BooruClass = "danbooru"
+
+// BooruToken is the endpoint's token, whose key opens the layer; nil while
+// there is no endpoint. Its read is locked on, but a config edited by hand
+// can take it away.
+func BooruToken(auth config.AuthConfig) *apitoken.Token {
+	if t := auth.Tokens.ByClass(BooruClass); t != nil && t.HasScope(config.ScopeRead) {
+		return t
+	}
+	return nil
+}
 
 func BooruPath(gallery, key string) string { return BooruPrefix + gallery + "/" + key }
 
@@ -94,20 +103,8 @@ func splitBooruPath(path string) (gallery, route string, ok bool) {
 	return gallery, route, true
 }
 
-// ChosenBooruToken is the token Settings picked for the layer, while it
-// still can be one; nil keeps the layer closed.
-func ChosenBooruToken(auth config.AuthConfig) *apitoken.Token {
-	if auth.BooruTokenID == "" {
-		return nil
-	}
-	if t := auth.Tokens.ByID(auth.BooruTokenID); t != nil && BooruToken(*t) {
-		return t
-	}
-	return nil
-}
-
 func booruKeyValid(auth config.AuthConfig, key string) bool {
-	t := ChosenBooruToken(auth)
+	t := BooruToken(auth)
 	return t != nil && subtle.ConstantTimeCompare([]byte(BooruKey(t.TokenHash)), []byte(key)) == 1
 }
 

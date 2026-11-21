@@ -57,6 +57,7 @@ type settingsData struct {
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
 	BooruEndpoints     booruEndpointsView
+	TokenRevokeNotes   map[string]string
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +133,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
 		BooruEndpoints:     s.booruEndpoints(r),
+		TokenRevokeNotes:   tokenRevokeNotes(),
 	})
 }
 
@@ -533,7 +535,7 @@ func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	var removed bool
 	if err := s.withConfig(func(c *config.Config) error {
 		removed = c.Auth.Tokens.Remove(id)
-		dropStaleBooruPick(&c.Auth)
+		closeBooruEndpointIfGone(c)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -553,8 +555,9 @@ func (s *Server) renderAuthTokensOOB(w http.ResponseWriter, r *http.Request) {
 	tokens := slices.Clone(s.cfg.Auth.Tokens)
 	s.cfgMu.RUnlock()
 	s.renderTemplate(w, "webui/auth_tokens", map[string]any{
-		"Tokens": tokens,
-		"OOB":    true,
+		"Tokens":      tokens,
+		"RevokeNotes": tokenRevokeNotes(),
+		"OOB":         true,
 	})
 	s.renderBooruEndpointsOOB(w, r)
 }
@@ -580,9 +583,10 @@ func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Reque
 		config.ScopeDelete: "delete - destructive actions",
 	}
 	s.renderTemplate(w, "webui/token_privileges_dialog", map[string]any{
-		"ID":     id,
-		"Scopes": webui.ScopeRows(config.AllScopes, scopes, descs),
-		"Paired": paired,
+		"ID":        id,
+		"Scopes":    webui.ScopeRows(config.AllScopes, scopes, descs),
+		"Paired":    paired,
+		"ManagedBy": s.tokenManagedBy(id),
 	})
 }
 
@@ -595,11 +599,14 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 		writeInlineFlash(w, "err", "This token is managed by a pairing; its privileges can't be changed.")
 		return
 	}
+	if by := s.tokenManagedBy(id); by != "" {
+		writeInlineFlash(w, "err", "This token is managed by "+by+"; its privileges can't be changed.")
+		return
+	}
 	scopes := apitoken.Filter(r.Form["scope"], config.AllScopes)
 	var found bool
 	if err := s.withConfig(func(c *config.Config) error {
 		found = c.Auth.Tokens.SetScopes(id, scopes)
-		dropStaleBooruPick(&c.Auth)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -612,7 +619,6 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 	logx.Infof("settings: API token %s privileges updated from %s", id, session.ClientIP(r))
 	setDialogSavedTrigger(w, "token-saved", "token-cfg-"+id)
 	s.renderTemplate(w, "webui/token_scopes_saved", map[string]string{"ID": id, "Scopes": strings.Join(scopes, " ")})
-	s.renderBooruEndpointsOOB(w, r)
 }
 
 func (s *Server) settingsRemovePasswordPost(w http.ResponseWriter, r *http.Request) {

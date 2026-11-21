@@ -1,13 +1,6 @@
 {{define "partials/booru_endpoints.html"}}
 <div id="booru-endpoints"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  {{if .View.Options}}
-  <form hx-post="/settings/auth/booru-token" hx-target="#flash-auth" hx-swap="innerHTML" hx-trigger="change">
-    <label for="booru-token">Token</label>
-    <select id="booru-token" name="token_id">
-      <option value="">(none, the endpoint is off)</option>
-      {{range .View.Options}}<option value="{{.ID}}"{{if .Chosen}} selected{{end}}>{{.Name}}</option>{{end}}
-    </select>
-  </form>
+  {{if .View.Exists}}
   {{with .View.Unreachable}}<div class="flash flash-warn">{{.}}</div>{{end}}
   {{with .View.Addresses}}
   <div class="table-scroll">
@@ -37,8 +30,16 @@
   </table>
   </div>
   {{end}}
+  <button type="button" class="btn-sm btn-danger" style="margin-top:8px"
+          hx-delete="/settings/auth/booru-endpoint"
+          hx-target="#flash-auth" hx-swap="innerHTML"
+          hx-confirm="Remove the Danbooru compatible endpoint?"
+          data-confirm-ok="Remove"
+          data-confirm-danger="Its token is revoked and the Danbooru compatible addresses are disabled.">Remove endpoint</button>
   {{else}}
-  <p class="field-hint">Create a token with the read privilege to pick it here.</p>
+  <button type="button" class="btn-link-accent"
+          hx-post="/settings/auth/booru-endpoint"
+          hx-target="#flash-auth" hx-swap="innerHTML">[+ create danbooru compatible endpoint]</button>
   {{end}}
 </div>
 {{end}}

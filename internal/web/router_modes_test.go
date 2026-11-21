@@ -45,6 +45,7 @@ var wantFreeRoutes = []string{
 	"GET /images/{id}/page/{n}",
 	"GET /images/{id}/page/{n}/thumb",
 
+	"DELETE /settings/auth/booru-endpoint",
 	"DELETE /settings/auth/tokens/{id}",
 	"GET /favicon.ico",
 	"GET /health",
@@ -55,8 +56,8 @@ var wantFreeRoutes = []string{
 	"POST /internal/open-folder",
 	"POST /login",
 	"POST /logout",
+	"POST /settings/auth/booru-endpoint",
 	"POST /settings/auth/booru-gallery",
-	"POST /settings/auth/booru-token",
 	"POST /settings/auth/password",
 	"POST /settings/auth/remove-password",
 	"POST /settings/auth/tokens",

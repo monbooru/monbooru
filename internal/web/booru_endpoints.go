@@ -4,18 +4,36 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/shared/apitoken"
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/session"
 )
 
-type booruTokenOption struct {
-	ID, Name string
-	Chosen   bool
+// The name the endpoint's token shows in API Tokens.
+const booruTokenName = "danbooru endpoint"
+
+// What the token table and its dialogs say about the endpoint's token.
+const (
+	booruManagedBy  = "the Danbooru compatible endpoint"
+	booruRevokeNote = "This removes the Danbooru compatible endpoint: its addresses are disabled."
+)
+
+// tokenRevokeNotes is what revoking a token of each class also does.
+func tokenRevokeNotes() map[string]string { return map[string]string{api.BooruClass: booruRevokeNote} }
+
+// The feature a token's class says manages it, or "" for one the
+// operator manages.
+func (s *Server) tokenManagedBy(id string) string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	if t := s.cfg.Auth.Tokens.ByID(id); t != nil && t.Class == api.BooruClass {
+		return booruManagedBy
+	}
+	return ""
 }
 
 type booruAddress struct {
@@ -25,28 +43,23 @@ type booruAddress struct {
 }
 
 type booruEndpointsView struct {
-	Options   []booruTokenOption
+	Exists    bool
 	Addresses []booruAddress
 	// Why a phone could not reach the addresses, if it could not.
 	Unreachable string
 }
 
-// The tokens the layer can use, and one address per gallery for the one
-// picked, on the host this browser reached, as an app on the same network
-// reaches it. Each gallery shows whether it answers there.
+// One address per gallery for the endpoint's token, on the host this
+// browser reached, as an app on the same network reaches it. Each gallery
+// shows whether it answers there.
 func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 	c := s.cfgSnapshot()
-	chosen := api.ChosenBooruToken(c.Auth)
-	var v booruEndpointsView
-	for _, t := range c.Auth.Tokens {
-		if api.BooruToken(t) {
-			v.Options = append(v.Options, booruTokenOption{ID: t.ID, Name: t.Name, Chosen: chosen != nil && chosen.ID == t.ID})
-		}
+	tok := api.BooruToken(c.Auth)
+	if tok == nil {
+		return booruEndpointsView{}
 	}
-	if chosen == nil {
-		return v
-	}
-	origin, key := s.browserOrigin(r), api.BooruKey(chosen.TokenHash)
+	v := booruEndpointsView{Exists: true}
+	origin, key := s.browserOrigin(r), api.BooruKey(tok.TokenHash)
 	for _, g := range c.Galleries {
 		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key), On: g.Booru})
 	}
@@ -62,7 +75,7 @@ func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 }
 
 // A token's create, revoke or privileges change can change what the block
-// offers.
+// shows.
 func (s *Server) renderBooruEndpointsOOB(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "partials/booru_endpoints.html", map[string]any{
 		"View": s.booruEndpoints(r),
@@ -70,44 +83,63 @@ func (s *Server) renderBooruEndpointsOOB(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// A pick its token no longer backs is dropped, so giving read back does
-// not reopen the layer unasked.
-func dropStaleBooruPick(auth *config.AuthConfig) {
-	if api.ChosenBooruToken(*auth) == nil {
-		auth.BooruTokenID = ""
+// closeBooruEndpointIfGone turns every gallery's address off once the
+// endpoint's token is gone, so a new endpoint starts with none shared.
+func closeBooruEndpointIfGone(c *config.Config) {
+	if api.BooruToken(c.Auth) != nil {
+		return
+	}
+	for i := range c.Galleries {
+		c.Galleries[i].Booru = false
 	}
 }
 
-var errBooruTokenUnfit = errors.New("that token needs the read privilege and must not belong to a pairing")
+var errBooruEndpointExists = errors.New("the Danbooru compatible endpoint already exists")
 
-// An empty token_id closes the layer. Like the token forms, the answer is
-// a flash with the block swapped in beside it.
-func (s *Server) settingsBooruTokenPost(w http.ResponseWriter, r *http.Request) {
-	if !parseFormOK(w, r) {
+// The endpoint makes a token of its own, locked to read. Its secret is
+// never shown: only the key derived from its hash is used.
+func (s *Server) settingsBooruEndpointCreate(w http.ResponseWriter, r *http.Request) {
+	tok, _ := apitoken.New(booruTokenName, []string{config.ScopeRead})
+	tok.Class = api.BooruClass
+	err := s.withConfig(func(c *config.Config) error {
+		if c.Auth.Tokens.ByClass(api.BooruClass) != nil {
+			return errBooruEndpointExists
+		}
+		return c.Auth.Tokens.Add(tok)
+	})
+	if err != nil {
+		writeInlineFlash(w, "err", "Could not create the endpoint: "+err.Error())
 		return
 	}
-	id := strings.TrimSpace(r.FormValue("token_id"))
+	logx.Infof("settings: Danbooru compatible endpoint created from %s", session.ClientIP(r))
+	writeInlineFlash(w, "ok", "Danbooru compatible endpoint created. Turn on the galleries to share.")
+	s.renderAuthTokensOOB(w, r)
+}
+
+// Removing the endpoint is revoking its token.
+func (s *Server) settingsBooruEndpointRemove(w http.ResponseWriter, r *http.Request) {
+	var removed bool
 	err := s.withConfig(func(c *config.Config) error {
-		if id != "" {
-			if t := c.Auth.Tokens.ByID(id); t == nil || !api.BooruToken(*t) {
-				return errBooruTokenUnfit
-			}
+		if tok := c.Auth.Tokens.ByClass(api.BooruClass); tok != nil {
+			removed = c.Auth.Tokens.Remove(tok.ID)
 		}
-		c.Auth.BooruTokenID = id
+		closeBooruEndpointIfGone(c)
 		return nil
 	})
 	if err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
 		return
 	}
-	logx.Infof("settings: booru token set to %q from %s", id, session.ClientIP(r))
-	if id == "" {
-		writeInlineFlash(w, "ok", "Danbooru compatible endpoint turned off.")
-	} else {
-		writeInlineFlash(w, "ok", "Danbooru compatible endpoint token saved.")
+	if !removed {
+		writeInlineFlash(w, "err", "There is no Danbooru compatible endpoint.")
+		return
 	}
-	s.renderBooruEndpointsOOB(w, r)
+	logx.Infof("settings: Danbooru compatible endpoint removed from %s", session.ClientIP(r))
+	writeInlineFlash(w, "ok", "Danbooru compatible endpoint removed, its addresses are disabled.")
+	s.renderAuthTokensOOB(w, r)
 }
+
+var errNoBooruEndpoint = errors.New("create the Danbooru compatible endpoint first")
 
 // An unticked box sends no on, which turns the gallery off.
 func (s *Server) settingsBooruGalleryPost(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +148,9 @@ func (s *Server) settingsBooruGalleryPost(w http.ResponseWriter, r *http.Request
 	}
 	name, on := r.FormValue("gallery"), r.FormValue("on") != ""
 	err := s.withConfig(func(c *config.Config) error {
+		if api.BooruToken(c.Auth) == nil {
+			return errNoBooruEndpoint
+		}
 		g := c.FindGallery(name)
 		if g == nil {
 			return fmt.Errorf("unknown gallery %q", name)
