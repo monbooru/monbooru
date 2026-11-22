@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -466,5 +467,22 @@ func TestFarAddress(t *testing.T) {
 		if got := farAddress(context.Background(), raw); got != want {
 			t.Errorf("farAddress(%q) = %v, want %v", raw, got, want)
 		}
+	}
+}
+
+func TestAWorkerBehindAGatewayIsCalledWithBothTokens(t *testing.T) {
+	f := newFake(t, wd())
+	var bearer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bearer = r.Header.Get("Authorization")
+		f.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	p := usePool(t, "", WorkerDef{Name: "rented", URL: srv.URL, Token: "tok", Gateway: "gateway-key"})
+	if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+		t.Fatalf("the fake reads the worker's token from its header: %v", err)
+	}
+	if bearer != "Bearer gateway-key" {
+		t.Errorf("Authorization = %q, want the gateway's key", bearer)
 	}
 }

@@ -310,6 +310,9 @@ type WorkerConfig struct {
 	URL    string `toml:"url"`
 	Token  string `toml:"token"`
 	Paused bool   `toml:"paused,omitempty"`
+	// GatewayToken is the key of a gateway in front of the worker, which
+	// takes the bearer; the worker's token then goes in its own header.
+	GatewayToken string `toml:"gateway_token,omitempty"`
 }
 
 type TaggerAggregationCfg struct {

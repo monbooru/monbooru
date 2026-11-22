@@ -26,11 +26,13 @@ import (
 const LocalWorker = config.LocalWorkerName
 
 type WorkerDef struct {
-	Name   string
-	URL    string
-	Token  string
-	Local  bool
-	Paused bool
+	Name  string
+	URL   string
+	Token string
+	// Gateway is the key of a gateway in front of the worker, if any.
+	Gateway string
+	Local   bool
+	Paused  bool
 }
 
 // What a worker last said of itself, kept on disk so the taggers list,
@@ -123,7 +125,7 @@ func (p *Pool) Set(defs []WorkerDef) {
 		var w *poolWorker
 		if i >= 0 {
 			w = p.workers[i]
-			if w.def.URL != d.URL || w.def.Token != d.Token {
+			if w.def.URL != d.URL || w.def.Token != d.Token || w.def.Gateway != d.Gateway {
 				w.checked = false
 			}
 		} else {
@@ -131,7 +133,7 @@ func (p *Pool) Set(defs []WorkerDef) {
 			w.cache = p.loadCache(d.Name)
 		}
 		w.def = d
-		w.client = worker.Client{BaseURL: d.URL, Token: d.Token, Format: w.format, HTTP: p.httpClient}
+		w.client = worker.Client{BaseURL: d.URL, Token: d.Token, Gateway: d.Gateway, Format: w.format, HTTP: p.httpClient}
 		next = append(next, w)
 	}
 	slices.SortStableFunc(next, func(a, b *poolWorker) int {
