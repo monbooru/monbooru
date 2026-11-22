@@ -982,7 +982,10 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 #tag-create-dialog .field select,
 #alias-create-dialog .field select { width: 100%; max-width: 360px; }
 
-#source-dialog, #original-dialog { min-width: 0; width: min(480px, 100% - 2rem); }
+#source-dialog, #original-dialog, #worker-add-dialog { min-width: 0; width: min(480px, 100% - 2rem); }
+#worker-add-dialog .field input[type="text"],
+#worker-add-dialog .field input[type="url"],
+#worker-add-dialog .field input[type="password"],
 #source-dialog .field input[type="text"],
 #source-dialog .field input[type="url"],
 #source-dialog .series-input-wrap { width: 100%; max-width: none; }
@@ -2722,6 +2725,8 @@ label.ptr-row:hover { background: var(--bg-input); }
 .tagger-get-steps > li { margin-bottom: 6px; }
 .tagger-get-files { list-style: none; margin: 4px 0; padding: 0; }
 .pair-window-toggle { margin-left: auto; }
+.sub-with-action { display: flex; align-items: center; }
+#worker-add-dialog .code-block { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .stack-table.auto-paired thead { display: block; }
   .stack-table.auto-paired thead tr { border: 0; padding: 0; margin: 0 0 4px; }

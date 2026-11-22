@@ -73,6 +73,7 @@ var wantFreeRoutes = []string{
 	"POST /settings/tagger/{name}/enable",
 	"POST /settings/tagger/{name}/reset",
 	"POST /settings/workers/local/enable",
+	"POST /settings/workers/add",
 	"POST /settings/workers/local/disable",
 	"POST /settings/workers/{name}/pause",
 	"POST /settings/workers/{name}/resume",

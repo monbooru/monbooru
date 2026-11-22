@@ -572,6 +572,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/maintenance/free-memory", s.freeMemoryPost)
 	rt.free("POST /settings/workers/local/enable", s.taggerLocalWorkerPost(true))
 	rt.free("POST /settings/workers/local/disable", s.taggerLocalWorkerPost(false))
+	rt.free("POST /settings/workers/add", s.taggerWorkerAddPost)
 	rt.free("POST /settings/workers/{name}/pause", s.taggerWorkerPausePost(true))
 	rt.free("POST /settings/workers/{name}/resume", s.taggerWorkerPausePost(false))
 	rt.free("POST /settings/workers/{name}/remove", s.taggerWorkerRemovePost)

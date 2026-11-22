@@ -313,6 +313,9 @@ type WorkerConfig struct {
 	// GatewayToken is the key of a gateway in front of the worker, which
 	// takes the bearer; the worker's token then goes in its own header.
 	GatewayToken string `toml:"gateway_token,omitempty"`
+	// Manual is a worker added by address and token: no pairing brought
+	// it, so none is ended when it is removed.
+	Manual bool `toml:"manual,omitempty"`
 }
 
 type TaggerAggregationCfg struct {

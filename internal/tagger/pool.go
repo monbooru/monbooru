@@ -459,6 +459,12 @@ func (p *Pool) JobWorkers() []JobWorker {
 	return out
 }
 
+// Probe asks a worker not yet listed what it says of itself.
+func (p *Pool) Probe(ctx context.Context, def WorkerDef) (worker.Info, error) {
+	c := worker.Client{BaseURL: def.URL, Token: def.Token, Gateway: def.Gateway, HTTP: p.httpClient}
+	return c.Info(ctx)
+}
+
 // Answers is whether the paired worker named name answers with the token
 // monbooru holds, and the address it was called at.
 func (p *Pool) Answers(ctx context.Context, name string) (string, bool) {

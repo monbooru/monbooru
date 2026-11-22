@@ -536,6 +536,7 @@
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
     {{template "partials/tagger_workers.html" .Workers}}
+    {{template "partials/worker_add_dialog.html" .Workers}}
     {{if not .Workers.None}}
     <form hx-post="/settings/tagger/jobs" hx-target="#flash-tagger" hx-swap="innerHTML">
       <div class="settings-sub">

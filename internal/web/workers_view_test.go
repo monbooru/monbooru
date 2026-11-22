@@ -68,7 +68,7 @@ func TestTheWorkersBlockShowsEachWorkersState(t *testing.T) {
 	spare := workerRowHTML(t, body, "spare")
 	wantIn(t, spare, ">paused<")
 	wantIn(t, spare, "/settings/workers/spare/resume")
-	wantIn(t, body, "To add a worker on another machine")
+	wantIn(t, body, `showModal()">Add a worker</button>`)
 }
 
 func TestTheWorkersBlockFollowsAWorkerThatStartsOrStopsTagging(t *testing.T) {
@@ -88,7 +88,8 @@ func TestTheWorkersBlockFollowsAWorkerThatStartsOrStopsTagging(t *testing.T) {
 func TestWithNoWorkerOnlyTheWorkersBlockShows(t *testing.T) {
 	srv := newTestServer(t)
 	_, body := getBody(t, srv, "/settings")
-	wantIn(t, body, "No worker. To add one, start a monworker instance")
+	wantIn(t, body, `<p class="field-hint">No worker.</p>`)
+	wantIn(t, body, `<dialog id="worker-add-dialog">`)
 	wantIn(t, body, `title="No worker to tag with">no worker`)
 	wantNotIn(t, body, "<h4>Taggers list</h4>")
 	wantNotIn(t, body, "<h4>Local worker</h4>")
@@ -277,19 +278,19 @@ func TestTheWorkersHintGivesMonbooruAddressAndWarnsOnLoopback(t *testing.T) {
 		c.Server.BaseURL, c.Server.BindAddress = "http://192.168.1.5:8455", "127.0.0.1:8455"
 	})
 	body := hintAt(srv, "192.168.1.5:8455")
-	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL=http://192.168.1.5:8455</code>")
+	wantIn(t, body, `<code id="worker-add-pair-cmd">MONWORKER_MONBOORU_URL=http://192.168.1.5:8455 monworker</code>`)
 	wantIn(t, body, `<p class="flash flash-warn">monbooru listens on 127.0.0.1:8455 only.</p>`)
 
 	srv = newTestServerWith(t, false, func(c *config.Config) {
 		c.Server.BaseURL, c.Server.BindAddress = "http://localhost:8455", "0.0.0.0:8455"
 	})
 	body = hintAt(srv, "localhost:8455")
-	wantIn(t, body, "<code>MONWORKER_MONBOORU_URL</code> set to monbooru's address on your network")
+	wantIn(t, body, `MONWORKER_MONBOORU_URL=&lt;monbooru&#39;s address on your network&gt; monworker</code>`)
 	wantNotIn(t, body, "listens on")
 }
 
 func hintAt(srv *Server, host string) string {
-	req := httptest.NewRequest("GET", "/internal/workers", nil)
+	req := httptest.NewRequest("GET", "/settings", nil)
 	req.Host = host
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)

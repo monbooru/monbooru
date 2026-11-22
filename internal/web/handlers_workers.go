@@ -2,9 +2,11 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
@@ -28,6 +30,9 @@ type workerModel struct {
 type workerRow struct {
 	Name, Version, URL, Provider, ModelsDir string
 	Local, Paused, Disabled                 bool
+	// Manual is a worker added by address and token, which no pairing
+	// brought.
+	Manual bool
 	// Missing is the local worker turned on with no monworker to run.
 	Missing bool
 	// Dot is the footer dot's state: ok, down or paused.
@@ -79,6 +84,9 @@ func (s *Server) workersView() workersData {
 	for _, v := range views {
 		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, ModelsDir: v.Info.ModelsDir,
 			Loaded: slices.Sorted(slices.Values(v.Info.Loaded))}
+		if wc := peer.FindWorker(cfg, v.Name); wc != nil && !v.Local {
+			row.Manual = wc.Manual
+		}
 		if v.Info.Provider != "" {
 			row.Provider = config.ExecutionProviderLabel(v.Info.Provider)
 		}
@@ -195,7 +203,8 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	name := r.PathValue("name")
 	var url, token string
 	s.cfgMu.RLock()
-	if wc := peer.FindWorker(s.cfg, name); wc != nil {
+	// A worker added by address holds no pairing to be told the end of.
+	if wc := peer.FindWorker(s.cfg, name); wc != nil && !wc.Manual {
 		url, token = wc.URL, wc.Token
 	}
 	s.cfgMu.RUnlock()
@@ -217,6 +226,65 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeFlashOOB(w, "flash-tagger", "", "")
 	}
+}
+
+// taggerWorkerAddPost lists a worker monbooru reaches by itself, started
+// with a token of the operator's, once it answers with that token.
+func (s *Server) taggerWorkerAddPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	def := tagger.WorkerDef{
+		Name:    strings.TrimSpace(r.FormValue("name")),
+		URL:     strings.TrimRight(strings.TrimSpace(r.FormValue("url")), "/"),
+		Token:   strings.TrimSpace(r.FormValue("token")),
+		Gateway: strings.TrimSpace(r.FormValue("gateway_token")),
+	}
+	u, err := url.Parse(def.URL)
+	switch {
+	case !pairing.ValidApp(def.Name):
+		writeInlineFlash(w, "err", "The name takes letters, digits, - and _, 32 at most.")
+		return
+	case def.Name == tagger.LocalWorker:
+		writeInlineFlash(w, "err", "local is the worker monbooru runs itself.")
+		return
+	case err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https":
+		writeInlineFlash(w, "err", "The address must start with http:// or https://.")
+		return
+	case def.Token == "":
+		writeInlineFlash(w, "err", "A token is required: the worker's MONWORKER_TOKEN.")
+		return
+	}
+	taken := func(c *config.Config) bool { return peer.FindWorker(c, def.Name) != nil }
+	if taken(s.cfgSnapshot()) {
+		writeInlineFlash(w, "err", "A worker named "+def.Name+" is already listed.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	info, err := tagger.CurrentPool().Probe(ctx, def)
+	var se *worker.StatusError
+	switch {
+	case errors.As(err, &se) && se.Status == http.StatusUnauthorized:
+		writeInlineFlash(w, "err", "The worker at "+def.URL+" refused the token.")
+		return
+	case err != nil:
+		writeInlineFlash(w, "err", "No worker answered at "+def.URL+": "+err.Error())
+		return
+	}
+	if err := s.withConfig(func(c *config.Config) error {
+		if taken(c) {
+			return errors.New("a worker named " + def.Name + " is already listed")
+		}
+		c.Workers = append(c.Workers, config.WorkerConfig{Name: def.Name, URL: def.URL, Token: def.Token, GatewayToken: def.Gateway, Manual: true})
+		return nil
+	}); err != nil {
+		writeInlineFlash(w, "err", "Could not save: "+err.Error())
+		return
+	}
+	logx.Infof("settings: worker %s added at %s (monworker %s) from %s", def.Name, def.URL, info.Version, session.ClientIP(r))
+	// The taggers list and the dialogs follow the workers, so the page reloads.
+	w.Header().Set("HX-Refresh", "true")
 }
 
 func (s *Server) workerPairDecided(w http.ResponseWriter, state pairing.State, msg string) {
