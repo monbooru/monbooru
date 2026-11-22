@@ -1490,7 +1490,7 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 }
 .suggest-item:hover { background: var(--bg-input); }
 .suggest-dropdown.suggest-fresh .suggest-item:hover { background: var(--bg-surface); }
-.suggest-name { white-space: nowrap; }
+.suggest-name { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .suggest-description { flex: 1; color: var(--fg-dim); font-size: 11px; font-style: italic; overflow: hidden; text-overflow: ellipsis; }
 .suggest-count { color: var(--fg-dim); font-size: 11px; }
 
