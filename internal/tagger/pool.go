@@ -66,7 +66,9 @@ type Pool struct {
 	// interactive counts the calls of a person waiting, which pass the
 	// batch ones to a free slot.
 	interactive int
-	httpClient  *http.Client
+	// waiting counts the calls waiting for a slot.
+	waiting    int
+	httpClient *http.Client
 	// changed wakes Run when Set brings a worker it has not looked at.
 	changed chan struct{}
 }
@@ -685,8 +687,34 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 				return best, nil
 			}
 		}
+		p.waiting++
 		p.free.Wait()
+		p.waiting--
 	}
+}
+
+// Load is where the calls stand now: those ready and waiting for a slot,
+// and the slots free on the workers that take calls by themselves, the
+// local one only when no paired worker is up.
+type Load struct {
+	Busy    bool
+	Waiting int
+	Free    int
+}
+
+func (p *Pool) Load() Load {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	l := Load{Waiting: p.waiting}
+	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && runnable(w) && w.up })
+	for _, w := range p.workers {
+		l.Busy = l.Busy || w.inUse > 0
+		if runnable(w) && w.up && !(w.def.Local && remoteUp) {
+			l.Free += max(0, w.slots()-w.inUse)
+		}
+	}
+	l.Busy = l.Busy || l.Waiting > 0
+	return l
 }
 
 func (p *Pool) release(w *poolWorker) {

@@ -386,3 +386,28 @@ func TestACallNoWorkerHoldsWholeIsSplitOverTheWorkersThatHoldItsParts(t *testing
 		t.Errorf("results = %v, want %v", got, want)
 	}
 }
+
+func TestLoadCountsTheCallsWaitingAndTheSlotsFree(t *testing.T) {
+	held := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, held), Token: "tok"})
+	if l := p.Load(); l.Busy || l.Waiting != 0 || l.Free != 2 {
+		t.Fatalf("idle load = %+v, want two free slots and nothing waiting", l)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	waitFor(t, func() bool { return p.Load().Waiting == 1 })
+	if l := p.Load(); !l.Busy || l.Free != 0 {
+		t.Errorf("load with three calls on two slots = %+v, want busy, none free, one waiting", l)
+	}
+	close(held.gate)
+	wg.Wait()
+	if l := p.Load(); l.Busy || l.Waiting != 0 || l.Free != 2 {
+		t.Errorf("load after the calls = %+v", l)
+	}
+}

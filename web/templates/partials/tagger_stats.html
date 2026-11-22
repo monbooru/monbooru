@@ -4,7 +4,7 @@
   <div class="table-scroll">
   <table class="stats-table">
     <tbody>
-      {{range .}}
+      {{range .Workers}}
       <tr><th>{{.Name}}</th><td>{{.State}}</td></tr>
       {{if .Up}}
       <tr><th class="stats-d1">Mode</th><td>{{or .Provider "-"}}</td></tr>
@@ -18,6 +18,10 @@
       {{end}}
       {{else}}
       <tr><th>Status</th><td>no worker</td></tr>
+      {{end}}
+      {{if .Load.Busy}}
+      <tr><th>Calls waiting for a slot</th><td>{{.Load.Waiting}}</td></tr>
+      <tr><th>Slots waiting for a call</th><td>{{.Load.Free}}</td></tr>
       {{end}}
     </tbody>
   </table>

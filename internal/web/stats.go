@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/desktop"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 type galleryDBStats struct {
@@ -41,7 +42,7 @@ type statsData struct {
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
-	Tagger     []workerStats
+	Tagger     taggerStats
 }
 
 // Cheap by design: no directory walks.
@@ -123,7 +124,14 @@ func (s *Server) gatherStats() statsData {
 	return out
 }
 
-func gatherTaggerStats(s *Server) []workerStats {
+// taggerStats is the Stats block: each worker, and while calls run, which
+// side they wait on.
+type taggerStats struct {
+	Workers []workerStats
+	Load    tagger.Load
+}
+
+func gatherTaggerStats(s *Server) taggerStats {
 	rows := s.workersView().Rows
 	out := make([]workerStats, 0, len(rows))
 	for _, r := range rows {
@@ -142,7 +150,7 @@ func gatherTaggerStats(s *Server) []workerStats {
 		}
 		out = append(out, st)
 	}
-	return out
+	return taggerStats{Workers: out, Load: tagger.CurrentPool().Load()}
 }
 
 // procChildren reads every thread's list: a child is listed under the
