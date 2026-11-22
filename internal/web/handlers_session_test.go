@@ -200,6 +200,36 @@ func TestSessionPage_CellMediaSrc(t *testing.T) {
 	wantNotIn(t, body, `src="/thumbnails/`+srv.activeGallery()+`/`+strconv.FormatInt(videoID, 10)+`.jpg" alt="image `+strconv.FormatInt(videoID, 10)+`" class="session-cell-img"`)
 }
 
+// The shared session partials render what main.js's pairSession looks for:
+// the cells in left-to-right order, each knowing its side of the pair, the
+// left id for the form, and the swap, compare and slider pieces.
+func TestSessionPage_RendersTheSharedSessionPieces(t *testing.T) {
+	srv := newTestServer(t)
+	small := insertRawImage(t, srv, "pieces_small.png", "")
+	big := insertRawImage(t, srv, "pieces_big.png", "")
+	mustExec(t, srv.db().Write, `UPDATE images SET file_size = 100 WHERE id = ?`, small)
+	mustExec(t, srv.db().Write, `UPDATE images SET file_size = 900 WHERE id = ?`, big)
+	queueTagRow(t, srv.db(), small, big, 3, relations.SourcePhash, 0)
+	smallID, bigID := strconv.FormatInt(small, 10), strconv.FormatInt(big, 10)
+
+	body := mustGetBody(t, srv, "/relations/session")
+	// The bigger file is B (the higher id), and goes on the left.
+	left := strings.Index(body, `<div class="session-cell" data-side="B">`)
+	right := strings.Index(body, `<div class="session-cell" data-side="A">`)
+	if left < 0 || right < left {
+		t.Fatalf("cells at %d (B) and %d (A), want B's cell first", left, right)
+	}
+	leftCell, rightCell := body[left:right], body[right:]
+	wantIn(t, leftCell, `<h4 class="session-role" data-role="left">Left</h4>`)
+	wantIn(t, leftCell, `<a href="/images/`+bigID+`" target="_blank">`)
+	wantIn(t, rightCell, `<h4 class="session-role" data-role="right">Right</h4>`)
+	wantIn(t, rightCell, `<a href="/images/`+smallID+`" target="_blank">`)
+	wantIn(t, body, `<input type="hidden" name="left" id="session-left" value="`+bigID+`">`)
+	for _, id := range []string{"session-swap", "session-compare", "session-compare-dialog", "compare-stage", "compare-divider", "compare-close"} {
+		wantIn(t, body, `id="`+id+`"`)
+	}
+}
+
 func TestSessionPage_DecisionFormSwapsIntoTheFlashSlot(t *testing.T) {
 	srv := newTestServer(t)
 	a := insertBareImage(t, srv, "/tmp/flash_a.png", "png", "sha_flash_a")

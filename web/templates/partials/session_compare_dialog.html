@@ -1,0 +1,21 @@
+{{define "partials/session_compare_dialog.html"}}
+{{- /* Filled when opened: the slots get the two images, left over right,
+       split by the divider. */ -}}
+<dialog id="session-compare-dialog" class="compare-dialog">
+  <div class="compare-captions" aria-hidden="true">
+    <span class="compare-caption">Left <span class="mono-small" id="compare-caption-left-id">#?</span></span>
+    <span class="compare-caption">Right <span class="mono-small" id="compare-caption-right-id">#?</span></span>
+  </div>
+  <div class="compare-stage" id="compare-stage">
+    <div class="compare-slot compare-slot-left"  id="compare-slot-left"></div>
+    <div class="compare-slot compare-slot-right" id="compare-slot-right"></div>
+    <div class="compare-divider" id="compare-divider" aria-hidden="true">
+      <span class="compare-divider-handle">&#x21d4;</span>
+    </div>
+  </div>
+  <div class="dialog-actions">
+    <span class="field-hint">Scroll or pinch to zoom, drag to pan, double-click or double-tap to reset.</span>
+    <button type="button" id="compare-close">Close</button>
+  </div>
+</dialog>
+{{end}}

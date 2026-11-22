@@ -1,0 +1,15 @@
+{{define "partials/session_cell.html"}}
+{{- /* One side of a two-image session. Swap sides moves the whole cell and
+       relabels its .session-role; data-side says which of the pair's A
+       and B it holds. */ -}}
+<div class="session-cell" data-side="{{.Side}}">
+  <h4 class="session-role" data-role="{{.Role}}">{{if eq .Role "left"}}Left{{else}}Right{{end}}</h4>
+  <a href="/images/{{.Image.ID}}" target="_blank">
+    {{template "partials/session_cell_media.html" (dict "ID" .Image.ID "FileType" .Image.FileType "ActiveGallery" .ActiveGallery)}}
+  </a>
+  <div class="session-cell-meta">
+    <strong class="session-cell-filename">{{.Image.Filename}}</strong>
+    <div class="session-facts mono-small">#{{.Image.ID}}</div>
+  </div>
+</div>
+{{end}}
