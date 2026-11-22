@@ -9,12 +9,6 @@ import (
 	"sort"
 )
 
-var (
-	leftWins  = Outcome{Winner: WinnerLeft}
-	tie       = Outcome{Winner: WinnerTie}
-	rightWins = Outcome{Winner: WinnerRight}
-)
-
 // answerer is a simulated person answering pairs, following Rao & Kupper's
 // (1967) tie model. Each time a pair is shown, they feel a preference: the
 // true strength gap plus random noise. If the feeling is weaker than
@@ -50,13 +44,13 @@ func (a answerer) Answer(rng *rand.Rand, gap float64) (o Outcome, skipped bool) 
 	felt := gap + math.Log(u/(1-u)) // logistic noise: P(felt > 0) = sigmoid(gap)
 	switch {
 	case felt > a.Threshold:
-		return leftWins, false
+		return LeftWins, false
 	case felt < -a.Threshold:
-		return rightWins, false
+		return RightWins, false
 	case rng.IntN(2) == 0:
-		return tie, false
+		return Tie, false
 	default:
-		return Outcome{}, true
+		return 0, true
 	}
 }
 

@@ -18,11 +18,11 @@ func TestAnswerChances(t *testing.T) {
 				switch {
 				case skipped:
 					counts["skip"]++
-				case o == leftWins:
+				case o == LeftWins:
 					counts["left"]++
-				case o == rightWins:
+				case o == RightWins:
 					counts["right"]++
-				case o == tie:
+				case o == Tie:
 					counts["tie"]++
 				}
 			}
@@ -51,10 +51,10 @@ func TestSimulateVotesMix(t *testing.T) {
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
-	counts := map[Winner]int{}
+	counts := map[Outcome]int{}
 	votes := simulateVotes(rng, truth, shown, tiesAndSkips)
 	for _, v := range votes {
-		counts[v.Outcome.Winner]++
+		counts[v.Outcome]++
 		if v.Left == v.Right || v.Left < 1 || v.Left > 1000 || v.Right < 1 || v.Right > 1000 {
 			t.Fatalf("vote %+v: want two different images with ids 1 to 1000", v)
 		}
@@ -65,9 +65,9 @@ func TestSimulateVotesMix(t *testing.T) {
 		got, want float64
 	}{
 		{"skip", float64(shown-len(votes)) / shown, 0.1},
-		{"tie", float64(counts[WinnerTie]) / shown, 0.1},
-		{"left", float64(counts[WinnerLeft]) / shown, 0.4},
-		{"right", float64(counts[WinnerRight]) / shown, 0.4},
+		{"tie", float64(counts[Tie]) / shown, 0.1},
+		{"left", float64(counts[LeftWins]) / shown, 0.4},
+		{"right", float64(counts[RightWins]) / shown, 0.4},
 	}
 	for _, s := range shares {
 		if !near(s.got, s.want, 0.01) {
@@ -91,7 +91,7 @@ func TestSimulateOneVoteEach(t *testing.T) {
 	for _, v := range votes {
 		seen[v.Left]++
 		seen[v.Right]++
-		if v.Outcome == tie {
+		if v.Outcome == Tie {
 			ties++
 		}
 		if v.Left == v.Right || v.Left < 1 || v.Left > 2000 || v.Right < 1 || v.Right > 2000 {

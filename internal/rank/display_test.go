@@ -8,13 +8,13 @@ import (
 func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
 
 // Glickman's "Example of the Glicko-2 system" rounds the scale to 173.7178.
-func TestGlickoScaleMatchesThePaper(t *testing.T) {
-	if !near(glickoScale, 173.7178, 1e-4) {
-		t.Errorf("glickoScale = %v, want 173.7178", glickoScale)
+func TestPointsPerStrengthMatchesThePaper(t *testing.T) {
+	if !near(pointsPerStrength, 173.7178, 1e-4) {
+		t.Errorf("pointsPerStrength = %v, want 173.7178", pointsPerStrength)
 	}
 }
 
-func TestRankingFromStrength(t *testing.T) {
+func TestRankFromStrength(t *testing.T) {
 	cases := []struct {
 		strength, want float64
 	}{
@@ -26,8 +26,8 @@ func TestRankingFromStrength(t *testing.T) {
 		{-math.Ln10, 1100},
 	}
 	for _, c := range cases {
-		if got := RankingFromStrength(c.strength); !near(got, c.want, 1e-9) {
-			t.Errorf("RankingFromStrength(%v) = %v, want %v", c.strength, got, c.want)
+		if got := RankFromStrength(c.strength); !near(got, c.want, 1e-9) {
+			t.Errorf("RankFromStrength(%v) = %v, want %v", c.strength, got, c.want)
 		}
 	}
 }
@@ -52,12 +52,12 @@ func TestRDFromUncertainty(t *testing.T) {
 	}
 }
 
-// Filters convert a typed ranking back to a strength, so the two directions
+// Filters convert a typed rank back to a strength, so the two directions
 // must agree everywhere, including far below and above 1500.
 func TestDisplayRoundTrips(t *testing.T) {
 	for _, strength := range []float64{-10, -3.5, -1, -0.001, 0, 0.001, 1, 3.5, 10} {
-		if got := StrengthFromRanking(RankingFromStrength(strength)); !near(got, strength, 1e-12) {
-			t.Errorf("StrengthFromRanking(RankingFromStrength(%v)) = %v", strength, got)
+		if got := StrengthFromRank(RankFromStrength(strength)); !near(got, strength, 1e-12) {
+			t.Errorf("StrengthFromRank(RankFromStrength(%v)) = %v", strength, got)
 		}
 	}
 	for _, uncertainty := range []float64{0, 0.25, 1, 2, 2.0148, 5} {
@@ -68,13 +68,13 @@ func TestDisplayRoundTrips(t *testing.T) {
 }
 
 // The sort and filters rely on a higher strength always showing a higher
-// ranking, so an index on strength can serve a filter on ranking.
-func TestRankingRisesWithStrength(t *testing.T) {
+// rank, so an index on strength can serve a filter on rank.
+func TestRankRisesWithStrength(t *testing.T) {
 	previous := math.Inf(-1)
 	for strength := -10.0; strength <= 10; strength += 0.5 {
-		got := RankingFromStrength(strength)
+		got := RankFromStrength(strength)
 		if got <= previous {
-			t.Fatalf("RankingFromStrength(%v) = %v, not above the previous %v", strength, got, previous)
+			t.Fatalf("RankFromStrength(%v) = %v, not above the previous %v", strength, got, previous)
 		}
 		previous = got
 	}

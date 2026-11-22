@@ -176,9 +176,9 @@ func TestFitOneVoteEach(t *testing.T) {
 		l, r := fit[v.Left], fit[v.Right]
 		var want [2]Estimate
 		switch v.Outcome {
-		case leftWins:
+		case LeftWins:
 			want = [2]Estimate{{Strength: winner, Uncertainty: winnerUncertainty}, {Strength: -winner, Uncertainty: winnerUncertainty}}
-		case rightWins:
+		case RightWins:
 			want = [2]Estimate{{Strength: -winner, Uncertainty: winnerUncertainty}, {Strength: winner, Uncertainty: winnerUncertainty}}
 		default:
 			want = [2]Estimate{{Strength: 0, Uncertainty: tieUncertainty}, {Strength: 0, Uncertainty: tieUncertainty}}

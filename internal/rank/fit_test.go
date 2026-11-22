@@ -59,7 +59,7 @@ func metricGateVotes() []Vote {
 	for i := range wins {
 		for j := range wins[i] {
 			for range wins[i][j] {
-				votes = append(votes, vote(int64(i+1), int64(j+1), leftWins))
+				votes = append(votes, vote(int64(i+1), int64(j+1), LeftWins))
 			}
 		}
 	}
@@ -69,10 +69,10 @@ func metricGateVotes() []Vote {
 // mixedVotes has ties, upsets, repeat pairs, and both sides used.
 func mixedVotes() []Vote {
 	return []Vote{
-		vote(1, 2, leftWins), vote(2, 1, rightWins), vote(1, 3, tie),
-		vote(3, 2, leftWins), vote(2, 4, rightWins), vote(4, 1, leftWins),
-		vote(5, 1, rightWins), vote(5, 4, tie), vote(3, 5, leftWins),
-		vote(2, 3, tie), vote(4, 3, rightWins), vote(1, 5, leftWins),
+		vote(1, 2, LeftWins), vote(2, 1, RightWins), vote(1, 3, Tie),
+		vote(3, 2, LeftWins), vote(2, 4, RightWins), vote(4, 1, LeftWins),
+		vote(5, 1, RightWins), vote(5, 4, Tie), vote(3, 5, LeftWins),
+		vote(2, 3, Tie), vote(4, 3, RightWins), vote(1, 5, LeftWins),
 	}
 }
 
@@ -151,8 +151,8 @@ func TestFitWithPriorBalancesVotesAndAssumption(t *testing.T) {
 	sets := map[string][]Vote{
 		"MetricGate": metricGateVotes(),
 		"mixed":      mixedVotes(),
-		"one vote":   {vote(1, 2, leftWins)},
-		"undefeated": {vote(1, 2, leftWins), vote(1, 3, leftWins), vote(2, 3, tie)},
+		"one vote":   {vote(1, 2, LeftWins)},
+		"undefeated": {vote(1, 2, LeftWins), vote(1, 3, LeftWins), vote(2, 3, Tie)},
 	}
 	for name, votes := range sets {
 		for _, startUncertainty := range []float64{0.5, 1, 2, 5} {
@@ -188,14 +188,14 @@ func TestFitWithPriorAveragesZero(t *testing.T) {
 // 1 − sigmoid(2t) = t/4, so t ≈ 0.740774 (solved by bisection in Python).
 // Uncertainty = 1/√(sigmoid(2t) × (1 − sigmoid(2t)) + 1/4) ≈ 1.579369.
 func TestFitOneVote(t *testing.T) {
-	fit := fitStrengths(t, []Vote{vote(7, 9, rightWins)}, 2)
+	fit := fitStrengths(t, []Vote{vote(7, 9, RightWins)}, 2)
 	sameFit(t, "one vote", fit, map[int64]Estimate{
 		9: {Strength: 0.7407743930623084, Uncertainty: 1.5793690933393363},
 		7: {Strength: -0.7407743930623084, Uncertainty: 1.5793690933393363},
 	}, 1e-8)
-	// That's ranking ≈ 1629, RD ≈ 274.
-	if got := math.Round(RankingFromStrength(fit[9].Strength)); got != 1629 {
-		t.Errorf("winner's ranking = %v, want 1629", got)
+	// That's rank ≈ 1629, RD ≈ 274.
+	if got := math.Round(RankFromStrength(fit[9].Strength)); got != 1629 {
+		t.Errorf("winner's rank = %v, want 1629", got)
 	}
 }
 
@@ -242,11 +242,11 @@ func TestFitIgnoresVoteOrderAndSides(t *testing.T) {
 
 // flipSides shows the same vote the other way round.
 func flipSides(v Vote) Vote {
-	switch v.Outcome.Winner {
-	case WinnerLeft:
-		v.Outcome.Winner = WinnerRight
-	case WinnerRight:
-		v.Outcome.Winner = WinnerLeft
+	switch v.Outcome {
+	case LeftWins:
+		v.Outcome = RightWins
+	case RightWins:
+		v.Outcome = LeftWins
 	}
 	v.Left, v.Right = v.Right, v.Left
 	return v
@@ -260,17 +260,17 @@ func TestFitTiesAreHalfWins(t *testing.T) {
 		ties, wins []Vote
 	}{
 		{"two ties = a win and a loss",
-			[]Vote{vote(1, 2, tie), vote(1, 2, tie)},
-			[]Vote{vote(1, 2, leftWins), vote(1, 2, rightWins)}},
+			[]Vote{vote(1, 2, Tie), vote(1, 2, Tie)},
+			[]Vote{vote(1, 2, LeftWins), vote(1, 2, RightWins)}},
 		{"a win and two ties = two wins and a loss",
-			[]Vote{vote(1, 2, leftWins), vote(1, 2, tie), vote(2, 1, tie)},
-			[]Vote{vote(1, 2, leftWins), vote(1, 2, leftWins), vote(1, 2, rightWins)}},
+			[]Vote{vote(1, 2, LeftWins), vote(1, 2, Tie), vote(2, 1, Tie)},
+			[]Vote{vote(1, 2, LeftWins), vote(1, 2, LeftWins), vote(1, 2, RightWins)}},
 	}
 	for _, c := range cases {
 		sameFit(t, c.name, fitStrengths(t, c.ties, 2), fitStrengths(t, c.wins, 2), 1e-9)
 	}
 	// Only ties: everyone is average.
-	for id, s := range fitStrengths(t, []Vote{vote(1, 2, tie), vote(2, 3, tie), vote(3, 1, tie)}, 2) {
+	for id, s := range fitStrengths(t, []Vote{vote(1, 2, Tie), vote(2, 3, Tie), vote(3, 1, Tie)}, 2) {
 		if !near(s.Strength, 0, 1e-12) {
 			t.Errorf("only ties: image %d strength = %v, want 0", id, s.Strength)
 		}
@@ -281,7 +281,7 @@ func TestFitTiesAreHalfWins(t *testing.T) {
 // each sits around 0 on its own (the starting assumption's job).
 func TestFitSeparateGroups(t *testing.T) {
 	groupA := metricGateVotes()
-	groupB := []Vote{vote(11, 12, leftWins), vote(12, 13, leftWins), vote(11, 13, tie)}
+	groupB := []Vote{vote(11, 12, LeftWins), vote(12, 13, LeftWins), vote(11, 13, Tie)}
 	together := fitStrengths(t, append(append([]Vote{}, groupA...), groupB...), 2)
 	want := fitStrengths(t, groupA, 2)
 	for id, s := range fitStrengths(t, groupB, 2) {
@@ -318,8 +318,8 @@ func TestConnectedGroups(t *testing.T) {
 
 // Each linked group averages 0 on its own, as shiftToAverageZero assumes.
 func TestFitEachGroupAveragesZero(t *testing.T) {
-	groupA := []Vote{vote(1, 2, leftWins), vote(1, 2, leftWins), vote(2, 3, leftWins)}
-	groupB := []Vote{vote(11, 12, leftWins), vote(13, 12, tie)}
+	groupA := []Vote{vote(1, 2, LeftWins), vote(1, 2, LeftWins), vote(2, 3, LeftWins)}
+	groupB := []Vote{vote(11, 12, LeftWins), vote(13, 12, Tie)}
 	fit := fitStrengths(t, append(groupA, groupB...), 2)
 	for name, ids := range map[string][]int64{"A": {1, 2, 3}, "B": {11, 12, 13}} {
 		total := 0.0
@@ -336,7 +336,7 @@ func TestFitEachGroupAveragesZero(t *testing.T) {
 // strength runs off to infinity), so the fit must fail. With the starting
 // assumption it gets a finite strength, above the others.
 func TestFitUndefeatedImage(t *testing.T) {
-	votes := []Vote{vote(1, 2, leftWins), vote(3, 1, rightWins), vote(2, 3, leftWins), vote(3, 2, leftWins)}
+	votes := []Vote{vote(1, 2, LeftWins), vote(3, 1, RightWins), vote(2, 3, LeftWins), vote(3, 2, LeftWins)}
 	if _, err := fitVotes(context.Background(), votes, 0); err == nil {
 		t.Errorf("fit without a starting assumption succeeded, want an error")
 	}
@@ -377,7 +377,7 @@ func TestFitUncertainty(t *testing.T) {
 
 func TestFitReturnsOnlyVotedImages(t *testing.T) {
 	bt := newTest(t)
-	got, err := bt.Fit(context.Background(), []Vote{vote(5, 8, leftWins), vote(8, 13, tie)})
+	got, err := bt.Fit(context.Background(), []Vote{vote(5, 8, LeftWins), vote(8, 13, Tie)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestFitReturnsOnlyVotedImages(t *testing.T) {
 		t.Errorf("Fit returned %v, want exactly images 5, 8 and 13", got)
 	}
 	// What Fit returns can go straight into Update.
-	if _, _, err := bt.Update(got[5], got[8], leftWins); err != nil {
+	if _, _, err := bt.Update(got[5], got[8], LeftWins); err != nil {
 		t.Errorf("Update(Fit results): %v", err)
 	}
 
@@ -421,9 +421,9 @@ func TestFitUsesSettings(t *testing.T) {
 func TestFitRejectsBadVotes(t *testing.T) {
 	bt := newTest(t)
 	cases := map[string][]Vote{
-		"image against itself": {vote(1, 2, leftWins), vote(3, 3, leftWins)},
-		"no winner":            {vote(1, 2, Outcome{})},
-		"tie with a degree":    {vote(1, 2, Outcome{Winner: WinnerTie, Degree: DegreeSlight})},
+		"image against itself": {vote(1, 2, LeftWins), vote(3, 3, LeftWins)},
+		"no outcome":           {vote(1, 2, 0)},
+		"unknown outcome":      {vote(1, 2, 4)},
 	}
 	for name, votes := range cases {
 		if _, err := bt.Fit(context.Background(), votes); err == nil {
@@ -448,15 +448,15 @@ func TestLogLikelihood(t *testing.T) {
 		strengths map[int64]float64
 		want      float64
 	}{
-		{"coin flip", []Vote{vote(1, 2, leftWins)}, nil, math.Log(0.5)},
-		{"tie between equals", []Vote{vote(1, 2, tie)}, nil, math.Log(0.5)},
-		{"expected win", []Vote{vote(1, 2, leftWins)}, map[int64]float64{1: 1}, math.Log(sigmoid(1))},
-		{"upset", []Vote{vote(1, 2, rightWins)}, map[int64]float64{1: 1}, math.Log(sigmoid(-1))},
+		{"coin flip", []Vote{vote(1, 2, LeftWins)}, nil, math.Log(0.5)},
+		{"tie between equals", []Vote{vote(1, 2, Tie)}, nil, math.Log(0.5)},
+		{"expected win", []Vote{vote(1, 2, LeftWins)}, map[int64]float64{1: 1}, math.Log(sigmoid(1))},
+		{"upset", []Vote{vote(1, 2, RightWins)}, map[int64]float64{1: 1}, math.Log(sigmoid(-1))},
 		// A tie is half a win and half a loss: log √(p × (1 − p)).
-		{"tie", []Vote{vote(1, 2, tie)}, map[int64]float64{1: 1}, 0.5*math.Log(sigmoid(1)) + 0.5*math.Log(sigmoid(-1))},
+		{"tie", []Vote{vote(1, 2, Tie)}, map[int64]float64{1: 1}, 0.5*math.Log(sigmoid(1)) + 0.5*math.Log(sigmoid(-1))},
 		// Huge gaps stay finite.
-		{"huge upset", []Vote{vote(1, 2, rightWins)}, map[int64]float64{1: 1000}, -1000},
-		{"several votes add up", []Vote{vote(1, 2, leftWins), vote(2, 1, leftWins)}, nil, 2 * math.Log(0.5)},
+		{"huge upset", []Vote{vote(1, 2, RightWins)}, map[int64]float64{1: 1000}, -1000},
+		{"several votes add up", []Vote{vote(1, 2, LeftWins), vote(2, 1, LeftWins)}, nil, 2 * math.Log(0.5)},
 	}
 	for _, c := range cases {
 		got, err := logLikelihood(c.votes, c.strengths)
@@ -464,7 +464,7 @@ func TestLogLikelihood(t *testing.T) {
 			t.Errorf("%s: logLikelihood = %v, %v; want %v", c.name, got, err, c.want)
 		}
 	}
-	if _, err := logLikelihood([]Vote{vote(1, 2, Outcome{})}, nil); err == nil {
+	if _, err := logLikelihood([]Vote{vote(1, 2, 0)}, nil); err == nil {
 		t.Errorf("logLikelihood with an invalid outcome succeeded, want an error")
 	}
 }
