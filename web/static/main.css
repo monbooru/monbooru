@@ -1099,6 +1099,7 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
   .danger-zone > * { flex: 1 1 auto; margin-left: 0; }
 }
 
+.btn-inbox { white-space: nowrap; }
 .btn-fav, .btn-inbox {
   color: var(--fg-dim);
   padding: 2px 8px;
