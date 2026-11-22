@@ -329,3 +329,18 @@ func installTagger(t *testing.T, modelPath, name, csv string) string {
 	}
 	return dir
 }
+
+func TestSettingsTaggerJobsSavesThePreparationCount(t *testing.T) {
+	srv := newTestServer(t)
+	w := postForm(t, srv, "/settings/tagger/jobs", url.Values{"prepare_parallel": {"12"}})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Saved.") {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	if got := srv.cfg.Tagger.PrepareParallel; got != 12 {
+		t.Errorf("prepare_parallel = %d, want 12", got)
+	}
+	w = postForm(t, srv, "/settings/tagger/jobs", url.Values{"prepare_parallel": {"-1"}})
+	if !strings.Contains(w.Body.String(), "must be 0 or more") || srv.cfg.Tagger.PrepareParallel != 12 {
+		t.Errorf("a negative count was taken: %s, now %d", w.Body.String(), srv.cfg.Tagger.PrepareParallel)
+	}
+}

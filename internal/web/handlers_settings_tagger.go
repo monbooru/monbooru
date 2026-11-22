@@ -168,6 +168,26 @@ func (s *Server) settingsTaggerPost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) settingsTaggerJobsPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	n, err := strconv.Atoi(r.FormValue("prepare_parallel"))
+	if err != nil || n < 0 {
+		writeInlineFlash(w, "err", "Images prepared at once must be 0 or more.")
+		return
+	}
+	if err := s.withConfig(func(c *config.Config) error {
+		c.Tagger.PrepareParallel = n
+		return nil
+	}); err != nil {
+		writeInlineFlash(w, "err", "Could not save: "+err.Error())
+		return
+	}
+	logx.Infof("settings: tagger jobs updated (prepare_parallel=%d)", n)
+	writeInlineFlash(w, "ok", "Saved.")
+}
+
 func (s *Server) settingsTaggerEnablePost(w http.ResponseWriter, r *http.Request) {
 	s.applyTaggerEnabled(w, strings.TrimSpace(r.PathValue("name")), true)
 }

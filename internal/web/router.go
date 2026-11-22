@@ -501,6 +501,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/general/ignore", s.settingsIgnorePost)
 	rt.free("POST /settings/monloader", s.settingsMonloaderPost)
 	rt.free("POST /settings/tagger", s.settingsTaggerPost)
+	rt.free("POST /settings/tagger/jobs", s.settingsTaggerJobsPost)
 	rt.free("POST /settings/auth/password", s.settingsPasswordPost)
 	rt.free("POST /settings/auth/remove-password", s.settingsRemovePasswordPost)
 	rt.free("POST /settings/auth/tokens", s.settingsTokenCreate)

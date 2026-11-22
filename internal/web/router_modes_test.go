@@ -66,6 +66,7 @@ var wantFreeRoutes = []string{
 	"POST /settings/schedule",
 	"POST /settings/schedule/run",
 	"POST /settings/tagger",
+	"POST /settings/tagger/jobs",
 	"POST /settings/tagger/{name}/config",
 	"POST /settings/tagger/{name}/delete",
 	"POST /settings/tagger/{name}/disable",

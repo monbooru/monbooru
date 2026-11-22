@@ -536,6 +536,17 @@
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
     {{template "partials/tagger_workers.html" .Workers}}
+    {{if not .Workers.None}}
+    <form hx-post="/settings/tagger/jobs" hx-target="#flash-tagger" hx-swap="innerHTML">
+      <div class="settings-sub">
+        <h4>Jobs</h4>
+        <div class="settings-cols">
+          {{template "partials/range_field.html" dict "Name" "prepare_parallel" "Label" "Images prepared at once" "Min" 0 "Max" .CPUCount "Step" 1 "Value" $cfg.Tagger.PrepareParallel "ZeroLabel" "auto"}}
+        </div>
+        <div class="settings-actions"><button type="submit">Save</button></div>
+      </div>
+    </form>
+    {{end}}
     {{if .LocalRunning}}
     <form hx-post="/settings/tagger" hx-target="#flash-tagger" hx-swap="innerHTML">
       <div class="settings-sub">
