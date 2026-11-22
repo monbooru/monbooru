@@ -7,9 +7,7 @@ package rankingtest
 import (
 	"math"
 	"math/rand/v2"
-	"slices"
 	"sort"
-	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -106,65 +104,6 @@ func SimulateOneVoteEach(rng *rand.Rand, truth []float64, a Answerer) []ranking.
 	return votes
 }
 
-// SimulatePicked shows n pairs picked by information, the way the plan's
-// picker works: each time it scores `candidates` random pairs with
-// ranking.PairInformation on the current estimates, and shows the best,
-// ties broken at random (ranking.PickBest). After each vote, alg.Update
-// brings the two images up to date, so later picks see what earlier votes
-// taught. Vote k is made at start + k × step. Skipped pairs leave no vote.
-// Image i has id i+1.
-//
-// A simplification of the real picker (step 7), which will also lean towards
-// unsure images and nearby rankings when choosing candidates, and handle
-// skipped pairs.
-func SimulatePicked(rng *rand.Rand, truth []float64, n int, a Answerer, alg ranking.Algorithm, candidates int, start time.Time, step time.Duration) ([]ranking.Vote, error) {
-	states := map[int]ranking.State{}
-	get := func(i int) ranking.State {
-		if s, ok := states[i]; ok {
-			return s
-		}
-		return alg.Start()
-	}
-	votes := make([]ranking.Vote, 0, n)
-	pairs := make([][2]int, candidates)
-	scores := make([]float64, candidates)
-	for k := range n {
-		for c := range pairs {
-			i := rng.IntN(len(truth))
-			j := rng.IntN(len(truth) - 1)
-			if j >= i {
-				j++
-			}
-			pairs[c] = [2]int{i, j}
-			scores[c] = ranking.PairInformation(alg.Shown(get(i)), alg.Shown(get(j)))
-		}
-		picked := pairs[ranking.PickBest(scores, rng)]
-		i, j := picked[0], picked[1]
-		o, skipped := a.Answer(rng, truth[i]-truth[j])
-		if skipped {
-			continue
-		}
-		at := start.Add(time.Duration(k) * step)
-		l, r, err := alg.Update(get(i), get(j), o, at)
-		if err != nil {
-			return nil, err
-		}
-		states[i], states[j] = l, r
-		votes = append(votes, ranking.Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o, At: at})
-	}
-	return votes, nil
-}
-
-// SpreadOverTime returns a copy of votes made evenly over span, starting at
-// start, in their order: for algorithms that care when votes were made.
-func SpreadOverTime(votes []ranking.Vote, start time.Time, span time.Duration) []ranking.Vote {
-	out := slices.Clone(votes)
-	for i := range out {
-		out[i].At = start.Add(time.Duration(float64(span) * float64(i) / float64(len(out))))
-	}
-	return out
-}
-
 // SpacedTruth gives n true strengths evenly spread from −2 to 2 (rankings
 // about 1150 to 1850), so they average 0, like a fit does.
 func SpacedTruth(n int) []float64 {
@@ -209,8 +148,7 @@ func mean(x []float64) float64 {
 	return total / float64(len(x))
 }
 
-// Accuracy sums up a fit against the known truth, over the images it ranked
-// (see ranking.Algorithm.Shown for turning states into estimates).
+// Accuracy sums up a fit against the known truth, over the images it ranked.
 //
 //   - avgUncertainty: the average uncertainty, in strength units (× 173.72
 //     for RD in ranking points).

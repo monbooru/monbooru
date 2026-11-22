@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
-	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -17,8 +16,8 @@ func vote(left, right int64, o ranking.Outcome) ranking.Vote {
 }
 
 // fitStrengths runs the refit with the given starting uncertainty
-// (math.Inf(1) = no starting assumption) and returns its states.
-func fitStrengths(t *testing.T, votes []ranking.Vote, startUncertainty float64) map[int64]state {
+// (math.Inf(1) = no starting assumption) and returns its estimates.
+func fitStrengths(t *testing.T, votes []ranking.Vote, startUncertainty float64) map[int64]ranking.Estimate {
 	t.Helper()
 	got, err := fitVotes(context.Background(), votes, 1/(startUncertainty*startUncertainty))
 	if err != nil {
@@ -27,15 +26,15 @@ func fitStrengths(t *testing.T, votes []ranking.Vote, startUncertainty float64) 
 	return got
 }
 
-func strengthsOf(states map[int64]state) map[int64]float64 {
-	out := make(map[int64]float64, len(states))
-	for id, s := range states {
+func strengthsOf(estimates map[int64]ranking.Estimate) map[int64]float64 {
+	out := make(map[int64]float64, len(estimates))
+	for id, s := range estimates {
 		out[id] = s.Strength
 	}
 	return out
 }
 
-func sameFit(t *testing.T, name string, got, want map[int64]state, tolerance float64) {
+func sameFit(t *testing.T, name string, got, want map[int64]ranking.Estimate, tolerance float64) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Errorf("%s: %d images, want %d", name, len(got), len(want))
@@ -192,7 +191,7 @@ func TestFitWithPriorAveragesZero(t *testing.T) {
 // Uncertainty = 1/√(sigmoid(2t) × (1 − sigmoid(2t)) + 1/4) ≈ 1.579369.
 func TestFitOneVote(t *testing.T) {
 	fit := fitStrengths(t, []ranking.Vote{vote(7, 9, rightWins)}, 2)
-	sameFit(t, "one vote", fit, map[int64]state{
+	sameFit(t, "one vote", fit, map[int64]ranking.Estimate{
 		9: {Strength: 0.7407743930623084, Uncertainty: 1.5793690933393363},
 		7: {Strength: -0.7407743930623084, Uncertainty: 1.5793690933393363},
 	}, 1e-8)
@@ -384,14 +383,14 @@ func TestFitReturnsOnlyVotedImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[5] == nil || got[8] == nil || got[13] == nil {
+	_, has5 := got[5]
+	_, has8 := got[8]
+	_, has13 := got[13]
+	if len(got) != 3 || !has5 || !has8 || !has13 {
 		t.Errorf("Fit returned %v, want exactly images 5, 8 and 13", got)
 	}
-	// What Fit returns is a normal state: Shown, Encode and Update take it.
-	if _, err := bt.Encode(got[5]); err != nil {
-		t.Errorf("Encode(Fit result): %v", err)
-	}
-	if _, _, err := bt.Update(got[5], got[8], leftWins, time.Time{}); err != nil {
+	// What Fit returns can go straight into Update.
+	if _, _, err := bt.Update(got[5], got[8], leftWins); err != nil {
 		t.Errorf("Update(Fit results): %v", err)
 	}
 
@@ -414,7 +413,7 @@ func TestFitUsesSettings(t *testing.T) {
 		}
 		want := fitStrengths(t, mixedVotes(), startUncertainty)
 		for id, s := range got {
-			if s.(state) != want[id] {
+			if s != want[id] {
 				t.Errorf("start uncertainty %v, image %d: Fit = %+v, want %+v", startUncertainty, id, s, want[id])
 			}
 		}

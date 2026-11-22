@@ -7,15 +7,14 @@ import (
 	"github.com/monbooru/monbooru/internal/ranking"
 )
 
-// newTest is Bradley–Terry with the default settings, unwrapped so tests can
-// reach its internals.
-func newTest(t testing.TB) *algorithm {
+// newTest is Bradley–Terry with the default settings.
+func newTest(t testing.TB) *Model {
 	t.Helper()
 	bt, err := New(DefaultSettings())
 	if err != nil {
 		t.Fatalf("New(defaults): %v", err)
 	}
-	return bt.(*algorithm)
+	return bt
 }
 
 func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
@@ -51,28 +50,18 @@ func TestNewRejectsBadSettings(t *testing.T) {
 	}
 }
 
-func TestIdentity(t *testing.T) {
-	bt := newTest(t)
-	if got := bt.ID(); got != ranking.AlgorithmBradleyTerry {
-		t.Errorf("ID() = %d, want AlgorithmBradleyTerry (%d)", got, ranking.AlgorithmBradleyTerry)
-	}
-	if got := bt.Name(); got != "bradley-terry" {
-		t.Errorf("Name() = %q, want %q", got, "bradley-terry")
-	}
-}
-
 func TestStart(t *testing.T) {
 	bt := newTest(t)
-	if got, want := bt.Shown(bt.Start()), (ranking.Estimate{Strength: 0, Uncertainty: 2}); got != want {
-		t.Errorf("Shown(Start()) = %+v, want %+v", got, want)
+	if got, want := bt.Start(), (ranking.Estimate{Strength: 0, Uncertainty: 2}); got != want {
+		t.Errorf("Start() = %+v, want %+v", got, want)
 	}
 	// Start follows the settings.
 	wide, err := New(Settings{StartUncertainty: 3, PerfVariance: 0.5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := wide.Shown(wide.Start()), (ranking.Estimate{Strength: 0, Uncertainty: 3}); got != want {
-		t.Errorf("Shown(Start()) with StartUncertainty 3 = %+v, want %+v", got, want)
+	if got, want := wide.Start(), (ranking.Estimate{Strength: 0, Uncertainty: 3}); got != want {
+		t.Errorf("Start() with StartUncertainty 3 = %+v, want %+v", got, want)
 	}
 }
 
@@ -110,116 +99,21 @@ func TestLogSigmoid(t *testing.T) {
 	}
 }
 
-// The stored format is pinned exactly: stored rows depend on it.
-func TestEncodeFormat(t *testing.T) {
-	bt := newTest(t)
-	cases := []struct {
-		s    state
-		want string
-	}{
-		{state{Strength: 1.5, Uncertainty: 0.25}, `{"strength":1.5,"uncertainty":0.25}`},
-		// A brand-new image: whole numbers are written without a decimal point.
-		{state{Strength: 0, Uncertainty: 2}, `{"strength":0,"uncertainty":2}`},
-		// Every digit needed to read the number back exactly, and no more.
-		{state{Strength: -0.7407743930623084, Uncertainty: 1.5793690933393363},
-			`{"strength":-0.7407743930623084,"uncertainty":1.5793690933393363}`},
-		{state{Strength: 1e-300, Uncertainty: 1e300}, `{"strength":1e-300,"uncertainty":1e+300}`},
-	}
-	for _, c := range cases {
-		got, err := bt.Encode(c.s)
-		if err != nil || string(got) != c.want {
-			t.Errorf("Encode(%+v) = %s, %v; want %s", c.s, got, err, c.want)
-		}
-	}
-}
-
-func TestEncodeDecodeRoundTrip(t *testing.T) {
-	bt := newTest(t)
-	states := []ranking.State{
-		bt.Start(),
-		state{Strength: 1.5, Uncertainty: 0.25},
-		state{Strength: -3.25, Uncertainty: 1.9245008972987525},
-		state{Strength: 0.1, Uncertainty: 0.3}, // not exact in binary
-		state{Strength: 1e-300, Uncertainty: 1e-300},
-		state{Strength: math.MaxFloat64, Uncertainty: math.SmallestNonzeroFloat64},
-	}
-	for _, s := range states {
-		b, err := bt.Encode(s)
-		if err != nil {
-			t.Errorf("Encode(%+v): %v", s, err)
-			continue
-		}
-		got, err := bt.Decode(b)
-		if err != nil {
-			t.Errorf("Decode(Encode(%+v)): %v", s, err)
-			continue
-		}
-		// Exactly equal: storage must not round anything.
-		if got != s {
-			t.Errorf("Decode(Encode(%+v)) = %+v", s, got)
-		}
-	}
-}
-
-// Decode reads any valid JSON with both fields, not just what Encode writes.
-func TestDecodeAcceptsOtherLayouts(t *testing.T) {
-	bt := newTest(t)
-	want := state{Strength: 0.5, Uncertainty: 1}
-	for _, b := range []string{
-		`{"uncertainty":1,"strength":0.5}`,            // other order
-		` { "strength" : 0.5 , "uncertainty" : 1 } `,  // spaces
-		`{"strength":5e-1,"uncertainty":1.0}`,         // other number spellings
-		`{"strength":0.5,"uncertainty":1,"later":42}`, // a field from a later version
+func TestUsable(t *testing.T) {
+	inf, nan := math.Inf(1), math.NaN()
+	for _, e := range []ranking.Estimate{
+		{Strength: 0, Uncertainty: 2}, {Strength: -3.25, Uncertainty: 0.1}, {Strength: 1e300, Uncertainty: 1e-300},
 	} {
-		got, err := bt.Decode([]byte(b))
-		if err != nil || got != want {
-			t.Errorf("Decode(%s) = %+v, %v; want %+v", b, got, err, want)
+		if !usable(e) {
+			t.Errorf("usable(%+v) = false, want true", e)
 		}
 	}
-}
-
-func TestDecodeRejectsBadBytes(t *testing.T) {
-	bt := newTest(t)
-	cases := []struct {
-		name string
-		b    string
-	}{
-		{"empty", ``},
-		{"not JSON", `strength=0.5`},
-		{"cut off", `{"strength":0.5,"uncertainty":1`},
-		{"extra after the object", `{"strength":0.5,"uncertainty":1}x`},
-		{"a list, not an object", `[0.5,1]`},
-		{"empty object", `{}`},
-		{"no strength", `{"uncertainty":1}`},
-		{"no uncertainty", `{"strength":0.5}`},
-		{"null strength", `{"strength":null,"uncertainty":1}`},
-		{"strength as text", `{"strength":"0.5","uncertainty":1}`},
-		{"misspelled field", `{"strenght":0.5,"uncertainty":1}`},
-		{"too big to be a number", `{"strength":1e999,"uncertainty":1}`},
-		{"zero uncertainty", `{"strength":0.5,"uncertainty":0}`},
-		{"negative uncertainty", `{"strength":0.5,"uncertainty":-1}`},
-	}
-	for _, c := range cases {
-		if s, err := bt.Decode([]byte(c.b)); err == nil {
-			t.Errorf("%s: Decode(%s) = %+v, want an error", c.name, c.b, s)
-		}
-	}
-	if s, err := bt.Decode(nil); err == nil {
-		t.Errorf("Decode(nil) = %+v, want an error", s)
-	}
-}
-
-func TestEncodeRejectsBadStates(t *testing.T) {
-	bt := newTest(t)
-	for _, s := range []state{
-		{Strength: math.NaN(), Uncertainty: 1},
-		{Strength: math.Inf(-1), Uncertainty: 1},
-		{Strength: 0, Uncertainty: 0},
-		{Strength: 0, Uncertainty: -1},
-		{Strength: 0, Uncertainty: math.Inf(1)},
+	for _, e := range []ranking.Estimate{
+		{Strength: nan, Uncertainty: 1}, {Strength: inf, Uncertainty: 1}, {Strength: -inf, Uncertainty: 1},
+		{Strength: 0, Uncertainty: 0}, {Strength: 0, Uncertainty: -1}, {Strength: 0, Uncertainty: inf}, {Strength: 0, Uncertainty: nan},
 	} {
-		if b, err := bt.Encode(s); err == nil {
-			t.Errorf("Encode(%+v) = % x, want an error", s, b)
+		if usable(e) {
+			t.Errorf("usable(%+v) = true, want false", e)
 		}
 	}
 }

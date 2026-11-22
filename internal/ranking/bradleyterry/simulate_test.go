@@ -83,26 +83,26 @@ func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 	truth := rankingtest.SpacedTruth(40)
 	votes := rankingtest.SimulateVotes(rand.New(rand.NewPCG(502, 754)), truth, 4000, rankingtest.TiesAndSkips)
 
-	states := map[int64]ranking.State{}
-	get := func(id int64) ranking.State {
-		if s, ok := states[id]; ok {
-			return s
+	estimates := map[int64]ranking.Estimate{}
+	get := func(id int64) ranking.Estimate {
+		if e, ok := estimates[id]; ok {
+			return e
 		}
 		return bt.Start()
 	}
 	for _, v := range votes {
-		l, r, err := bt.Update(get(v.Left), get(v.Right), v.Outcome, v.At)
+		l, r, err := bt.Update(get(v.Left), get(v.Right), v.Outcome)
 		if err != nil {
 			t.Fatal(err)
 		}
-		states[v.Left], states[v.Right] = l, r
+		estimates[v.Left], estimates[v.Right] = l, r
 	}
 
 	fit := fitStrengths(t, votes, DefaultSettings().StartUncertainty)
 	quick := make([]float64, len(truth))
 	refit := make([]float64, len(truth))
 	for i := range truth {
-		quick[i] = bt.Shown(states[int64(i+1)]).Strength
+		quick[i] = estimates[int64(i+1)].Strength
 		refit[i] = fit[int64(i+1)].Strength
 	}
 	if c := rankingtest.Correlation(truth, quick); c < 0.95 {
@@ -177,16 +177,16 @@ func TestFitOneVoteEach(t *testing.T) {
 	tieUncertainty := 1 / math.Sqrt(0.5)
 	for _, v := range votes {
 		l, r := fit[v.Left], fit[v.Right]
-		var want [2]state
+		var want [2]ranking.Estimate
 		switch v.Outcome {
 		case leftWins:
-			want = [2]state{{winner, winnerUncertainty}, {-winner, winnerUncertainty}}
+			want = [2]ranking.Estimate{{Strength: winner, Uncertainty: winnerUncertainty}, {Strength: -winner, Uncertainty: winnerUncertainty}}
 		case rightWins:
-			want = [2]state{{-winner, winnerUncertainty}, {winner, winnerUncertainty}}
+			want = [2]ranking.Estimate{{Strength: -winner, Uncertainty: winnerUncertainty}, {Strength: winner, Uncertainty: winnerUncertainty}}
 		default:
-			want = [2]state{{0, tieUncertainty}, {0, tieUncertainty}}
+			want = [2]ranking.Estimate{{Strength: 0, Uncertainty: tieUncertainty}, {Strength: 0, Uncertainty: tieUncertainty}}
 		}
-		for k, got := range [2]state{l, r} {
+		for k, got := range [2]ranking.Estimate{l, r} {
 			if !near(got.Strength, want[k].Strength, 1e-8) || !near(got.Uncertainty, want[k].Uncertainty, 1e-8) {
 				t.Errorf("vote %+v: image %d = %+v, want %+v", v, [2]int64{v.Left, v.Right}[k], got, want[k])
 			}
@@ -206,6 +206,128 @@ func TestFitOneVoteEach(t *testing.T) {
 	}
 	if share := float64(withinTwo) / float64(len(fit)); share < 0.95 {
 		t.Errorf("%.1f%% of images within 2 standard deviations of the truth, want at least 95%%", 100*share)
+	}
+}
+
+// simulatePicked shows n pairs picked by information: each time it scores
+// `candidates` random pairs with ranking.PairInformation on the current
+// estimates, and shows the best, ties broken at random (ranking.PickBest).
+// After each vote, the quick update brings the two images up to date, so
+// later picks see what earlier votes taught. Skipped pairs leave no vote.
+// Image i has id i+1.
+func simulatePicked(rng *rand.Rand, truth []float64, n int, a rankingtest.Answerer, bt *Model, candidates int) ([]ranking.Vote, error) {
+	estimates := map[int]ranking.Estimate{}
+	get := func(i int) ranking.Estimate {
+		if e, ok := estimates[i]; ok {
+			return e
+		}
+		return bt.Start()
+	}
+	votes := make([]ranking.Vote, 0, n)
+	pairs := make([][2]int, candidates)
+	scores := make([]float64, candidates)
+	for range n {
+		for c := range pairs {
+			i := rng.IntN(len(truth))
+			j := rng.IntN(len(truth) - 1)
+			if j >= i {
+				j++
+			}
+			pairs[c] = [2]int{i, j}
+			scores[c] = ranking.PairInformation(get(i), get(j))
+		}
+		picked := pairs[ranking.PickBest(scores, rng)]
+		i, j := picked[0], picked[1]
+		o, skipped := a.Answer(rng, truth[i]-truth[j])
+		if skipped {
+			continue
+		}
+		l, r, err := bt.Update(get(i), get(j), o)
+		if err != nil {
+			return nil, err
+		}
+		estimates[i], estimates[j] = l, r
+		votes = append(votes, ranking.Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
+	}
+	return votes, nil
+}
+
+// simulatePicked's votes are well formed: with a simulated person who never
+// skips, every pair shown becomes one vote, between two different images in
+// range; with skips allowed, there are fewer votes. (How often the simulated
+// person skips is checked in rankingtest's TestSimulateVotesMix, so it isn't
+// pinned here.) Whether picking chooses better pairs is
+// TestPickedPairsBeatRandomPairs.
+func TestSimulatePicked(t *testing.T) {
+	bt := newTest(t)
+	truth := rankingtest.SpacedTruth(300)
+	votes, err := simulatePicked(rand.New(rand.NewPCG(502, 754)), truth, 1000, rankingtest.SidesOnly, bt, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) != 1000 {
+		t.Fatalf("%d votes from 1000 pairs shown with no skips, want 1000", len(votes))
+	}
+	for _, v := range votes {
+		if v.Left == v.Right || v.Left < 1 || v.Left > 300 || v.Right < 1 || v.Right > 300 {
+			t.Fatalf("vote %+v: want two different images with ids 1 to 300", v)
+		}
+	}
+	votes, err = simulatePicked(rand.New(rand.NewPCG(502, 754)), truth, 1000, rankingtest.TiesAndSkips, bt, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(votes) >= 1000 || len(votes) == 0 {
+		t.Fatalf("%d votes from 1000 pairs shown with skips, want some but fewer than 1000", len(votes))
+	}
+}
+
+// Picking pairs by information (ranking.PairInformation, with
+// ranking.PickBest) should teach more than random pairs, as Glickman & Jensen
+// (2005) found for chess tournaments.
+//
+// 500 images, 2000 pairs shown (about 4 votes per image), the same simulated
+// person either way. Every image is scored, an unvoted one at its start (0).
+// Over 20 seeds the average correlation with the truth went from 0.759
+// (random) to 0.793 (picked), with picking ahead in all 20. The uncertainty
+// stays honest: at least 92% within 2 standard deviations with picked pairs.
+func TestPickedPairsBeatRandomPairs(t *testing.T) {
+	rng := rand.New(rand.NewPCG(502, 754))
+	truth := make([]float64, 500)
+	for i := range truth {
+		truth[i] = rng.NormFloat64()
+	}
+	const shown = 2000
+	bt := newTest(t)
+	// The votes use their own seed: the same seed as the truth would give
+	// the same random numbers, quietly linking the pairs to the truth.
+	picked, err := simulatePicked(rand.New(rand.NewPCG(754, 502)), truth, shown, rankingtest.TiesAndSkips, bt, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	random := rankingtest.SimulateVotes(rand.New(rand.NewPCG(754, 502)), truth, shown, rankingtest.TiesAndSkips)
+
+	score := func(name string, votes []ranking.Vote) float64 {
+		fit, err := bt.Fit(context.Background(), votes)
+		if err != nil {
+			t.Fatalf("%s: Fit: %v", name, err)
+		}
+		all := make([]float64, len(truth)) // unvoted images stay at their start, 0
+		withinTwo := 0
+		for id, e := range fit {
+			all[id-1] = e.Strength
+			if math.Abs(e.Strength-truth[id-1]) <= 2*e.Uncertainty {
+				withinTwo++
+			}
+		}
+		if share := float64(withinTwo) / float64(len(fit)); share < 0.9 {
+			t.Errorf("%s: %.1f%% of images within 2 standard deviations of the truth, want about 95%%", name, 100*share)
+		}
+		return rankingtest.Correlation(truth, all)
+	}
+	r, p := score("random pairs", random), score("picked pairs", picked)
+	if p <= r {
+		t.Errorf("correlation with the truth: picked pairs %v, random pairs %v; want picked to do better", p, r)
 	}
 }
 
@@ -246,18 +368,14 @@ func BenchmarkFit(b *testing.B) {
 				sortedTruth := slices.Sorted(slices.Values(poolTruth))
 				vs := rankingtest.SimulateVotes(rand.New(rand.NewPCG(754, 502)), poolTruth, shown, rankingtest.TiesAndSkips)
 				bt := newTest(b)
-				var fit map[int64]ranking.State
+				var fit map[int64]ranking.Estimate
 				for b.Loop() {
 					var err error
 					if fit, err = bt.Fit(context.Background(), vs); err != nil {
 						b.Fatal(err)
 					}
 				}
-				estimates := make(map[int64]ranking.Estimate, len(fit))
-				for id, s := range fit {
-					estimates[id] = bt.Shown(s)
-				}
-				avgUncertainty, impliedRange, withinRange := rankingtest.Accuracy(estimates, poolTruth, sortedTruth)
+				avgUncertainty, impliedRange, withinRange := rankingtest.Accuracy(fit, poolTruth, sortedTruth)
 				b.ReportMetric(float64(len(fit)), "ranked_images")
 				b.ReportMetric(avgUncertainty, "avg_uncertainty")
 				b.ReportMetric(ranking.RDFromUncertainty(avgUncertainty), "avg_RD")

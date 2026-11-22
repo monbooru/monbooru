@@ -3,7 +3,6 @@ package bradleyterry
 import (
 	"math"
 	"testing"
-	"time"
 
 	"github.com/monbooru/monbooru/internal/ranking"
 )
@@ -14,17 +13,17 @@ var (
 	rightWins = ranking.Outcome{Winner: ranking.WinnerRight}
 )
 
-// update runs bt.Update on two states and unwraps the results.
-func update(t *testing.T, bt *algorithm, left, right state, o ranking.Outcome) (state, state) {
+// update runs bt.Update and fails the test on an error.
+func update(t *testing.T, bt *Model, left, right ranking.Estimate, o ranking.Outcome) (ranking.Estimate, ranking.Estimate) {
 	t.Helper()
-	l, r, err := bt.Update(left, right, o, time.Time{})
+	l, r, err := bt.Update(left, right, o)
 	if err != nil {
 		t.Fatalf("Update(%+v, %+v, %+v): %v", left, right, o, err)
 	}
-	return l.(state), r.(state)
+	return l, r
 }
 
-func checkState(t *testing.T, name string, got, want state) {
+func checkEstimate(t *testing.T, name string, got, want ranking.Estimate) {
 	t.Helper()
 	if !near(got.Strength, want.Strength, 1e-9) || !near(got.Uncertainty, want.Uncertainty, 1e-9) {
 		t.Errorf("%s = %+v, want %+v", name, got, want)
@@ -45,22 +44,22 @@ func checkState(t *testing.T, name string, got, want state) {
 
 func TestUpdateTwoNewImages(t *testing.T) {
 	bt := newTest(t)
-	start := bt.Start().(state)
+	start := bt.Start()
 	// spread      = √(4 + 4 + 1) = 3
 	// win_chance  = sigmoid(0 / 3) = ½
 	// strength    = 0 ± 4/3 × ½ = ±2/3
 	// shrink      = 2/3 × 4/9 × ½ × ½ = 2/27
 	// uncert²     = 4 × (1 − 2/27) = 100/27, so uncert = 10/√27 ≈ 1.924501
 	l, r := update(t, bt, start, start, leftWins)
-	checkState(t, "winner", l, state{Strength: 2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
-	checkState(t, "loser", r, state{Strength: -2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
+	checkEstimate(t, "winner", l, ranking.Estimate{Strength: 2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
+	checkEstimate(t, "loser", r, ranking.Estimate{Strength: -2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
 }
 
 func TestUpdateUpset(t *testing.T) {
 	bt := newTest(t)
 	// A fairly certain strong image loses to an unsure average one.
-	strong := state{Strength: 1, Uncertainty: 0.5}
-	unsure := state{Strength: 0, Uncertainty: 1.5}
+	strong := ranking.Estimate{Strength: 1, Uncertainty: 0.5}
+	unsure := ranking.Estimate{Strength: 0, Uncertainty: 1.5}
 	// spread            = √(0.25 + 2.25 + 1) = √3.5 ≈ 1.870829
 	// strong win_chance = sigmoid(1 / 1.870829) ≈ 0.630537
 	// strong strength   = 1 + 0.25 / 1.870829 × (0 − 0.630537) ≈ 0.915741
@@ -70,8 +69,8 @@ func TestUpdateUpset(t *testing.T) {
 	// unsure shrink     = (1.5 / 1.870829) × (2.25 / 3.5) × 0.630537 × 0.369463 ≈ 0.120075
 	// unsure uncert     = 1.5 × √(1 − 0.120075) ≈ 1.407065
 	l, r := update(t, bt, strong, unsure, rightWins)
-	checkState(t, "strong loser", l, state{Strength: 0.9157409103463072, Uncertainty: 0.49888695428742236})
-	checkState(t, "unsure winner", r, state{Strength: 0.7583318068832351, Uncertainty: 1.407064652899043})
+	checkEstimate(t, "strong loser", l, ranking.Estimate{Strength: 0.9157409103463072, Uncertainty: 0.49888695428742236})
+	checkEstimate(t, "unsure winner", r, ranking.Estimate{Strength: 0.7583318068832351, Uncertainty: 1.407064652899043})
 	// The unsure image learned far more than the certain one, in both
 	// strength and uncertainty.
 	if math.Abs(r.Strength-unsure.Strength) <= math.Abs(l.Strength-strong.Strength) {
@@ -81,8 +80,8 @@ func TestUpdateUpset(t *testing.T) {
 
 func TestUpdateTie(t *testing.T) {
 	bt := newTest(t)
-	higher := state{Strength: 1, Uncertainty: 1}
-	lower := state{Strength: 0, Uncertainty: 1}
+	higher := ranking.Estimate{Strength: 1, Uncertainty: 1}
+	lower := ranking.Estimate{Strength: 0, Uncertainty: 1}
 	// spread            = √(1 + 1 + 1) = √3 ≈ 1.732051
 	// higher win_chance = sigmoid(1 / 1.732051) ≈ 0.640457
 	// higher strength   = 1 + 1 / 1.732051 × (0.5 − 0.640457) ≈ 0.918907
@@ -90,12 +89,12 @@ func TestUpdateTie(t *testing.T) {
 	// shrink (both)     = (1 / 1.732051) × (1 / 3) × 0.640457 × 0.359543 ≈ 0.044316
 	// uncert (both)     = √(1 − 0.044316) ≈ 0.977591
 	l, r := update(t, bt, higher, lower, tie)
-	checkState(t, "higher", l, state{Strength: 0.9189068386060943, Uncertainty: 0.9775910142533948})
-	checkState(t, "lower", r, state{Strength: 0.08109316139390564, Uncertainty: 0.9775910142533948})
+	checkEstimate(t, "higher", l, ranking.Estimate{Strength: 0.9189068386060943, Uncertainty: 0.9775910142533948})
+	checkEstimate(t, "lower", r, ranking.Estimate{Strength: 0.08109316139390564, Uncertainty: 0.9775910142533948})
 }
 
-// sampleStates covers new, settled, strong, weak and lopsided images.
-var sampleStates = []state{
+// sampleEstimates covers new, settled, strong, weak and lopsided images.
+var sampleEstimates = []ranking.Estimate{
 	{Strength: 0, Uncertainty: 2},
 	{Strength: 0, Uncertainty: 0.3},
 	{Strength: 1.5, Uncertainty: 1},
@@ -111,13 +110,13 @@ var allOutcomes = []ranking.Outcome{leftWins, tie, rightWins}
 func TestUpdateSidesAreSymmetric(t *testing.T) {
 	bt := newTest(t)
 	mirror := map[ranking.Outcome]ranking.Outcome{leftWins: rightWins, tie: tie, rightWins: leftWins}
-	for _, a := range sampleStates {
-		for _, b := range sampleStates {
+	for _, a := range sampleEstimates {
+		for _, b := range sampleEstimates {
 			for _, o := range allOutcomes {
 				l, r := update(t, bt, a, b, o)
 				r2, l2 := update(t, bt, b, a, mirror[o])
-				checkState(t, "left image", l2, l)
-				checkState(t, "right image", r2, r)
+				checkEstimate(t, "left image", l2, l)
+				checkEstimate(t, "right image", r2, r)
 			}
 		}
 	}
@@ -125,8 +124,8 @@ func TestUpdateSidesAreSymmetric(t *testing.T) {
 
 func TestUpdateDirection(t *testing.T) {
 	bt := newTest(t)
-	for _, a := range sampleStates {
-		for _, b := range sampleStates {
+	for _, a := range sampleEstimates {
+		for _, b := range sampleEstimates {
 			l, r := update(t, bt, a, b, leftWins)
 			if l.Strength <= a.Strength || r.Strength >= b.Strength {
 				t.Errorf("%+v beat %+v: winner %v → %v, loser %v → %v; the winner must rise and the loser fall",
@@ -153,8 +152,8 @@ func TestUpdateDirection(t *testing.T) {
 // about each: change / uncert² is equal and opposite.
 func TestUpdateBalance(t *testing.T) {
 	bt := newTest(t)
-	for _, a := range sampleStates {
-		for _, b := range sampleStates {
+	for _, a := range sampleEstimates {
+		for _, b := range sampleEstimates {
 			for _, o := range allOutcomes {
 				l, r := update(t, bt, a, b, o)
 				leftShare := (l.Strength - a.Strength) / (a.Uncertainty * a.Uncertainty)
@@ -171,11 +170,11 @@ func TestUpdateBalance(t *testing.T) {
 // quarter of uncert² per vote (shrink ≤ ¼), and never to 0.
 func TestUpdateShrinksUncertaintyGently(t *testing.T) {
 	bt := newTest(t)
-	for _, a := range sampleStates {
-		for _, b := range sampleStates {
+	for _, a := range sampleEstimates {
+		for _, b := range sampleEstimates {
 			for _, o := range allOutcomes {
 				l, r := update(t, bt, a, b, o)
-				for _, pair := range [][2]state{{a, l}, {b, r}} {
+				for _, pair := range [][2]ranking.Estimate{{a, l}, {b, r}} {
 					before, after := pair[0].Uncertainty, pair[1].Uncertainty
 					if after >= before || after*after < 0.75*before*before {
 						t.Errorf("%+v vs %+v, %+v: uncertainty %v → %v, want smaller, and uncert² down by at most ¼", a, b, o, before, after)
@@ -190,10 +189,10 @@ func TestUpdateShrinksUncertaintyGently(t *testing.T) {
 // so it moves the winner further.
 func TestUpdateUpsetsMoveMore(t *testing.T) {
 	bt := newTest(t)
-	me := state{Strength: 0, Uncertainty: 1}
+	me := ranking.Estimate{Strength: 0, Uncertainty: 1}
 	previousGain := 0.0
 	for _, opponent := range []float64{-3, -1, 0, 1, 3} {
-		l, _ := update(t, bt, me, state{Strength: opponent, Uncertainty: 1}, leftWins)
+		l, _ := update(t, bt, me, ranking.Estimate{Strength: opponent, Uncertainty: 1}, leftWins)
 		gain := l.Strength - me.Strength
 		if gain <= previousGain {
 			t.Errorf("beating strength %v gained %v, not more than beating a weaker opponent (%v)", opponent, gain, previousGain)
@@ -205,10 +204,10 @@ func TestUpdateUpsetsMoveMore(t *testing.T) {
 // The more unsure we are about an image, the more one vote moves it.
 func TestUpdateUnsureImagesMoveMore(t *testing.T) {
 	bt := newTest(t)
-	opponent := state{Strength: 0, Uncertainty: 1}
+	opponent := ranking.Estimate{Strength: 0, Uncertainty: 1}
 	previousGain := 0.0
 	for _, uncertainty := range []float64{0.1, 0.5, 1, 2, 3} {
-		l, _ := update(t, bt, state{Strength: 0, Uncertainty: uncertainty}, opponent, leftWins)
+		l, _ := update(t, bt, ranking.Estimate{Strength: 0, Uncertainty: uncertainty}, opponent, leftWins)
 		if gain := l.Strength; gain <= previousGain {
 			t.Errorf("uncertainty %v gained %v, not more than a surer image (%v)", uncertainty, gain, previousGain)
 		} else {
@@ -225,7 +224,7 @@ func TestUpdateMatchesRefitUnitsWhenCertain(t *testing.T) {
 	bt := newTest(t)
 	const u = 1e-4
 	for _, gap := range []float64{-2, -1, 0, 1, 2} {
-		l, _ := update(t, bt, state{Strength: gap, Uncertainty: u}, state{Strength: 0, Uncertainty: u}, leftWins)
+		l, _ := update(t, bt, ranking.Estimate{Strength: gap, Uncertainty: u}, ranking.Estimate{Strength: 0, Uncertainty: u}, leftWins)
 		implied := 1 - (l.Strength-gap)/(u*u) // the win chance the update used
 		if !near(implied, sigmoid(gap), 1e-6) {
 			t.Errorf("gap %v: quick update's win chance = %v, want the refit's sigmoid(%v) = %v", gap, implied, gap, sigmoid(gap))
@@ -235,7 +234,7 @@ func TestUpdateMatchesRefitUnitsWhenCertain(t *testing.T) {
 
 func TestUpdateIgnoresDegree(t *testing.T) {
 	bt := newTest(t)
-	a, b := sampleStates[2], sampleStates[3]
+	a, b := sampleEstimates[2], sampleEstimates[3]
 	plainL, plainR := update(t, bt, a, b, leftWins)
 	for _, d := range []ranking.Degree{ranking.DegreeSlight, ranking.DegreeModerate, ranking.DegreeStrong} {
 		l, r := update(t, bt, a, b, ranking.Outcome{Winner: ranking.WinnerLeft, Degree: d})
@@ -248,7 +247,7 @@ func TestUpdateIgnoresDegree(t *testing.T) {
 func TestUpdateRejectsInvalidOutcomes(t *testing.T) {
 	bt := newTest(t)
 	for _, o := range []ranking.Outcome{{}, {Winner: 4}, {Winner: ranking.WinnerTie, Degree: ranking.DegreeStrong}} {
-		if _, _, err := bt.Update(bt.Start(), bt.Start(), o, time.Time{}); err == nil {
+		if _, _, err := bt.Update(bt.Start(), bt.Start(), o); err == nil {
 			t.Errorf("Update with outcome %+v succeeded, want an error", o)
 		}
 	}
@@ -258,8 +257,8 @@ func TestUpdateRejectsInvalidOutcomes(t *testing.T) {
 // shrinking, and an image that always wins ends up on top.
 func TestUpdateManyVotes(t *testing.T) {
 	bt := newTest(t)
-	champion := bt.Start().(state)
-	other := bt.Start().(state)
+	champion := bt.Start()
+	other := bt.Start()
 	for i := range 1000 {
 		before := champion.Uncertainty
 		champion, other = update(t, bt, champion, other, leftWins)
@@ -269,25 +268,5 @@ func TestUpdateManyVotes(t *testing.T) {
 	}
 	if champion.Strength <= other.Strength {
 		t.Errorf("after 1000 wins the champion %+v is not above %+v", champion, other)
-	}
-}
-
-// Bradley–Terry has no rating periods: time passing changes nothing, and
-// neither does when a vote was made.
-func TestAdvanceAndVoteTimeChangeNothing(t *testing.T) {
-	bt := newTest(t)
-	monday := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
-	for _, s := range sampleStates {
-		for _, now := range []time.Time{{}, monday, monday.AddDate(10, 0, 0)} {
-			if got := bt.Advance(s, now); got != s {
-				t.Errorf("Advance(%+v, %v) = %+v, want it unchanged", s, now, got)
-			}
-		}
-	}
-	a, b := sampleStates[2], sampleStates[3]
-	l1, r1 := update(t, bt, a, b, leftWins)
-	l2, r2, err := bt.Update(a, b, leftWins, monday.AddDate(3, 0, 0))
-	if err != nil || l2 != l1 || r2 != r1 {
-		t.Errorf("a vote three years later = %+v, %+v, %v; want %+v, %+v, nil", l2, r2, err, l1, r1)
 	}
 }

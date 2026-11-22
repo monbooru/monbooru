@@ -30,17 +30,9 @@ const (
 // that best explain the votes together with the bell-curve starting
 // assumption (the MAP estimate), and how unsure each one is. Vote order
 // doesn't matter. Images without votes aren't in the result.
-func (bt *algorithm) Fit(ctx context.Context, votes []ranking.Vote) (map[int64]ranking.State, error) {
-	u := bt.settings.StartUncertainty
-	fitted, err := fitVotes(ctx, votes, 1/(u*u))
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[int64]ranking.State, len(fitted))
-	for id, s := range fitted {
-		out[id] = s
-	}
-	return out, nil
+func (m *Model) Fit(ctx context.Context, votes []ranking.Vote) (map[int64]ranking.Estimate, error) {
+	u := m.settings.StartUncertainty
+	return fitVotes(ctx, votes, 1/(u*u))
 }
 
 // match is one vote, seen from one of its images.
@@ -67,7 +59,7 @@ type match struct {
 // shiftToAverageZero), and passes repeat until nothing moves. At the best
 // guess every balance is 0, and the image's uncertainty is 1/√certainty (the
 // plan's per-image approximation, "diagonal Laplace").
-func fitVotes(ctx context.Context, votes []ranking.Vote, priorPrecision float64) (map[int64]state, error) {
+func fitVotes(ctx context.Context, votes []ranking.Vote, priorPrecision float64) (map[int64]ranking.Estimate, error) {
 	scores := make([]float64, len(votes))
 	position := map[int64]int{}
 	for k, v := range votes {
@@ -118,16 +110,16 @@ func fitVotes(ctx context.Context, votes []ranking.Vote, priorPrecision float64)
 		}
 	}
 
-	out := make(map[int64]state, len(ids))
+	out := make(map[int64]ranking.Estimate, len(ids))
 	for i, id := range ids {
 		_, certainty := imageBalance(strength, i, matches[i], priorPrecision)
-		s := state{Strength: strength[i], Uncertainty: 1 / math.Sqrt(certainty)}
-		if !s.valid() {
+		e := ranking.Estimate{Strength: strength[i], Uncertainty: 1 / math.Sqrt(certainty)}
+		if !usable(e) {
 			// Only possible without a starting assumption, e.g. for an image
 			// that never lost, whose strength runs off to infinity.
 			return nil, fmt.Errorf("the votes can't pin down image %d's strength", id)
 		}
-		out[id] = s
+		out[id] = e
 	}
 	return out, nil
 }
