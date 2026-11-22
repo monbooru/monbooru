@@ -296,13 +296,15 @@ func TestAWorkerAddedWhileRunningIsLookedAtAtOnce(t *testing.T) {
 }
 
 func TestAJobNamingItsWorkersSharesThemTheLocalOneIncluded(t *testing.T) {
-	local := &counting{f: newFake(t, wd())}
+	local := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
 	left := &counting{f: newFake(t, wd())}
 	named := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
 	p := usePool(t, "",
 		WorkerDef{Name: LocalWorker, Local: true, URL: serve(t, local), Token: "tok"},
 		WorkerDef{Name: "left-out", URL: serve(t, left), Token: "tok"},
 		WorkerDef{Name: "gpu-box", URL: serve(t, named), Token: "tok"})
+	open := sync.OnceFunc(func() { close(local.gate); close(named.gate) })
+	t.Cleanup(open)
 	only := []string{LocalWorker, "gpu-box"}
 	if n := p.Slots([][]string{{"wd"}}, only); n != 4 {
 		t.Errorf("slots of the named workers = %d, want 2 + 2", n)
@@ -319,7 +321,7 @@ func TestAJobNamingItsWorkersSharesThemTheLocalOneIncluded(t *testing.T) {
 		})
 	}
 	waitFor(t, func() bool { return named.n() == 2 && local.n() == 1 })
-	close(named.gate)
+	open()
 	wg.Wait()
 	if left.n() != 0 {
 		t.Errorf("the worker left out took %d calls", left.n())
