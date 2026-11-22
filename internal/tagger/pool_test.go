@@ -411,3 +411,60 @@ func TestLoadCountsTheCallsWaitingAndTheSlotsFree(t *testing.T) {
 		t.Errorf("load after the calls = %+v", l)
 	}
 }
+
+func TestAFarWorkerThatListsPNGGetsItsFramesCompressed(t *testing.T) {
+	lists, plain := newFake(t, wd()), newFake(t, wd())
+	lists.Info.Formats = []string{worker.FormatRGB8, worker.FormatPNG}
+	lastFormat := func(f *worker.Fake) string {
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		return f.Calls[len(f.Calls)-1].Frames.Format
+	}
+	for _, tc := range []struct {
+		name string
+		f    *worker.Fake
+		far  bool
+		want string
+	}{
+		{"near, lists png", lists, false, worker.FormatRGB8},
+		{"far, lists png", lists, true, worker.FormatPNG},
+		{"far, an older worker", plain, true, worker.FormatRGB8},
+	} {
+		p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, tc.f), Token: "tok"})
+		p.far = func(context.Context, string) bool { return tc.far }
+		p.Refresh(context.Background())
+		if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := lastFormat(tc.f); got != tc.want {
+			t.Errorf("%s: frames went as %q, want %q", tc.name, got, tc.want)
+		}
+
+		p.Set([]WorkerDef{{Name: "a", URL: p.Workers()[0].URL, Token: "tok"}})
+		if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+			t.Fatalf("%s after a config write: %v", tc.name, err)
+		}
+		if got := lastFormat(tc.f); got != tc.want {
+			t.Errorf("%s after a config write: frames went as %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestFarAddress(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:8457":       false,
+		"http://[::1]:8457":           false,
+		"http://192.168.1.20:8457":    false,
+		"http://10.0.0.2:8457":        false,
+		"http://169.254.3.4:8457":     false,
+		"https://203.0.113.9":         true,
+		"http://[2001:db8::1]:8457":   true,
+		"http://no-such-host.invalid": false,
+		"not a url":                   false,
+	} {
+		if got := farAddress(context.Background(), raw); got != want {
+			t.Errorf("farAddress(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}

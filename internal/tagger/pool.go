@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,6 +54,8 @@ type poolWorker struct {
 	downSince time.Time
 	err       string
 	inUse     int
+	// format is the frame format its calls use, chosen at each look.
+	format string
 }
 
 func (w *poolWorker) slots() int { return max(1, w.cache.Info.Slots) }
@@ -69,13 +73,16 @@ type Pool struct {
 	// waiting counts the calls waiting for a slot.
 	waiting    int
 	httpClient *http.Client
+	// far reports a worker address a slow link may sit before: its frames
+	// go compressed.
+	far func(ctx context.Context, rawURL string) bool
 	// changed wakes Run when Set brings a worker it has not looked at.
 	changed chan struct{}
 }
 
 // NewPool keeps each worker's descriptions in dir; "" keeps them in memory.
 func NewPool(dir string) *Pool {
-	p := &Pool{dir: dir, httpClient: &http.Client{Timeout: 10 * time.Minute}, changed: make(chan struct{}, 1)}
+	p := &Pool{dir: dir, httpClient: &http.Client{Timeout: 10 * time.Minute}, changed: make(chan struct{}, 1), far: farAddress}
 	p.free = sync.NewCond(&p.mu)
 	return p
 }
@@ -124,7 +131,7 @@ func (p *Pool) Set(defs []WorkerDef) {
 			w.cache = p.loadCache(d.Name)
 		}
 		w.def = d
-		w.client = worker.Client{BaseURL: d.URL, Token: d.Token, HTTP: p.httpClient}
+		w.client = worker.Client{BaseURL: d.URL, Token: d.Token, Format: w.format, HTTP: p.httpClient}
 		next = append(next, w)
 	}
 	slices.SortStableFunc(next, func(a, b *poolWorker) int {
@@ -252,6 +259,10 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
 	client, prev := w.client, w.cache
 	p.mu.Unlock()
 	next, err := describe(ctx, client, prev)
+	format := worker.FormatRGB8
+	if err == nil && slices.Contains(next.Info.Formats, worker.FormatPNG) && p.far(ctx, client.BaseURL) {
+		format = worker.FormatPNG
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil && glance {
@@ -270,6 +281,7 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
 		logx.Infof("tagger: worker %s is up", w.def.Name)
 	}
 	w.up, w.err, w.downSince = true, "", time.Time{}
+	w.format, w.client.Format = format, format
 	w.cache = next
 	p.free.Broadcast()
 	go p.saveCache(w.def.Name, next)
@@ -777,4 +789,25 @@ func WorkersDescribed() bool {
 		}
 	}
 	return true
+}
+
+// farAddress is whether rawURL names a host outside this machine and its
+// private networks, where raw frames would wait on the link. A name that
+// does not resolve counts as near.
+func farAddress(ctx context.Context, rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	ips := []net.IP{net.ParseIP(u.Hostname())}
+	if ips[0] == nil {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if ips, err = net.DefaultResolver.LookupIP(ctx, "ip", u.Hostname()); err != nil {
+			return false
+		}
+	}
+	return slices.ContainsFunc(ips, func(ip net.IP) bool {
+		return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
+	})
 }
