@@ -239,6 +239,35 @@ func TestAGlanceShowsANewModelAndLeavesTheStateAlone(t *testing.T) {
 	}
 }
 
+func TestAGlanceLeavesAWorkerThatIsTaggingAlone(t *testing.T) {
+	c := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, c), Token: "tok"})
+	done := make(chan error, 1)
+	go func() {
+		_, err := tagOne(t, p, worker.PriorityBatch)
+		done <- err
+	}()
+	for c.n() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	c.f.Mu.Lock()
+	c.f.Models = append(c.f.Models, worker.Model{Name: "joytag", Kind: worker.KindTagger, Digest: "d-joytag", Ready: true})
+	c.f.Mu.Unlock()
+
+	p.Glance(context.Background())
+	if n := len(p.Workers()[0].Models); n != 1 {
+		t.Errorf("a glance read a tagging worker: %d models, want 1", n)
+	}
+	close(c.gate)
+	if err := <-done; err != nil {
+		t.Fatalf("tag: %v", err)
+	}
+	p.Glance(context.Background())
+	if n := len(p.Workers()[0].Models); n != 2 {
+		t.Errorf("a glance after the call: %d models, want 2", n)
+	}
+}
+
 func TestAPeekReadsTheLoadedModelsAndOnlyThat(t *testing.T) {
 	f := newFake(t, wd())
 	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, f), Token: "tok"})

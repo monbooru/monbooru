@@ -205,7 +205,7 @@ func (p *Pool) Forget(name string) {
 // does not answer is down until the next refresh.
 func (p *Pool) Refresh(ctx context.Context) { p.refresh(ctx, false) }
 
-// Glance reads again what the workers that are up hold, so a page shows a
+// Glance reads again what the workers that are up and not tagging hold, so a page shows a
 // model copied in a moment ago; one that does not answer in time keeps
 // its state for the next Refresh to settle.
 func (p *Pool) Glance(ctx context.Context) { p.refresh(ctx, true) }
@@ -243,14 +243,14 @@ func (p *Pool) Peek(ctx context.Context) {
 func (p *Pool) refresh(ctx context.Context, glance bool) {
 	p.mu.Lock()
 	ws := slices.Clone(p.workers)
-	up := map[*poolWorker]bool{}
+	up, busy := map[*poolWorker]bool{}, map[*poolWorker]bool{}
 	for _, w := range ws {
-		up[w] = w.up
+		up[w], busy[w] = w.up, w.inUse > 0
 	}
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, w := range ws {
-		if w.def.Paused || w.def.OnDemand || w.def.URL == "" || glance && !up[w] {
+		if w.def.Paused || w.def.OnDemand || w.def.URL == "" || glance && (!up[w] || busy[w]) {
 			continue
 		}
 		wg.Go(func() { _ = p.refreshOne(ctx, w, glance, 30*time.Second) })
