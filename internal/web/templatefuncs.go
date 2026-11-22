@@ -140,15 +140,8 @@ func templateFuncs() template.FuncMap {
 			}
 			return d.Round(time.Millisecond).String()
 		},
-		"minusDuration": func(a, b time.Duration) time.Duration {
-			return a - b
-		},
-		"int64Duration": func(d time.Duration) int64 {
-			return int64(d)
-		},
-		"plural":      models.Plural,
-		"abbrevCount": abbrevCount,
-		"searchTime":  searchTime,
+		"plural":     models.Plural,
+		"searchTime": searchTime,
 		// Always quoted: a term may carry spaces the parser would split on.
 		"comfySearch": func(term string) string {
 			if term == "" {
@@ -293,19 +286,6 @@ func monloaderOffReason(conn string) string {
 	return cmp.Or(monloaderOffReasons[conn], "monloader is not responding")
 }
 
-// At most four glyphs; the unit promotes at 999500 because anything
-// higher rounds to "1000k".
-func abbrevCount(n int) string {
-	switch {
-	case n < 1000:
-		return strconv.Itoa(n)
-	case n < 999500:
-		return abbrevUnit(n, 1000, "k")
-	default:
-		return abbrevUnit(n, 1000000, "M")
-	}
-}
-
 // Three significant digits, as a cached search takes well under a
 // millisecond; the unit promotes at 999.5 ms, which rounds to "1000".
 func searchTime(d time.Duration) string {
@@ -329,13 +309,6 @@ func threeDigits(v float64) string {
 		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
 	}
 	return s
-}
-
-func abbrevUnit(n, div int, suffix string) string {
-	if tenths := (n*10 + div/2) / div; tenths < 100 {
-		return fmt.Sprintf("%d.%d%s", tenths/10, tenths%10, suffix)
-	}
-	return fmt.Sprintf("%d%s", (n+div/2)/div, suffix)
 }
 
 func groupByOriginStale[T, G any](items []T, origin func(T) string, stale func(T) bool, newGroup func(T) *G, add func(*G, T)) []G {

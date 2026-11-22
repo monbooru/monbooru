@@ -1,23 +1,19 @@
-//go:build tagger
-
 package web
 
 import (
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"testing"
+
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 )
 
-func stageDummyTagger(t *testing.T, srv *Server) {
+func stageDummyTagger(t *testing.T, labels ...string) *taggertest.Worker {
 	t.Helper()
-	modelRoot := filepath.Join(t.TempDir(), "models")
-	installTagger(t, modelRoot, "wd14", "tag_id,name,category\n0,sample,0\n")
-
-	lib := filepath.Join(modelRoot, "libonnxruntime.so")
-	mustWriteFile(t, lib, nil, 0o644)
-	t.Setenv("ORT_LIB_PATH", lib)
-	srv.cfg.Paths.ModelPath = modelRoot
+	if len(labels) == 0 {
+		labels = []string{"sample"}
+	}
+	return taggertest.Use(t, map[string][]string{"wd14": labels})
 }
 
 func bulkSeedVisibleImages(t *testing.T, srv *Server, n int) {

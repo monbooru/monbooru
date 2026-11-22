@@ -16,6 +16,8 @@ import (
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/peer"
+	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 )
 
 func rulesStub(t *testing.T, body string) *httptest.Server {
@@ -49,7 +51,7 @@ const rulesAnswer = `{"category_kept":true,"sites":[
  {"site":"rule34","kind":"booru","rule":"none","kept":false},
  {"site":"sankaku","kind":"booru","rule":"none","blacklist":"site","blacklist_line":"watermark","kept":true},
  {"site":"yandere","kind":"booru","rule":"none","kept":true},
- {"site":"zerochan","kind":"booru","builtin":true,"rule":"none","blacklist":"global","blacklist_line":"watermark rating:explicit","kept":true},
+ {"site":"zerochan","kind":"booru","builtin":true,"rule":"none","blacklist":"global","blacklist_line":"watermark rating:explicit","blacklist_condition":"rating:explicit","kept":true},
  {"site":"ptr","kind":"lookup","rule":"move","target":"meta:watermark","kept":false}]}`
 
 func TestTagRulesPanel_DrawsEveryLane(t *testing.T) {
@@ -105,6 +107,51 @@ func TestTagRulesPanel_DrawsEveryLane(t *testing.T) {
 	wantIn(t, body, `<a href="#tag-implied-by" onclick="document.getElementById('implied-by-add-input').focus();return false"><text`)
 	wantNotIn(t, body, ">konachan<")
 	wantNotIn(t, body, "Configure → mappings")
+}
+
+func TestTagRulesPanel_FoldsTheSitesOnlyTheRulesForAllSitesTouch(t *testing.T) {
+	stub := rulesStub(t, `{"category_kept":true,"sites":[
+ {"site":"danbooru","kind":"booru","rule":"rename","target":"logo","rule_key":"watermark","rule_list":"site","kept":true},
+ {"site":"e621","kind":"booru","builtin":true,"rule":"move","target":"meta:watermark","rule_key":"water*","rule_list":"global","kept":true},
+ {"site":"gelbooru","kind":"booru","rule":"move","target":"meta:watermark","rule_key":"water*","rule_list":"global","kept":true},
+ {"site":"konachan","kind":"booru","rule":"move","target":"meta:watermark","rule_key":"water*","rule_list":"global","blacklist":"site","blacklist_line":"watermark","kept":true},
+ {"site":"ptr","kind":"lookup","rule":"move","target":"meta:watermark","rule_key":"water*","rule_list":"global","kept":true}]}`)
+	srv := newTestServer(t)
+	pairPeer(srv, "monloader")
+	srv.cfg.Monloader.APIURL = stub.URL
+	srv.cfg.Monloader.APIToken = "tok"
+	srv.cfg.Server.MonloaderURL = stub.URL
+	cx := srv.active()
+	tag := mustTag(t, cx.TagSvc, "watermark", cx.GeneralCategoryID)
+
+	body := do(srv, "GET", fmt.Sprintf("/tags/%d/rules", tag.ID), hxRules).Body.String()
+	for _, want := range []string{
+		">all sites<", ">danbooru<", ">logo<", ">konachan<", ">ptr<",
+		`<div class="tag-path-row"><span><span class="tl-ml">all sites</span>`,
+		`href="` + stub.URL + `/settings?site=danbooru&amp;tab=mapping&amp;q=watermark"`,
+	} {
+		wantIn(t, body, want)
+	}
+	for _, gone := range []string{">e621<", ">gelbooru<", ">built-in<", "site=e621", "site=gelbooru", "site=konachan&amp;tab=mapping&amp;q=", "site=ptr"} {
+		wantNotIn(t, body, gone)
+	}
+	if n := strings.Count(body, `<span class="tl-ml">all sites</span>`); n != 1 {
+		t.Errorf("the rules for all sites take %d lanes, want one", n)
+	}
+
+	alone := rulesStub(t, `{"category_kept":true,"sites":[
+ {"site":"danbooru","kind":"booru","rule":"none","renamed_from":["wm"],"renamed_from_global":["wm_text"],"kept":true},
+ {"site":"gelbooru","kind":"booru","rule":"none","renamed_from_global":["wm_text"],"kept":true},
+ {"site":"ptr","kind":"lookup","rule":"none","renamed_from_global":["wm_text"],"kept":true}]}`)
+	srv.cfg.Monloader.APIURL = alone.URL
+	srv.cfg.Server.MonloaderURL = alone.URL
+	body = do(srv, "GET", fmt.Sprintf("/tags/%d/rules", tag.ID), hxRules).Body.String()
+	for _, want := range []string{">gelbooru<", ">danbooru<", ">wm, wm_text<", ">wm_text<", "> → here<", "site=danbooru&amp;tab=mapping&amp;q=watermark"} {
+		wantIn(t, body, want)
+	}
+	for _, gone := range []string{">all sites<", "site=gelbooru", "site=ptr"} {
+		wantNotIn(t, body, gone)
+	}
 }
 
 var hxRules = [2]string{"HX-Request", "true"}
@@ -275,31 +322,34 @@ func TestTagRulesPanel_DrawsTheAliasBand(t *testing.T) {
 	wantIn(t, body, "<title>"+long)
 }
 
-func TestBlacklistConditionIsTheRestOfTheLine(t *testing.T) {
-	for _, c := range []struct{ line, want string }{
-		{"watermark", ""},
-		{"*mark", ""},
-		{"watermark rating:explicit", "rating:explicit"},
-		{"1boy general:watermark -solo", "1boy -solo"},
-		{"*miku* 1boy", "*miku* 1boy"},
+func TestTheSkipNoteIsMonloadersCondition(t *testing.T) {
+	cond := func(s string) *string { return &s }
+	for _, c := range []struct {
+		line        string
+		condition   *string
+		state, note string
+	}{
+		{"Watermark text", cond("text"), "cond", "only with text"},
+		{"watermark", cond(""), "stop", "global list: post skipped"},
+		{"watermark rating:explicit", nil, "cond", "watermark rating:explicit"},
+		{"watermark", nil, "stop", "global list: post skipped"},
 	} {
-		if got := blacklistCondition(c.line, "watermark"); got != c.want {
-			t.Errorf("blacklistCondition(%q) = %q, want %q", c.line, got, c.want)
+		r := contract.TagRule{Site: "danbooru", Kind: "booru", Rule: contract.RuleNone, Blacklist: contract.ListGlobal, BlacklistLine: c.line, BlacklistCondition: c.condition, Kept: true}
+		step := siteLane("watermark", "general", r, "", func(string) string { return "" }).Steps[1]
+		if step.State != c.state || step.Note != c.note {
+			t.Errorf("%q with condition %v = %s %q, want %s %q", c.line, c.condition, step.State, step.Note, c.state, c.note)
 		}
 	}
 }
 
 func TestTagRulesPanel_TaggerThresholdAndOffLanes(t *testing.T) {
-	srv, modelPath := newModelServer(t,
+	srv, _ := newModelServer(t,
 		config.TaggerInstance{Name: "alpha", Enabled: true, ConfidenceThreshold: 0.35, CategoryThresholds: map[string]float64{"general": 0.6}, TagsFile: "tags.csv"},
 		config.TaggerInstance{Name: "beta", Enabled: true, ConfidenceThreshold: 0.35, TagsFile: "tags.csv", Galleries: []string{}},
 		config.TaggerInstance{Name: "gamma", Enabled: false, ConfidenceThreshold: 0.35, TagsFile: "tags.csv"},
 		config.TaggerInstance{Name: "delta", Enabled: true, ConfidenceThreshold: 0.35, TagsFile: "tags.csv"},
 	)
-	for _, name := range []string{"alpha", "beta", "gamma"} {
-		installTagger(t, modelPath, name, "tag_id,name,category\n1,watermark,0\n")
-	}
-	installTagger(t, modelPath, "delta", "tag_id,name,category\n1,other,0\n")
+	taggertest.Use(t, map[string][]string{"alpha": {"watermark"}, "beta": {"watermark"}, "gamma": {"watermark"}, "delta": {"other"}})
 	cx := srv.active()
 	tag := mustTag(t, cx.TagSvc, "watermark", cx.GeneralCategoryID)
 

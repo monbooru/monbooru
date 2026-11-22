@@ -29,6 +29,7 @@ import (
 	"github.com/monbooru/monbooru/internal/relations"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
@@ -1390,16 +1391,13 @@ func TestSettingsTagger_RejectsBadName(t *testing.T) {
 	}
 }
 
-func TestSettingsTaggerLabels_NonDefaultLabelFile(t *testing.T) {
+func TestSettingsTaggerLabels_ComeFromTheWorker(t *testing.T) {
 	srv := newTestServer(t)
-	modelRoot := filepath.Join(t.TempDir(), "models")
-	dir := installTagger(t, modelRoot, "joytag", "")
-	mustWriteFile(t, filepath.Join(dir, "tags.txt"), []byte("1girl\nmonochrome\n"), 0o644)
-	srv.cfg.Paths.ModelPath = modelRoot
+	taggertest.Use(t, map[string][]string{"joytag": {"1girl", "monochrome"}})
 	srv.cfg.Tagger.Taggers = []config.TaggerInstance{{Name: "joytag", Enabled: true, ConfidenceThreshold: 0.4}}
 
 	body := mustGetBody(t, srv, "/settings/tagger/joytag/labels")
-	wantNotIn(t, body, "Cannot read the label file")
+	wantNotIn(t, body, "Cannot read the labels")
 	wantIn(t, body, `data-source="monochrome"`)
 }
 

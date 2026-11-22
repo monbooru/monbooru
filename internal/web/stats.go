@@ -1,12 +1,12 @@
 package web
 
 import (
+	"os"
 	"slices"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/desktop"
-	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 type galleryDBStats struct {
@@ -23,17 +23,17 @@ type mountStats struct {
 	UsedPct   int
 }
 
-type taggerCacheStats struct {
-	Loaded           bool
-	Provider         string
-	InUse            bool
-	Sessions         []string
-	IdleFor          time.Duration
-	IdleReleaseAfter time.Duration
-	WorkerPID        int
-	WorkerRSS        int64
-	WorkerAnon       int64
-	WorkerFile       int64
+// workerStats is one worker as the Stats block shows it; the memory is
+// the local worker's only, the one process monbooru can read.
+type workerStats struct {
+	Name, Provider, State string
+	// Up is a worker answering, whose mode and models are worth a row.
+	Up         bool
+	Loaded     []string
+	WorkerPID  int
+	WorkerRSS  int64
+	WorkerAnon int64
+	WorkerFile int64
 }
 
 type statsData struct {
@@ -41,7 +41,7 @@ type statsData struct {
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
-	Tagger     taggerCacheStats
+	Tagger     []workerStats
 }
 
 // Cheap by design: no directory walks.
@@ -123,29 +123,46 @@ func (s *Server) gatherStats() statsData {
 	return out
 }
 
-func gatherTaggerStats(s *Server) taggerCacheStats {
-	st := tagger.Status()
-	out := taggerCacheStats{
-		Loaded:   st.Loaded,
-		Provider: st.Provider,
-		InUse:    st.InUse,
-		Sessions: st.Sessions,
+func gatherTaggerStats(s *Server) []workerStats {
+	rows := s.workersView().Rows
+	out := make([]workerStats, 0, len(rows))
+	for _, r := range rows {
+		st := workerStats{Name: r.Name, Provider: r.Provider, State: r.State, Up: r.Dot == "ok", Loaded: r.Loaded}
+		// The models live in the worker's inference child, so its memory
+		// counts with the worker's.
+		if pid := s.peers.PID(localWorkerName); r.Local && !r.Disabled && pid > 0 {
+			st.WorkerPID = pid
+			for _, p := range append([]int{pid}, procChildren(pid)...) {
+				if rss, ok := desktop.ProcRSS(p); ok {
+					st.WorkerRSS += int64(rss.Total)
+					st.WorkerAnon += int64(rss.Anon)
+					st.WorkerFile += int64(rss.File)
+				}
+			}
+		}
+		out = append(out, st)
 	}
-	s.cfgMu.RLock()
-	mins := s.cfg.Tagger.IdleReleaseAfterMinutes
-	s.cfgMu.RUnlock()
-	if mins > 0 {
-		out.IdleReleaseAfter = time.Duration(mins) * time.Minute
+	return out
+}
+
+// procChildren reads every thread's list: a child is listed under the
+// thread that forked it, and Go forks from any of them.
+func procChildren(pid int) []int {
+	dir := "/proc/" + strconv.Itoa(pid) + "/task"
+	tasks, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
 	}
-	if st.Loaded && !st.InUse && !st.LastUsed.IsZero() {
-		out.IdleFor = time.Since(st.LastUsed)
-	}
-	if pid, ok := tagger.WorkerPID(); ok {
-		out.WorkerPID = pid
-		if r, rok := desktop.ProcRSS(pid); rok {
-			out.WorkerRSS = int64(r.Total)
-			out.WorkerAnon = int64(r.Anon)
-			out.WorkerFile = int64(r.File)
+	var out []int
+	for _, task := range tasks {
+		data, err := os.ReadFile(dir + "/" + task.Name() + "/children")
+		if err != nil {
+			continue
+		}
+		for _, f := range strings.Fields(string(data)) {
+			if n, err := strconv.Atoi(f); err == nil {
+				out = append(out, n)
+			}
 		}
 	}
 	return out

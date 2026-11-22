@@ -1,20 +1,12 @@
 package tagger
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/monbooru/monbooru/internal/config"
-)
-
-const (
-	DefaultModelFile    = "model.onnx"
-	DefaultTagsFile     = "tags.csv"
-	DefaultTextTagsFile = "tags.txt"
+	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
 // The name becomes a TOML key and a folder under the model path, which the
@@ -30,32 +22,22 @@ type TaggerStatus struct {
 	Malformed bool
 	// Set whichever Reason the row shows.
 	Missing bool
+	// Differs is a tagger two workers hold with different files.
+	Differs bool
 }
 
-// DiscoverTaggers keeps a row for a configured tagger whose folder is gone.
+// DiscoverTaggers lists every tagger a worker holds, then every configured
+// one no worker holds.
 func DiscoverTaggers(cfg *config.Config) []TaggerStatus {
+	p := currentPool()
+	p.mu.Lock()
+	order, held := p.held()
+	p.mu.Unlock()
+
 	byName := map[string]config.TaggerInstance{}
-	order := []string{}
-
-	catalogDefaults := catalogDefaultsByName(cfg.Paths.ModelPath)
-
-	if entries, err := os.ReadDir(cfg.Paths.ModelPath); err == nil {
-		for _, e := range entries {
-			name := e.Name()
-			// Stat, not the entry's type: a symlinked model directory
-			// reports as a link.
-			fi, err := os.Stat(filepath.Join(cfg.Paths.ModelPath, name))
-			if err != nil || !fi.IsDir() {
-				continue
-			}
-			if onnx, labels := listTaggerFiles(filepath.Join(cfg.Paths.ModelPath, name)); len(onnx)+len(labels) == 0 {
-				continue
-			}
-			byName[name] = SeedTaggerInstance(name, true, catalogDefaults[name])
-			order = append(order, name)
-		}
+	for _, name := range order {
+		byName[name] = SeedTaggerInstance(name, true, held[name].catalog)
 	}
-
 	for _, t := range cfg.Tagger.Taggers {
 		if _, seen := byName[t.Name]; !seen {
 			order = append(order, t.Name)
@@ -63,61 +45,48 @@ func DiscoverTaggers(cfg *config.Config) []TaggerStatus {
 		byName[t.Name] = t
 	}
 
-	noLibrary := ""
-	if buildSupportsInference() {
-		noLibrary = missingRuntimeLibrary()
-	}
-
 	out := make([]TaggerStatus, 0, len(order))
 	for _, name := range order {
 		t := byName[name]
-		dir := filepath.Join(cfg.Paths.ModelPath, name)
-		t.ModelFile, t.TagsFile = resolveTaggerFiles(dir, t.ModelFile, t.TagsFile)
-
 		status := TaggerStatus{TaggerInstance: t, Available: true}
-		onnxPath := filepath.Join(dir, t.ModelFile)
-		tagsPath := filepath.Join(dir, t.TagsFile)
-		missing := ""
-		switch {
-		case statMissing(onnxPath):
-			missing = "missing " + t.ModelFile
-		case statMissing(tagsPath):
-			missing = "missing " + t.TagsFile
+		h := held[name]
+		if h != nil {
+			status.ModelFile, status.TagsFile = h.model.ModelFile, h.model.LabelFile
+			status.Differs = h.differs
 		}
-		status.Missing = missing != ""
 		switch {
 		case ValidateTaggerName(name) != nil:
 			status.Available, status.Malformed = false, true
 			status.Reason = "folder name must match [A-Za-z0-9_-]+; rename the folder"
-		case noLibrary != "":
+		case h == nil:
+			status.Available, status.Missing = false, true
+			status.Reason = "no worker holds it"
+		case !h.usable && h.model.Reason != "" && h.model.Reason != reasonReading:
+			status.Available, status.Malformed = false, true
+			status.Reason = h.model.Reason
+		case !h.usable:
 			status.Available = false
-			status.Reason = noLibrary
-		case missing != "":
-			status.Available = false
-			status.Reason = missing
-		default:
-			if _, err := ResolveProfile(cfg.Paths.ModelPath, name, t.TagsFile); err != nil {
-				status.Available, status.Malformed = false, true
-				status.Reason = "no inference profile: " + err.Error() + "; add a tagger.json"
-			}
+			status.Reason = cmp.Or(readingReason(h), "the workers that hold it are off")
 		}
 		out = append(out, status)
 	}
 	return out
 }
 
-func statMissing(path string) bool {
-	_, err := os.Stat(path)
-	return err != nil
+// The worker's reason while it reads a model's weights for its digest.
+const reasonReading = "reading the weights"
+
+func readingReason(h *heldModel) string {
+	if h.model.Reason == reasonReading {
+		return reasonReading
+	}
+	return ""
 }
 
 // EnabledTaggers ignores gallery scoping; a job on one gallery uses
 // EnabledTaggersForGallery. It passes no predicate: AppliesToGallery("")
 // is false for a gallery-scoped tagger.
 func EnabledTaggers(cfg *config.Config) []TaggerStatus {
-	if !buildSupportsInference() {
-		return nil
-	}
 	return enabledIn(DiscoverTaggers(cfg), nil)
 }
 
@@ -146,9 +115,6 @@ func EnabledTaggersForGallery(cfg *config.Config, gallery string) []TaggerStatus
 // controls, from "set up but unusable", which only disables them;
 // reason is UnavailableReason's.
 func GalleryTaggers(cfg *config.Config, gallery string) (enabled []TaggerStatus, present bool, reason string) {
-	if !buildSupportsInference() {
-		return nil, false, reasonFrom(nil)
-	}
 	all := DiscoverTaggers(cfg)
 	enabled = enabledIn(all, func(t TaggerStatus) bool { return t.AppliesToGallery(gallery) })
 	reason = reasonFrom(all)
@@ -172,74 +138,7 @@ func enabledIn(list []TaggerStatus, extra func(TaggerStatus) bool) []TaggerStatu
 	return out
 }
 
-// resolveTaggerFiles falls back to the default names so a missing file
-// still gets named in the reason.
-func resolveTaggerFiles(dir, explicitModel, explicitTags string) (string, string) {
-	modelFile := explicitModel
-	tagsFile := explicitTags
-
-	onnxFiles, labelFiles := listTaggerFiles(dir)
-
-	if modelFile == "" {
-		switch {
-		case slices.Contains(onnxFiles, DefaultModelFile):
-			modelFile = DefaultModelFile
-		case len(onnxFiles) == 1:
-			modelFile = onnxFiles[0]
-		default:
-			modelFile = DefaultModelFile
-		}
-	}
-
-	if tagsFile == "" {
-		switch {
-		case slices.Contains(labelFiles, DefaultTagsFile):
-			tagsFile = DefaultTagsFile
-		case slices.Contains(labelFiles, DefaultTextTagsFile):
-			tagsFile = DefaultTextTagsFile
-		case len(labelFiles) == 1:
-			tagsFile = labelFiles[0]
-		default:
-			tagsFile = DefaultTagsFile
-		}
-	}
-
-	return modelFile, tagsFile
-}
-
-func isTaggerSidecar(name string) bool {
-	switch name {
-	case "tagger.json", "dispatch.json", modelManifest, stockProfile, stockDispatch:
-		return true
-	}
-	return false
-}
-
-func listTaggerFiles(dir string) (onnx, labels []string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, nil
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		n := e.Name()
-		switch strings.ToLower(filepath.Ext(n)) {
-		case ".onnx":
-			onnx = append(onnx, n)
-		case ".csv", ".txt":
-			labels = append(labels, n)
-		case ".json":
-			if !isTaggerSidecar(n) {
-				labels = append(labels, n)
-			}
-		}
-	}
-	return onnx, labels
-}
-
-func SeedTaggerInstance(name string, enabled bool, catalog *CatalogEntry) config.TaggerInstance {
+func SeedTaggerInstance(name string, enabled bool, catalog *worker.CatalogEntry) config.TaggerInstance {
 	t := config.TaggerInstance{
 		Name:                name,
 		Enabled:             enabled,
@@ -258,13 +157,4 @@ func SeedTaggerInstance(name string, enabled bool, catalog *CatalogEntry) config
 		t.PerCategoryTopK = maps.Clone(catalog.DefaultTopK)
 	}
 	return t
-}
-
-func catalogDefaultsByName(modelPath string) map[string]*CatalogEntry {
-	cat := LoadCatalog(modelPath)
-	out := make(map[string]*CatalogEntry, len(cat))
-	for i := range cat {
-		out[cat[i].Name] = &cat[i]
-	}
-	return out
 }

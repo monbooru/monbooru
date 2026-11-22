@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/shared/worker"
+	"github.com/monbooru/monbooru/internal/tagger"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
 )
 
 func TestSettingsTaggerPost_SavesTheAcceptedFormAndRefusesABadProvider(t *testing.T) {
@@ -90,7 +93,7 @@ func TestSettingsTaggerDeletePost_RemovesTheFolderAndTheEntry(t *testing.T) {
 func TestSettingsTaggerMappingPost_RefusesANonLevelRatingTarget(t *testing.T) {
 	srv, modelPath := newModelServer(t)
 	mustMkdirAll(t, filepath.Join(modelPath, "camie"), 0o755)
-	dispatch := filepath.Join(modelPath, "camie", "dispatch.json")
+	dispatch := tagger.OverlayPath(srv.dataPath(), "camie")
 	rule := func(name string) *httptest.ResponseRecorder {
 		return postForm(t, srv, "/settings/tagger/camie/mapping", url.Values{
 			"rule_source": {"rating_safe"}, "rule_category": {"rating"}, "rule_name": {name},
@@ -111,10 +114,10 @@ func TestSettingsTaggerMappingPost_RefusesANonLevelRatingTarget(t *testing.T) {
 }
 
 func TestSettingsTaggerMappingPost_RefusesOverABrokenDispatchFile(t *testing.T) {
-	srv, modelPath := newModelServer(t)
-	dir := installTagger(t, modelPath, "wd-swinv2", "tag_id,name,category\n1,engrish,0\n")
+	srv, _ := newModelServer(t)
+	taggertest.Use(t, map[string][]string{"wd-swinv2": {"engrish"}})
 	broken := `{"version":1,"rules":[{"source":"engrish","category":""},]}`
-	dispatch := filepath.Join(dir, "dispatch.json")
+	dispatch := tagger.OverlayPath(srv.dataPath(), "wd-swinv2")
 	mustWriteFile(t, dispatch, []byte(broken), 0o644)
 
 	w := postForm(t, srv, "/settings/tagger/wd-swinv2/mapping", url.Values{
@@ -130,8 +133,8 @@ func TestSettingsTaggerMappingPost_RefusesOverABrokenDispatchFile(t *testing.T) 
 }
 
 func TestSettingsTaggerMappingPost_RefreshesTheExportAndTheRow(t *testing.T) {
-	srv, modelPath := newModelServer(t)
-	installTagger(t, modelPath, "wd-swinv2", "tag_id,name,category\n1,engrish,0\n2,monochrome,0\n")
+	srv, _ := newModelServer(t)
+	taggertest.Use(t, map[string][]string{"wd-swinv2": {"engrish", "monochrome"}})
 	oob := func(body, id string) string {
 		t.Helper()
 		i := strings.Index(body, `id="`+id+`"`)
@@ -164,8 +167,12 @@ func TestSettingsTaggerMappingPost_RefreshesTheExportAndTheRow(t *testing.T) {
 }
 
 func TestSettingsShowsAMalformedTaggerFolderWithoutActions(t *testing.T) {
-	srv, modelPath := newModelServer(t)
-	installTagger(t, modelPath, "wd-v1.4-moat", "tag_id,name,category\n1,engrish,0\n")
+	srv, _ := newModelServer(t)
+	w := taggertest.Use(t, map[string][]string{"wd-v1.4-moat": {"engrish"}})
+	w.Fake().Mu.Lock()
+	w.Fake().Models[0].Ready, w.Fake().Models[0].Reason = false, `model name "wd-v1.4-moat" must match [A-Za-z0-9_-]+`
+	w.Fake().Mu.Unlock()
+	w.Refresh()
 
 	_, body := getBody(t, srv, "/settings")
 	wantIn(t, body, "folder name must match [A-Za-z0-9_-]&#43;; rename the folder")
@@ -185,33 +192,26 @@ func taggerEnabled(srv *Server, name string) bool {
 	return false
 }
 
-func TestSettingsKeepsTaggersEnabledWhileTheModelPathIsMissing(t *testing.T) {
-	srv := newTestServerWith(t, false, func(c *config.Config) {
-		c.Paths.ModelPath = filepath.Join(t.TempDir(), "unmounted")
-		c.Tagger.Taggers = []config.TaggerInstance{{Name: "wd-swinv2", Enabled: true}}
-	})
+func TestSettingsDisablesATaggerNoWorkerHolds(t *testing.T) {
+	srv, _ := newModelServer(t, config.TaggerInstance{Name: "wd-swinv2", Enabled: true}, config.TaggerInstance{Name: "joytag", Enabled: true})
+	taggertest.Use(t, map[string][]string{"joytag": {"solo"}})
 	getBody(t, srv, "/settings")
-	if !taggerEnabled(srv, "wd-swinv2") {
-		t.Error("a missing model_path disabled the tagger")
+	if taggerEnabled(srv, "wd-swinv2") || !taggerEnabled(srv, "joytag") {
+		t.Error("want wd-swinv2, which no worker holds, disabled, and joytag kept")
 	}
 }
 
-func TestSettingsDisablesATaggerWhoseFilesAreGone(t *testing.T) {
-	srv, modelPath := newModelServer(t, config.TaggerInstance{Name: "wd-swinv2", Enabled: true}, config.TaggerInstance{Name: "joytag", Enabled: true})
-	installTagger(t, modelPath, "joytag", "")
+func TestSettingsDisablesNothingBeforeAWorkerHasAnswered(t *testing.T) {
+	srv, _ := newModelServer(t, config.TaggerInstance{Name: "wd-swinv2", Enabled: true})
 	getBody(t, srv, "/settings")
-	if taggerEnabled(srv, "wd-swinv2") || taggerEnabled(srv, "joytag") {
-		t.Error("a tagger whose folder or label file is gone stayed enabled")
+	if !taggerEnabled(srv, "wd-swinv2") {
+		t.Error("with no worker described yet the tagger was disabled")
 	}
 }
 
 func TestSettingsAutoEnablesAndDisablesInOneVisit(t *testing.T) {
-	srv, modelPath := newModelServer(t, config.TaggerInstance{Name: "wd-swinv2", Enabled: true})
-	installTagger(t, modelPath, "fresh", "tag_id,name,category,count\n0,red,0,1\n")
-
-	lib := filepath.Join(t.TempDir(), "libonnxruntime.so")
-	mustWriteFile(t, lib, nil, 0o644)
-	t.Setenv("ORT_LIB_PATH", lib)
+	srv, _ := newModelServer(t, config.TaggerInstance{Name: "wd-swinv2", Enabled: true})
+	taggertest.Use(t, map[string][]string{"fresh": {"red"}})
 
 	getBody(t, srv, "/settings")
 
@@ -281,31 +281,27 @@ func taggerNames(srv *Server) []string {
 	return out
 }
 
-func TestSettingsOffersTheFilesACopiedRegistryFolderLacks(t *testing.T) {
-	srv, modelPath := newModelServer(t)
-	src := filepath.Join("..", "registry", "plugins", "taggers", "camie-v2")
-	dir := filepath.Join(modelPath, "camie-v2")
-	mustMkdirAll(t, dir, 0o755)
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		mustWriteFile(t, filepath.Join(dir, e.Name()), data, 0o644)
-	}
+func TestSettingsOffersWhatAWorkersCatalogLacks(t *testing.T) {
+	srv, _ := newModelServer(t)
+	w := taggertest.Use(t, nil)
+	w.Fake().Mu.Lock()
+	w.Fake().Catalog = []worker.CatalogEntry{{
+		Name: "camie-v2", Description: "Anime tagger with artist/copyright recognition",
+		Files:   []worker.CatalogFile{{URL: "https://example.invalid/camie-tagger-v2.onnx", Filename: "camie-tagger-v2.onnx"}},
+		Command: "mkdir -p 'camie-v2' && \\\ncurl -L -o 'camie-v2/camie-tagger-v2.onnx' 'https://example.invalid/camie-tagger-v2.onnx'",
+	}}
+	w.Fake().Mu.Unlock()
+	w.Refresh()
 
 	_, body := getBody(t, srv, "/settings")
 	wantIn(t, body, `data-tagger-name="camie-v2"`)
 	wantIn(t, body, "Anime tagger with artist/copyright recognition")
 	wantIn(t, body, "camie-tagger-v2.onnx")
-	wantNotIn(t, body, "taggers/camie-v2/profile_default.json")
 
-	mustWriteFile(t, filepath.Join(dir, "camie-tagger-v2.onnx"), []byte("weights"), 0o644)
-	mustWriteFile(t, filepath.Join(dir, "camie-tagger-v2-metadata.json"), []byte(`{}`), 0o644)
+	w.Fake().Mu.Lock()
+	w.Fake().Catalog[0].Command = ""
+	w.Fake().Mu.Unlock()
+	w.Refresh()
 	_, body = getBody(t, srv, "/settings")
 	wantNotIn(t, body, `data-tagger-name="camie-v2"`)
 }

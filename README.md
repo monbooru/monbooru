@@ -70,7 +70,7 @@ Monbooru runs on Linux (x86_64, arm64) and Windows (x86_64). Once started, it's 
 
 Edit the volume paths in [`docker/docker-compose.yml`](docker/docker-compose.yml), then run `docker compose up -d`.
 
-For faster auto-tagging, use the `latest-cuda` image (NVIDIA) or `latest-openvino` (Intel GPU).
+`latest` can only do CPU auto-tagging. For faster auto-tagging, use the `latest-cuda` image (NVIDIA) or `latest-openvino` (Intel GPU). The `latest-lite` image has no auto-tagger of its own and tags through a [monworker](https://github.com/monbooru/monworker) on another machine.
 
 ### Download
 
@@ -78,8 +78,8 @@ Download a build for your system from the [releases](https://github.com/monbooru
 
 Downloads come in two flavours:
 
-- **lite** is the program alone. It has no auto-tagger, and video, AVIF and JPEG XL thumbnails need ffmpeg on your system.
-- **bundled** carries ffmpeg and ONNX Runtime, so everything works out of the box.
+- **lite** is the program and ffmpeg. It can only tag through a [monworker](https://github.com/monbooru/monworker) you run on this machine or another one.
+- **bundled** adds monworker beside it, so auto-tagging works out of the box.
 
 Beside the portable archives, Linux bundled builds also ship as an AppImage and as a Flatpak.
 
@@ -93,13 +93,13 @@ The [documentation](https://monbooru.github.io/mondocs/) covers the first steps.
 
 ## Technical overview
 
-Monbooru is a single self-contained Go binary, web assets embedded, with seven direct dependencies. Each gallery is one SQLite file: no database server, no cache layer, nothing else to run. Your images stay ordinary files and folders; the database and thumbnails live in a separate data directory, so backing up means copying that directory, and removing monbooru leaves your images where they were. The UI is server-rendered with htmx, with no JS framework and no frontend build step.
+Monbooru is a single self-contained Go binary, web assets embedded, with six direct dependencies. Each gallery is one SQLite file: no database server, no cache layer, nothing else to run. Your images stay ordinary files and folders; the database and thumbnails live in a separate data directory, so backing up means copying that directory, and removing monbooru leaves your images where they were. The UI is server-rendered with htmx, with no JS framework and no frontend build step.
 
-The heavy features stay out of the main process. Auto-tagging is off until you install a model from **Settings → Auto-Tagger**, and runs in a separate worker that unloads itself when idle. ffmpeg is optional, needed only for video, animated previews, AVIF and JPEG XL.
+The heavy features stay out of the main process. Auto-tagging runs in [monworker](https://github.com/monbooru/monworker), a separate program that monbooru starts on the same machine or reaches on another one, and that unloads its models when idle; it is off until you install a model from **Settings → Auto-Tagger**. ffmpeg is needed only for video, animated previews, AVIF and JPEG XL.
 
 ## Related applications
 
-Monbooru works offline. These optional companions add the online features:
+Monbooru works offline and on its own. These optional companions add the online features and auto-tagging:
 
 ```mermaid
 ---
@@ -119,6 +119,8 @@ browser extension`"]
 downloader`"]
     booru(["`**monbooru**
 Your self-hosted booru`"])
+    worker["`**monworker**
+Machine Learning worker`"]
 
     web -->|browse| sender
     sender -->|send URL| loader
@@ -129,19 +131,21 @@ Your self-hosted booru`"])
     loader -.->|reverse lookup: md5 + similarity| web
     ptr <-.->|"`sync: sha256 tags + aliases + implications
 contribute back`"| loader
+    worker <-.->|handle auto-tagging| booru
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
     classDef tool fill:#1a1818,stroke:#9d2235,stroke-width:1.5px,color:#e8e4e2;
     classDef src  fill:#1a1818,stroke:#a09898,stroke-width:1px,color:#a09898;
 
     class booru hub;
-    class sender,loader tool;
+    class sender,loader,worker tool;
     class web,ptr src;
 ```
 
 - **monbooru**: this application; organizes, tags, and serves your collection.
 - **[monloader](https://github.com/monbooru/monloader)**: downloader. Fetches files and per-post metadata (via gallery-dl) from supported boorus and galleries and pushes them into a monbooru gallery over the REST API. It also answers monbooru's reverse lookups against boorus, IQDB, SauceNAO and the Hydrus Public Tag Repository, to backfill tags and sources; when a matched post has a better file than your local copy, one click replaces it in place. The PTR connection can also pull tag aliases and implications into your catalog, and send yours back.
 - **[monsender](https://github.com/monbooru/monsender)**: browser extension; sends the URL of the page you're browsing to monloader.
+- **[monworker](https://github.com/monbooru/monworker)**: Machine Learning worker; runs the auto-tagging models for monbooru, on the same machine or on another one.
 - **[monbooru-plugins](https://github.com/monbooru/monbooru-plugins)**: community registry of plugins, themes and extra taggers.
 
 ## Contributing
@@ -174,7 +178,7 @@ This project is built on the work of others:
 
 - [htmx](https://htmx.org/) powers the server-rendered UI.
 - [SQLite](https://sqlite.org/), through the pure-Go [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) driver, stores each gallery.
-- [ONNX Runtime](https://onnxruntime.ai/), through [onnxruntime_go](https://github.com/yalue/onnxruntime_go), runs the auto-tagger. The supported models are the work of [SmilingWolf](https://huggingface.co/SmilingWolf) (WD SwinV2 v3), [animetimm](https://huggingface.co/animetimm) (EVA02), [fancyfeast](https://huggingface.co/fancyfeast) (JoyTag), [Camais03](https://huggingface.co/Camais03) (Camie Tagger v2), and [PixAI](https://huggingface.co/pixai-labs) (PixAI Tagger v1.0, in [noaione](https://huggingface.co/noaione)'s ONNX export).
+- [ONNX Runtime](https://onnxruntime.ai/), through [onnxruntime_go](https://github.com/yalue/onnxruntime_go), runs the auto-tagger in [monworker](https://github.com/monbooru/monworker). The supported models are the work of [SmilingWolf](https://huggingface.co/SmilingWolf) (WD SwinV2 v3), [animetimm](https://huggingface.co/animetimm) (EVA02), [fancyfeast](https://huggingface.co/fancyfeast) (JoyTag), [Camais03](https://huggingface.co/Camais03) (Camie Tagger v2), and [PixAI](https://huggingface.co/pixai-labs) (PixAI Tagger v1.0, in [noaione](https://huggingface.co/noaione)'s ONNX export).
 - [ffmpeg](https://ffmpeg.org/) decodes video, AVIF and JPEG XL for thumbnails and hover previews; the bundled downloads carry a trimmed build of it from [ffmpeg-builds](https://github.com/monbooru/ffmpeg-builds), statically linked with [libwebp](https://chromium.googlesource.com/webm/libwebp), [dav1d](https://code.videolan.org/videolan/dav1d) and [libjxl](https://github.com/libjxl/libjxl).
 - monloader is mostly a wrapper for [gallery-dl](https://github.com/mikf/gallery-dl), which does the actual scraping. Reverse lookups by image similarity are answered by [IQDB](https://iqdb.org/) and [SauceNAO](https://saucenao.com/); md5 lookups by the boorus themselves. The PTR tag lookup syncs against the [Hydrus Public Tag Repository](https://hydrusnetwork.github.io/hydrus/PTR.html) (PTR) via [Hydrus Network](https://github.com/hydrusnetwork/hydrus)'s repository protocol; the tags, aliases, and implications it serves are the work of the hydrus community.
 - monsender's in-page image detection uses code from [ushiro](https://github.com/gary-host-laptop/ushiro) by gary-host-laptop and [behind!](https://github.com/kubuzetto/behind) by kubuzetto, originally under MPL-2.0.

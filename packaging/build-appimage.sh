@@ -1,5 +1,6 @@
 #!/bin/sh
-# Builds the desktop bundled AppImage for $GOARCH into dist/.
+# Builds the desktop bundled AppImage for $GOARCH into dist/, from the
+# tools fetch-tools.sh left.
 set -eu
 
 . ./packaging/release-env.sh
@@ -7,11 +8,12 @@ set -eu
 
 appimage_begin
 
-CGO_ENABLED=1 go build -tags tagger -trimpath \
+CGO_ENABLED=0 go build -trimpath \
   -ldflags="-s -w $LDFLAGS -X '$MOD.Package=appimage' -X 'main.defaultDesktop=true'" \
   -o "$app/usr/bin/monbooru" ./cmd/monbooru
 
-cp tools/ffmpeg tools/ffprobe tools/libonnxruntime.so "$app/usr/bin/"
-cp -r tools/licenses "$app/usr/share/"
+# The worker and its ONNX Runtime sit beside monbooru, where each looks.
+cp tools/ffmpeg tools/ffprobe worker/monworker worker/libonnxruntime.so "$app/usr/bin/"
+cp -r tools/licenses worker/licenses "$app/usr/share/"
 
 appimage_finish

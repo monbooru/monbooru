@@ -10,13 +10,14 @@ import (
 
 // Settle ends an autotag job; finished reports a run that went to the end,
 // whose peak memory the caller may log.
-func Settle(ctx context.Context, mgr *jobs.Manager, prefix, itemNoun string, total, skipped int, err error) (finished bool, _ error) {
+func Settle(ctx context.Context, mgr *jobs.Manager, prefix, itemNoun string, total int, res Result, err error) (finished bool, _ error) {
+	skipped := res.Skipped
 	done := fmt.Sprintf("%sauto-tagged %d %s%s", prefix, total, itemNoun, models.Plural(total, "image", "images"))
 	if skipped > 0 {
 		done = fmt.Sprintf("%sauto-tagged %d of %d %s%s, %d skipped", prefix, total-skipped, total, itemNoun, models.Plural(total, "image", "images"), skipped)
 	}
 	finished = ctx.Err() == nil && err == nil
-	return finished, settler(mgr, skipped)(ctx, err, fmt.Sprintf("%sauto-tagging cancelled (%d %s queued)", prefix, total, models.Plural(total, "image", "images")), done)
+	return finished, settler(mgr, skipped)(ctx, err, fmt.Sprintf("%sauto-tagging cancelled (%d %s queued)", prefix, total, models.Plural(total, "image", "images")), done+res.Shares())
 }
 
 func SettleImage(ctx context.Context, mgr *jobs.Manager, id int64, skipped int, err error) (finished bool, _ error) {

@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "description": "Photo / realistic tagger (JoyTag, ~430 MB)",
-  "files": [
-    { "url": "https://huggingface.co/fancyfeast/joytag/resolve/6b7f16331a6ccf0fdce37d5a9564715f6e772b22/model.onnx", "filename": "model.onnx" },
-    { "url": "https://huggingface.co/fancyfeast/joytag/resolve/6b7f16331a6ccf0fdce37d5a9564715f6e772b22/top_tags.txt", "filename": "tags.txt" }
-  ],
-  "default_threshold": 0.40
-}

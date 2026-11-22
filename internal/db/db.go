@@ -96,6 +96,8 @@ type DB struct {
 	// UnturnedThumbs is set by Bootstrap on a library last opened before
 	// thumbnails were turned by their EXIF orientation.
 	UnturnedThumbs bool
+	// Created is set by Bootstrap on a library it made from nothing.
+	Created bool
 	// Two passes each holding part of one pool would wait on each other
 	// forever.
 	eachConn sync.Mutex

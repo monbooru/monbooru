@@ -66,6 +66,7 @@ button.footer-rating-link { color: var(--fg-dim); }
 #nav a.nav-relations   { --nav-hue: var(--nav-relations); }
 #nav a.nav-settings    { --nav-hue: var(--nav-settings); }
 
+#topbar-right { flex: 1 1 0; justify-content: flex-end; }
 #job-status {
   font-size: 12px;
   color: var(--fg-dim);
@@ -73,7 +74,6 @@ button.footer-rating-link { color: var(--fg-dim); }
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: min(60ch, 30vw);
   overflow-x: clip;
   justify-content: flex-end;
 }
@@ -88,6 +88,7 @@ button.footer-rating-link { color: var(--fg-dim); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.job-type, .job-progress { flex: none; }
 .job-dismiss {
   background: none;
   border: none;
@@ -107,8 +108,7 @@ button.footer-rating-link { color: var(--fg-dim); }
   #nav a { padding-left: 8px; padding-right: 8px; }
   #topbar-right { order: 2; margin-left: auto; }
 }
-@media (max-width: 959px) { #job-status { max-width: 60vw; } }
-@media (max-width: 600px) { .job-mascot { width: 22px; height: 22px; margin: 0; } }
+@media (max-width: 600px) { #job-status > .job-mascot, #job-status > .job-type, #job-status > .job-msg, #job-status > .job-spin { display: none; } }
 @keyframes job-bob { 50% { transform: translateY(-3px); } }
 @keyframes job-spin { to { transform: rotate(360deg); } }
 
@@ -2580,6 +2580,10 @@ body.reader-body {
 }
 .peer-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .peer-address { color: var(--fg-dim); }
+.worker-table .worker-name { white-space: nowrap; }
+.worker-actions { display: inline-grid; grid-template-columns: repeat(2, 5.5em); gap: 6px; }
+.worker-act-state { grid-column: 1; }
+.worker-act-remove { grid-column: 2; }
 .peer-line { margin-top: 4px; font-size: 12px; }
 .peer-label { display: inline-block; min-width: 64px; color: var(--fg-dim); }
 #plugins .peer-row .field { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 12px; }
@@ -2696,3 +2700,10 @@ label.ptr-row:hover { background: var(--bg-input); }
 .tagger-get-steps { margin: 10px 0; padding-left: 20px; }
 .tagger-get-steps > li { margin-bottom: 6px; }
 .tagger-get-files { list-style: none; margin: 4px 0; padding: 0; }
+.pair-window-toggle { margin-left: auto; }
+@media (max-width: 600px) {
+  .stack-table.auto-paired thead { display: block; }
+  .stack-table.auto-paired thead tr { border: 0; padding: 0; margin: 0 0 4px; }
+  .stack-table.auto-paired thead th { padding: 0; }
+  .stack-table.auto-paired thead th:not(:first-child) { display: none; }
+}

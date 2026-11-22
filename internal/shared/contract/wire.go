@@ -27,6 +27,24 @@ type Gallery struct {
 	Active bool   `json:"active"`
 }
 
+// One folder of a listing. Images counts every subfolder's too, and a
+// folder holding only subfolders is still listed; Folders is how many
+// subfolders it has, so 0 is a leaf.
+type Folder struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Images  int    `json:"images"`
+	Folders int    `json:"folders"`
+}
+
+// A folder listing is one level a page at a time, as the sidebar: a
+// {hash:4} layout holds tens of thousands of folders.
+const (
+	FolderPageSize    = 500
+	FolderSearchLimit = 10
+	FolderSearchMax   = 100
+)
+
 type GalleryRename struct {
 	From string `json:"from"`
 	To   string `json:"to"`

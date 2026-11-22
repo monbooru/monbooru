@@ -24,6 +24,8 @@ type Req struct {
 	Version   string
 	Buttons   []config.PluginButton
 	Repair    bool
+	// Auto is an offer approved on arrival, with no click.
+	Auto bool
 }
 
 // An open button's page runs on monbooru's origin with the operator's
@@ -32,6 +34,9 @@ func (r Req) OpenOutranksScopes() bool {
 	return !slices.Contains(r.Scopes, config.ScopeWrite) &&
 		slices.ContainsFunc(r.Buttons, func(b config.PluginButton) bool { return b.Mode == config.ModeOpen })
 }
+
+// Address is where monbooru will call the peer once paired.
+func (r Req) Address() string { return CallbackURL(r.URL, r.Source) }
 
 type Store = pairing.Store[Req, *Req]
 
@@ -69,6 +74,11 @@ func Repoint(c *config.Config, app, url string) {
 	if t := c.Auth.Tokens.Paired(app); t != nil {
 		t.PeerURL = url
 	}
+	if name, ok := WorkerLabel(app); ok {
+		if w := FindWorker(c, name); w != nil {
+			w.URL = url
+		}
+	}
 }
 
 // The request stores the grant, so the approval card shows what the
@@ -84,8 +94,12 @@ func GrantedScopes(requested []string) []string {
 func Grant(c *config.Config, req Req, tok apitoken.Token) {
 	// A re-pair replaces the credentials: the copy that held the old
 	// token is gone.
-	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == req.App })
+	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == tok.Paired })
 	c.Auth.Tokens = append(c.Auth.Tokens, tok)
+	if req.App == contract.AppMonworker {
+		grantWorker(c, req, tok.PeerURL)
+		return
+	}
 	if req.App == contract.AppMonloader {
 		if c.EnvPinned("monloader.api_token") == "" {
 			c.Monloader.APIToken = req.PeerToken
@@ -115,6 +129,10 @@ func SetPaused(c *config.Config, app string, paused bool) {
 // and re-pair.
 func Revoke(c *config.Config, app string) {
 	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == app })
+	if name, ok := WorkerLabel(app); ok {
+		c.Workers = slices.DeleteFunc(c.Workers, func(w config.WorkerConfig) bool { return w.Name == name })
+		return
+	}
 	if app == contract.AppMonloader {
 		if c.EnvPinned("monloader.api_token") == "" {
 			c.Monloader.APIToken = ""

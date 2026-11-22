@@ -71,8 +71,16 @@ var wantFreeRoutes = []string{
 	"POST /settings/tagger/{name}/disable",
 	"POST /settings/tagger/{name}/enable",
 	"POST /settings/tagger/{name}/reset",
+	"POST /settings/workers/local/enable",
+	"POST /settings/workers/local/disable",
+	"POST /settings/workers/{name}/pause",
+	"POST /settings/workers/{name}/resume",
+	"POST /settings/workers/{name}/remove",
+	"GET /internal/workers",
+	"GET /internal/tagger-stats",
 	"GET /api/v1/pair/status",
 	"GET /internal/plugins/pairing",
+	"POST /api/v1/pair/check",
 	"POST /api/v1/pair/remove",
 	"POST /api/v1/pair/request",
 
@@ -97,6 +105,7 @@ var wantFreeRoutes = []string{
 	"POST /upload",
 	"POST /api/v1/images",
 	"POST /api/v1/images/{id}/file",
+	"POST /settings/plugins/pair/window",
 	"POST /settings/plugins/pair/{id}/approve",
 	"POST /settings/plugins/pair/{id}/deny",
 	"POST /settings/plugins/theme",
@@ -310,5 +319,16 @@ func TestImageBytesStreamWithoutTheGalleryLock(t *testing.T) {
 		}
 		close(sw.release)
 		<-done
+	}
+}
+
+func TestThePolledRoutesLogAtDebug(t *testing.T) {
+	for _, p := range []string{"/internal/job/status", "/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status"} {
+		if !isNoisyPath(p) {
+			t.Errorf("%s logs at info", p)
+		}
+	}
+	if isNoisyPath("/api/v1/pair/request") {
+		t.Error("an offer logs at debug")
 	}
 }

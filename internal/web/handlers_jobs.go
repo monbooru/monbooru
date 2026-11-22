@@ -37,13 +37,15 @@ func (s *Server) footerCountsHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	// MarkViewed first: a finished job's first render starts its dismiss timer.
 	s.jobs.MarkViewed()
-	n := s.pairNotice()
-	s.renderTemplate(w, "partials/job_status.html", jobStatusView{Job: s.jobs.Get(), Downloads: s.downloads.snapshot(), Mascot: themeMascots(s.activeTheme())["sparkle-head"], PairKey: n.Key()})
+	n, auto := s.pairNotice(), s.autoPairNotice()
+	key := n.Key() + auto.Key()
+	s.renderTemplate(w, "partials/job_status.html", jobStatusView{Job: s.jobs.Get(), Downloads: s.downloads.snapshot(), Mascot: themeMascots(s.activeTheme())["sparkle-head"], PairKey: key})
 	// The poll sends the key it last rendered, so an unchanged notice is
 	// not swapped under a pointer reading its title.
-	if r.FormValue("pair") != n.Key() {
-		n.OOB = true
+	if r.FormValue("pair") != key {
+		n.OOB, auto.OOB = true, true
 		s.renderTemplate(w, "webui/pair_notice", n)
+		s.renderTemplate(w, "partials/auto_pair_notice.html", auto)
 	}
 }
 

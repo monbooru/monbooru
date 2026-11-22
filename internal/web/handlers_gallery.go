@@ -21,6 +21,7 @@ import (
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/searchkw"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -53,10 +54,12 @@ type galleryData struct {
 	EnabledTaggers    []tagger.TaggerStatus
 	TaggersPresent    bool
 	TaggerReason      string
+	AutotagWorkers    []tagger.JobWorker
 	ActiveTagTerms    map[string]bool
 	InboxClusterAtIdx []*inboxCluster
 	InboxUploadActive bool
 	AcceptFileTypes   string
+	UploadFolder      webui.FolderPicker
 	SimilarityPercent map[int64]int
 	SortSelectOOB     bool
 	PluginSlot        pluginSlotView
@@ -308,6 +311,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		EnabledTaggers:    enabledTaggers,
 		TaggersPresent:    taggersPresent,
 		TaggerReason:      taggerReason,
+		AutotagWorkers:    autotagWorkers(),
 		PluginSlot:        s.pluginSlot(r, config.SlotBatchBar, 0, ""),
 		ActiveTagTerms:    computeActiveTagTerms(queryStr),
 		SearchTime:        took,
@@ -326,6 +330,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 	if inboxFilterActive(expr) {
 		data.InboxUploadActive = true
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
+		data.UploadFolder = s.folderPicker("upload")
 	}
 	data.HiddenByCeiling = hiddenByCeiling
 	var first, last int64
@@ -862,4 +867,13 @@ func buildInboxCluster(rows []models.Image, queryStr string, whole bool) *inboxC
 		RangeQuery: clusterQ,
 		Whole:      whole,
 	}
+}
+
+// autotagWorkers are what the batch Auto-tag dialog offers, once there
+// are two to choose from.
+func autotagWorkers() []tagger.JobWorker {
+	if ws := tagger.CurrentPool().JobWorkers(); len(ws) > 1 {
+		return ws
+	}
+	return nil
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/webui"
-	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 func (s *Server) pruneMissingImagesPost(w http.ResponseWriter, r *http.Request) {
@@ -592,7 +591,6 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	debug.FreeOSMemory()
-	tagger.ReleaseAll()
 	after := desktop.ProcStatus("self", "VmRSS")
 	if before > 0 && after > 0 && before > after {
 		writeInlineFlash(w, "ok", "Freed "+webui.HumanBytes(int64(before-after))+".")

@@ -26,6 +26,29 @@ func openTestDB(t *testing.T) *DB {
 	return db
 }
 
+func TestBootstrapMarksOnlyALibraryItCreated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lib.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustBootstrap(t, first)
+	if !first.Created {
+		t.Error("a library bootstrapped from nothing is not marked created")
+	}
+	_ = first.Close()
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = again.Close() }()
+	mustBootstrap(t, again)
+	if again.Created {
+		t.Error("reopening a library marks it created")
+	}
+}
+
 func TestBootstrap(t *testing.T) {
 	db := openTestDB(t)
 

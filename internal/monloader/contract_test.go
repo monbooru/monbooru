@@ -85,8 +85,8 @@ func TestMonloaderDocumentsEveryFieldThisClientUses(t *testing.T) {
 		{"get", "/health", nil, reflect.TypeFor[contract.Health]()},
 		{"get", "/api/v1/queue/{id}", nil, reflect.TypeFor[queueJob]()},
 		{"get", "/api/v1/ptr/status", nil, reflect.TypeFor[ptrStatus]()},
-		{"get", "/api/v1/rules", nil, reflect.TypeFor[TagRules]()},
-		{"post", "/api/v1/rules", reflect.TypeFor[tagRulesRequest](), reflect.TypeFor[tagRulesBatch]()},
+		{"get", "/api/v1/rules", nil, reflect.TypeFor[contract.TagRules]()},
+		{"post", "/api/v1/rules", reflect.TypeFor[contract.TagRulesRequest](), reflect.TypeFor[contract.TagRulesBatch]()},
 	} {
 		op, _ := dig(doc, "paths", x.path, x.method).(map[string]any)
 		if op == nil {
