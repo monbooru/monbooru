@@ -486,3 +486,106 @@ func TestAWorkerBehindAGatewayIsCalledWithBothTokens(t *testing.T) {
 		t.Errorf("Authorization = %q, want the gateway's key", bearer)
 	}
 }
+
+type asleep struct {
+	f    *worker.Fake
+	mu   sync.Mutex
+	hits int
+	wake int
+}
+
+func (a *asleep) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	a.hits++
+	up := a.hits >= a.wake
+	a.mu.Unlock()
+	if !up {
+		http.Error(w, `{"error":"no workers available"}`, http.StatusServiceUnavailable)
+		return
+	}
+	a.f.ServeHTTP(w, r)
+}
+
+func (a *asleep) seen() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.hits
+}
+
+func TestAnOnDemandWorkerIsLeftAloneUntilAJobNamesIt(t *testing.T) {
+	prev := wakeEvery
+	wakeEvery = 5 * time.Millisecond
+	t.Cleanup(func() { wakeEvery = prev })
+	rented := &asleep{f: newFake(t, wd()), wake: 3}
+	p := usePool(t, "",
+		WorkerDef{Name: "nas", URL: serve(t, newFake(t, wd())), Token: "tok"},
+		WorkerDef{Name: "rented", URL: serve(t, rented), Token: "tok", OnDemand: true})
+	p.Refresh(context.Background())
+	p.Glance(context.Background())
+	p.Peek(context.Background())
+	if rented.seen() != 0 {
+		t.Fatalf("a refresh reached the on-demand worker %d times", rented.seen())
+	}
+	names := func() (out []string) {
+		for _, w := range p.JobWorkers() {
+			out = append(out, w.Name)
+		}
+		return out
+	}
+	if got := names(); !slices.Equal(got, []string{"nas", "rented"}) {
+		t.Errorf("job workers = %v, want the on-demand one offered though never seen", got)
+	}
+	if _, name, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 192)}, nil); err != nil || name != "nas" {
+		t.Fatalf("a call that names no worker went to %q, %v", name, err)
+	}
+	if rented.seen() != 0 {
+		t.Fatal("a call that names no worker reached the on-demand one")
+	}
+
+	only := []string{"rented"}
+	if n := p.Slots([][]string{{"wd"}}, only); n != 0 {
+		t.Errorf("slots before it was ever read = %d: nothing says it holds wd yet", n)
+	}
+	var ticks int
+	if err := p.Wake(context.Background(), only, func(string, time.Duration) { ticks++ }); err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	if rented.seen() < 3 {
+		t.Errorf("the worker was asked %d times; it answers at the third", rented.seen())
+	}
+	if n := p.Slots([][]string{{"wd"}}, only); n != 2 {
+		t.Errorf("slots once it is up = %d, want its 2", n)
+	}
+	if _, name, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 192)}, only); err != nil || name != "rented" {
+		t.Errorf("a call that names it went to %q, %v", name, err)
+	}
+	if !p.OnDemand("rented") || p.OnDemand("nas") {
+		t.Error("OnDemand does not tell the two apart")
+	}
+	for _, v := range p.Workers() {
+		if v.Local && v.Standby {
+			t.Error("an on-demand worker made the local one stand by")
+		}
+	}
+}
+
+func TestWakeGivesUpOnAWorkerThatRefusesTheToken(t *testing.T) {
+	f := newFake(t, wd())
+	p := usePool(t, "", WorkerDef{Name: "rented", URL: serve(t, f), Token: "wrong", OnDemand: true})
+	err := p.Wake(context.Background(), []string{"rented"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "worker rented did not start") {
+		t.Fatalf("wake = %v", err)
+	}
+	if v := p.Workers()[0]; v.Up || !v.Checked {
+		t.Errorf("after a failed start: %+v, want it down", v)
+	}
+}
+
+func TestSpell(t *testing.T) {
+	t.Parallel()
+	for d, want := range map[time.Duration]string{400 * time.Millisecond: "0 s", 34 * time.Second: "34 s", 72 * time.Second: "1 min 12 s", time.Hour: "60 min 0 s"} {
+		if got := Spell(d); got != want {
+			t.Errorf("Spell(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

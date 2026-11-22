@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
@@ -63,6 +64,9 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 type Result struct {
 	Skipped int
 	Tagged  map[string]int
+	// Took is set when a worker started for the job took part, whose time
+	// is what the operator pays.
+	Took time.Duration
 }
 
 // Shares names each worker's images, most first, once more than one
@@ -183,6 +187,12 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	for i, g := range groups {
 		calls[i] = g.models
 	}
+	started := time.Now()
+	if err := pool.Wake(ctx, only, func(name string, waited time.Duration) {
+		mgr.Update(0, len(ids), fmt.Sprintf("starting %s, %s", name, Spell(waited)))
+	}); err != nil {
+		return Result{}, err
+	}
 	slots, remote := pool.JobSlots(calls, only)
 	parallel := min(prepareCount(cfg.Tagger, max(1, slots), remote), len(ids))
 	prep := make(semaphore, parallel)
@@ -302,6 +312,9 @@ feed:
 	wg.Wait()
 
 	res := Result{Skipped: int(skipped.Load()), Tagged: tagged}
+	if slices.ContainsFunc(only, pool.OnDemand) {
+		res.Took = time.Since(started)
+	}
 	if err := ctx.Err(); err != nil {
 		return res, err
 	}

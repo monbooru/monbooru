@@ -33,6 +33,8 @@ type workerRow struct {
 	// Manual is a worker added by address and token, which no pairing
 	// brought.
 	Manual bool
+	// OnDemand is a worker left alone between the jobs that name it.
+	OnDemand bool
 	// Missing is the local worker turned on with no monworker to run.
 	Missing bool
 	// Dot is the footer dot's state: ok, down or paused.
@@ -82,7 +84,7 @@ func (s *Server) workersView() workersData {
 	}
 	first := map[string]tagger.WorkerView{}
 	for _, v := range views {
-		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, ModelsDir: v.Info.ModelsDir,
+		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, OnDemand: v.OnDemand, ModelsDir: v.Info.ModelsDir,
 			Loaded: slices.Sorted(slices.Values(v.Info.Loaded))}
 		if wc := peer.FindWorker(cfg, v.Name); wc != nil && !v.Local {
 			row.Manual = wc.Manual
@@ -114,6 +116,8 @@ func workerState(v tagger.WorkerView) (dot, state string) {
 	switch {
 	case v.Paused:
 		return "paused", "paused"
+	case v.OnDemand:
+		return onDemandState(v)
 	case !v.Checked:
 		return "paused", "starting"
 	case !v.Up:
@@ -127,6 +131,22 @@ func workerState(v tagger.WorkerView) (dot, state string) {
 		return "ok", "standby"
 	}
 	return "ok", "idle"
+}
+
+// An on-demand worker is asleep unless a job has it: offline is kept for
+// a start that failed.
+func onDemandState(v tagger.WorkerView) (dot, state string) {
+	switch {
+	case v.Waking:
+		return "paused", "starting"
+	case v.InUse:
+		return "ok", "tagging"
+	case v.Checked && !v.Up:
+		return "down", "offline since " + v.DownSince.Local().Format("15:04")
+	case v.Seen.IsZero():
+		return "paused", "asleep"
+	}
+	return "paused", "asleep, last seen " + v.Seen.Local().Format("15:04")
 }
 
 func modelDigest(v tagger.WorkerView, name string) string {
@@ -235,10 +255,11 @@ func (s *Server) taggerWorkerAddPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	def := tagger.WorkerDef{
-		Name:    strings.TrimSpace(r.FormValue("name")),
-		URL:     strings.TrimRight(strings.TrimSpace(r.FormValue("url")), "/"),
-		Token:   strings.TrimSpace(r.FormValue("token")),
-		Gateway: strings.TrimSpace(r.FormValue("gateway_token")),
+		Name:     strings.TrimSpace(r.FormValue("name")),
+		URL:      strings.TrimRight(strings.TrimSpace(r.FormValue("url")), "/"),
+		Token:    strings.TrimSpace(r.FormValue("token")),
+		Gateway:  strings.TrimSpace(r.FormValue("gateway_token")),
+		OnDemand: r.FormValue("on_demand") == "on",
 	}
 	u, err := url.Parse(def.URL)
 	switch {
@@ -260,7 +281,12 @@ func (s *Server) taggerWorkerAddPost(w http.ResponseWriter, r *http.Request) {
 		writeInlineFlash(w, "err", "A worker named "+def.Name+" is already listed.")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// A platform that starts the worker for this call holds it meanwhile.
+	wait := 20 * time.Second
+	if def.OnDemand {
+		wait = 150 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), wait)
 	defer cancel()
 	info, err := tagger.CurrentPool().Probe(ctx, def)
 	var se *worker.StatusError
@@ -276,7 +302,7 @@ func (s *Server) taggerWorkerAddPost(w http.ResponseWriter, r *http.Request) {
 		if taken(c) {
 			return errors.New("a worker named " + def.Name + " is already listed")
 		}
-		c.Workers = append(c.Workers, config.WorkerConfig{Name: def.Name, URL: def.URL, Token: def.Token, GatewayToken: def.Gateway, Manual: true})
+		c.Workers = append(c.Workers, config.WorkerConfig{Name: def.Name, URL: def.URL, Token: def.Token, GatewayToken: def.Gateway, Manual: true, OnDemand: def.OnDemand})
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())

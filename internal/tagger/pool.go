@@ -33,6 +33,8 @@ type WorkerDef struct {
 	Gateway string
 	Local   bool
 	Paused  bool
+	// OnDemand is a worker left alone until a job that names it starts.
+	OnDemand bool
 }
 
 // What a worker last said of itself, kept on disk so the taggers list,
@@ -58,6 +60,8 @@ type poolWorker struct {
 	inUse     int
 	// format is the frame format its calls use, chosen at each look.
 	format string
+	// waking is a job starting an on-demand worker.
+	waking bool
 }
 
 func (w *poolWorker) slots() int { return max(1, w.cache.Info.Slots) }
@@ -213,7 +217,7 @@ func (p *Pool) Peek(ctx context.Context) {
 	p.mu.Lock()
 	var ws []*poolWorker
 	for _, w := range p.workers {
-		if w.up && !w.def.Paused && w.def.URL != "" {
+		if w.up && !w.def.Paused && !w.def.OnDemand && w.def.URL != "" {
 			ws = append(ws, w)
 		}
 	}
@@ -246,16 +250,16 @@ func (p *Pool) refresh(ctx context.Context, glance bool) {
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, w := range ws {
-		if w.def.Paused || w.def.URL == "" || glance && !up[w] {
+		if w.def.Paused || w.def.OnDemand || w.def.URL == "" || glance && !up[w] {
 			continue
 		}
-		wg.Go(func() { p.refreshOne(ctx, w, glance) })
+		wg.Go(func() { _ = p.refreshOne(ctx, w, glance, 30*time.Second) })
 	}
 	wg.Wait()
 }
 
-func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	p.mu.Lock()
 	client, prev := w.client, w.cache
@@ -268,7 +272,7 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil && glance {
-		return
+		return err
 	}
 	w.checked = true
 	if err != nil {
@@ -277,7 +281,7 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
 			logx.Infof("tagger: worker %s is down: %v", w.def.Name, err)
 		}
 		w.up, w.err = false, err.Error()
-		return
+		return err
 	}
 	if !w.up && !w.downSince.IsZero() {
 		logx.Infof("tagger: worker %s is up", w.def.Name)
@@ -287,6 +291,84 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool) {
 	w.cache = next
 	p.free.Broadcast()
 	go p.saveCache(w.def.Name, next)
+	return nil
+}
+
+// Each try waits out a platform that holds a request while it starts a
+// worker; the tries end when the worker answers or the start has taken
+// longer than any does.
+var (
+	wakeTry   = 150 * time.Second
+	wakeLimit = 6 * time.Minute
+	wakeEvery = 5 * time.Second
+)
+
+// Wake starts the on-demand workers among names and reads what they hold,
+// calling tick each second with the one it waits on. A worker that does
+// not answer in time, or refuses the token, fails the job that named it.
+func (p *Pool) Wake(ctx context.Context, names []string, tick func(name string, waited time.Duration)) error {
+	p.mu.Lock()
+	var ws []*poolWorker
+	for _, w := range p.workers {
+		if w.def.OnDemand && !w.def.Paused && slices.Contains(names, w.def.Name) {
+			ws = append(ws, w)
+		}
+	}
+	p.mu.Unlock()
+	for _, w := range ws {
+		if err := p.wake(ctx, w, tick); err != nil {
+			return fmt.Errorf("worker %s did not start: %w", w.def.Name, err)
+		}
+	}
+	return nil
+}
+
+func (p *Pool) wake(ctx context.Context, w *poolWorker, tick func(string, time.Duration)) error {
+	set := func(on bool) {
+		p.mu.Lock()
+		w.waking = on
+		p.mu.Unlock()
+	}
+	set(true)
+	defer set(false)
+	started := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		for {
+			err := p.refreshOne(ctx, w, false, wakeTry)
+			var se *worker.StatusError
+			refused := errors.As(err, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusForbidden)
+			if err == nil || refused || ctx.Err() != nil || time.Since(started) > wakeLimit {
+				done <- err
+				return
+			}
+			select {
+			case <-ctx.Done():
+				done <- ctx.Err()
+				return
+			case <-time.After(wakeEvery):
+			}
+		}
+	}()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-t.C:
+			if tick != nil {
+				tick(w.def.Name, time.Since(started))
+			}
+		}
+	}
+}
+
+// OnDemand reports whether name is a worker left alone between jobs.
+func (p *Pool) OnDemand(name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return w.def.OnDemand && w.def.Name == name })
 }
 
 // describe reads what a worker holds, fetching only the labels whose etag
@@ -329,6 +411,8 @@ type WorkerView struct {
 	URL       string
 	Local     bool
 	Paused    bool
+	OnDemand  bool
+	Waking    bool
 	Up        bool
 	Checked   bool
 	Standby   bool
@@ -343,11 +427,11 @@ type WorkerView struct {
 func (p *Pool) Workers() []WorkerView {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && !w.def.Paused && w.up })
+	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && !w.def.Paused && !w.def.OnDemand && w.up })
 	out := make([]WorkerView, 0, len(p.workers))
 	for _, w := range p.workers {
 		out = append(out, WorkerView{
-			Name: w.def.Name, URL: w.def.URL, Local: w.def.Local, Paused: w.def.Paused,
+			Name: w.def.Name, URL: w.def.URL, Local: w.def.Local, Paused: w.def.Paused, OnDemand: w.def.OnDemand, Waking: w.waking,
 			Up: w.up, Checked: w.checked, Standby: w.def.Local && remoteUp, InUse: w.inUse > 0,
 			DownSince: w.downSince, Err: w.err, Info: w.cache.Info, Models: slices.Clone(w.cache.Models), Seen: w.cache.Seen,
 		})
@@ -399,8 +483,10 @@ func (p *Pool) held() ([]string, map[string]*heldModel) {
 }
 
 // runnable is a worker a call may go to now. Caller holds p.mu.
+// An on-demand worker is not polled, so its last answer says nothing of
+// now: a job that names it finds out.
 func runnable(w *poolWorker) bool {
-	return !w.def.Paused && w.def.URL != "" && (w.up || !w.checked)
+	return !w.def.Paused && w.def.URL != "" && (w.def.OnDemand || w.up || !w.checked)
 }
 
 func (p *Pool) heldModel(name string) (heldModel, bool) {
@@ -435,8 +521,10 @@ func (p *Pool) Catalog() []worker.CatalogEntry {
 type JobWorker struct {
 	Name, Provider string
 	Local          bool
-	Slots          int
-	Holds          []string
+	// OnDemand is started by the job that names it.
+	OnDemand bool
+	Slots    int
+	Holds    []string
 }
 
 func (p *Pool) JobWorkers() []JobWorker {
@@ -445,10 +533,10 @@ func (p *Pool) JobWorkers() []JobWorker {
 	_, held := p.held()
 	var out []JobWorker
 	for _, w := range p.workers {
-		if !runnable(w) || !w.up {
+		if !runnable(w) || !w.up && !w.def.OnDemand {
 			continue
 		}
-		jw := JobWorker{Name: w.def.Name, Provider: w.cache.Info.Provider, Local: w.def.Local, Slots: w.slots()}
+		jw := JobWorker{Name: w.def.Name, Provider: w.cache.Info.Provider, Local: w.def.Local, OnDemand: w.def.OnDemand, Slots: w.slots()}
 		for _, m := range w.cache.Models {
 			if h := held[m.Name]; h != nil && m.Ready && m.Digest == h.model.Digest {
 				jw.Holds = append(jw.Holds, m.Name)
@@ -459,10 +547,24 @@ func (p *Pool) JobWorkers() []JobWorker {
 	return out
 }
 
-// Probe asks a worker not yet listed what it says of itself.
+// Probe asks a worker not yet listed what it says of itself. An
+// on-demand one is asked until ctx ends, as it may be starting; a refused
+// token ends the asking.
 func (p *Pool) Probe(ctx context.Context, def WorkerDef) (worker.Info, error) {
 	c := worker.Client{BaseURL: def.URL, Token: def.Token, Gateway: def.Gateway, HTTP: p.httpClient}
-	return c.Info(ctx)
+	for {
+		info, err := c.Info(ctx)
+		var se *worker.StatusError
+		refused := errors.As(err, &se) && (se.Status == http.StatusUnauthorized || se.Status == http.StatusForbidden)
+		if err == nil || refused || !def.OnDemand {
+			return info, err
+		}
+		select {
+		case <-ctx.Done():
+			return info, err
+		case <-time.After(wakeEvery):
+		}
+	}
 }
 
 // Answers is whether the paired worker named name answers with the token
@@ -497,7 +599,7 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []strin
 	_, held := p.held()
 	var local, remote []*poolWorker
 	for _, w := range p.workers {
-		if skip[w] || !runnable(w) || only != nil && !slices.Contains(only, w.def.Name) {
+		if skip[w] || !runnable(w) || only != nil && !slices.Contains(only, w.def.Name) || w.def.OnDemand && only == nil {
 			continue
 		}
 		ok := true
@@ -726,10 +828,10 @@ func (p *Pool) Load() Load {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	l := Load{Waiting: p.waiting}
-	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && runnable(w) && w.up })
+	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && !w.def.OnDemand && runnable(w) && w.up })
 	for _, w := range p.workers {
 		l.Busy = l.Busy || w.inUse > 0
-		if runnable(w) && w.up && (!w.def.Local || !remoteUp) {
+		if runnable(w) && w.up && (!w.def.OnDemand || w.inUse > 0) && (!w.def.Local || !remoteUp) {
 			l.Free += max(0, w.slots()-w.inUse)
 		}
 	}

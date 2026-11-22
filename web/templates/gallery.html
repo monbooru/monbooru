@@ -133,7 +133,7 @@
     {{if .AutotagWorkers}}
     <div class="field" id="batch-autotag-workers">
       <label>Workers</label>
-      {{range .AutotagWorkers}}<label><input type="checkbox" name="workers" value="{{.Name}}" data-holds="{{range $i, $h := .Holds}}{{if $i}} {{end}}{{$h}}{{end}}"{{if .Local}} data-local onchange="this.dataset.auto = ''"{{end}}> {{.Name}} <span class="field-hint">{{with .Provider}}{{providerLabel .}}, {{end}}{{.Slots}} at once{{if .Local}}, this machine{{end}}</span> <span class="field-hint" data-lacks hidden></span></label>{{end}}
+      {{range .AutotagWorkers}}<label><input type="checkbox" name="workers" value="{{.Name}}" data-holds="{{range $i, $h := .Holds}}{{if $i}} {{end}}{{$h}}{{end}}"{{if .Local}} data-local onchange="this.dataset.auto = ''"{{end}}{{if .OnDemand}} data-on-demand="1"{{end}}> {{.Name}} <span class="field-hint">{{with .Provider}}{{providerLabel .}}, {{end}}{{.Slots}} at once{{if .Local}}, this machine{{end}}{{if .OnDemand}}, on demand: starts with the job{{end}}</span> <span class="field-hint" data-lacks hidden></span></label>{{end}}
       <p class="field-hint">The ticked workers share the images.</p>
     </div>
     {{end}}
@@ -607,7 +607,7 @@ function openBatchAutotagDialog(scope) {
     beforeShow: function() {
       var kept = autotagWorkerTicks();
       document.querySelectorAll('#batch-autotag-workers input[name="workers"]').forEach(function(box) {
-        box.checked = Object.prototype.hasOwnProperty.call(kept, box.value) ? kept[box.value] === true : !box.hasAttribute('data-local');
+        box.checked = Object.prototype.hasOwnProperty.call(kept, box.value) ? kept[box.value] === true : !box.hasAttribute('data-local') && !box.hasAttribute('data-on-demand');
         box.dataset.auto = '';
       });
       updateAutotagWorkers();

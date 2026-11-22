@@ -256,6 +256,8 @@ func scheduleAutotagView(cfg *config.Config, taggers []tagger.TaggerStatus, work
 		switch {
 		case w.Local:
 			hint += ", this machine"
+		case w.OnDemand:
+			hint += ", on demand"
 		case w.Paused:
 			hint += ", paused"
 		case !w.Up:

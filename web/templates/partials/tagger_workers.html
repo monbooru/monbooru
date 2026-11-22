@@ -38,7 +38,7 @@
     <tbody>
       {{range .Rows}}
       <tr data-worker="{{.Name}}">
-        <td class="stack-head worker-name"><span class="footer-dot footer-dot-{{.Dot}}"></span> <strong>{{.Name}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}</td>
+        <td class="stack-head worker-name"><span class="footer-dot footer-dot-{{.Dot}}"></span> <strong>{{.Name}}</strong>{{if .Version}} <span class="field-hint">{{.Version}}</span>{{end}}{{if .OnDemand}} <span class="status-badge" title="Not polled: started only by a job that names it">on demand</span>{{end}}</td>
         <td data-label="Where">{{if .Local}}this machine{{else}}<code class="peer-address">{{.URL}}</code>{{end}}</td>
         <td data-label="Provider">{{or .Provider "-"}}</td>
         <td data-label="State"{{if eq .State "standby"}} title="Takes calls only when no paired worker can"{{end}}>{{.State}}</td>
@@ -101,6 +101,10 @@
     <div class="field"><label for="worker-add-token">Token</label><input type="password" id="worker-add-token" name="token" autocomplete="off" required></div>
     <div class="field"><label for="worker-add-gateway">Gateway token</label><input type="password" id="worker-add-gateway" name="gateway_token" autocomplete="off">
       <span class="field-hint">Only for a worker behind a gateway that wants its own key.</span></div>
+    <div class="field">
+      <label><input type="checkbox" name="on_demand"> On demand</label>
+      <span class="field-hint">For a worker billed while it runs: monbooru leaves it alone until a job that names it starts.</span>
+    </div>
     <div id="worker-add-flash"></div>
     {{template "dialog_actions" dict "ID" "worker-add-dialog" "Submit" "Add"}}
   </form>

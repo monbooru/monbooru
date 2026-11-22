@@ -316,6 +316,9 @@ type WorkerConfig struct {
 	// Manual is a worker added by address and token: no pairing brought
 	// it, so none is ended when it is removed.
 	Manual bool `toml:"manual,omitempty"`
+	// OnDemand is a worker billed while it runs: never polled, and called
+	// only by a job that names it.
+	OnDemand bool `toml:"on_demand,omitempty"`
 }
 
 type TaggerAggregationCfg struct {

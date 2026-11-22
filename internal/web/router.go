@@ -1364,7 +1364,7 @@ func (s *Server) syncWorkers(cfg *config.Config) {
 		defs = append(defs, s.local.def())
 	}
 	for _, w := range cfg.Workers {
-		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Gateway: w.GatewayToken, Paused: w.Paused})
+		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Gateway: w.GatewayToken, Paused: w.Paused, OnDemand: w.OnDemand})
 	}
 	s.pool.Set(defs)
 }

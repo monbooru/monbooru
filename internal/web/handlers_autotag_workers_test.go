@@ -146,3 +146,32 @@ func TestAddAWorkerByAddressOnceItAnswersWithItsToken(t *testing.T) {
 		t.Errorf("removing a worker added by address: told %v, left %+v; it holds no pairing to end", told, srv.cfgSnapshot().Workers)
 	}
 }
+
+func TestAnOnDemandWorkerShowsAsleepAndIsOfferedUnticked(t *testing.T) {
+	srv := newTestServer(t)
+	enableOnWorkers(t, srv, tagger.WorkerDef{Name: "gpu-box"}, tagger.WorkerDef{Name: "rented", OnDemand: true})
+	_, body := getBody(t, srv, "/internal/workers")
+	row := workerRowHTML(t, body, "rented")
+	for _, want := range []string{"footer-dot-paused", `>on demand</span>`, ">asleep<"} {
+		wantIn(t, row, want)
+	}
+	if err := tagger.CurrentPool().Wake(t.Context(), []string{"rented"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, body = getBody(t, srv, "/internal/workers")
+	wantIn(t, workerRowHTML(t, body, "rented"), ">asleep, last seen ")
+
+	_, body = getBody(t, srv, "/")
+	box := workerBox(t, body, "rented")
+	wantIn(t, box, `data-on-demand="1"`)
+	wantIn(t, body, "2 at once, on demand: starts with the job</span>")
+	wantNotIn(t, workerBox(t, body, "gpu-box"), "data-on-demand")
+
+	id := strconv.FormatInt(seedImage(t, srv, "one.png", 32, 32), 10)
+	w := postHTMXForm(t, srv, "/internal/autotag", url.Values{"scope": {"selection"}, "ids": {id}, "workers": {"rented"}})
+	mustCode(t, w, http.StatusAccepted)
+	awaitJobsDrain(t, srv)
+	if msg := srv.jobs.Get().Summary; !strings.Contains(msg, "(rented 1) in ") || !strings.HasSuffix(msg, " s") {
+		t.Errorf("the job on a started worker ended on %q, want its time", msg)
+	}
+}
