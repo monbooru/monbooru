@@ -1,7 +1,7 @@
 {{define "partials/schedule_status.html"}}
 {{$st := .Status}}
 <p id="schedule-status" class="field-hint"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  {{if $st.LastRun.IsZero}}Last run: never.{{else}}Last run: {{$st.LastRun.Format "2006-01-02 15:04:05"}}{{with $st.LastInfo}} ({{.}}, {{schedDuration $st.LastDur}}){{end}}.{{end}}
+  {{if $st.LastRun.IsZero}}Last run: never.{{else}}Last run: {{$st.LastRun.Format "2006-01-02 15:04:05"}}{{with $st.LastInfo}} ({{.}}, {{schedDuration $st.LastDur}}){{end}}.{{end}}{{range $st.AutotagInfo}} {{.}}{{end}}
   {{if $st.NextRun.IsZero}}{{$st.NextRunNote}}{{else}}Next run: {{$st.NextRun.Format "2006-01-02 15:04:05"}}.{{end}}
 </p>
 {{end}}

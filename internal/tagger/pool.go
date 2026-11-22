@@ -14,13 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/shared/fsx"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/worker"
 )
 
 // LocalWorker names the worker monbooru runs itself.
-const LocalWorker = "local"
+const LocalWorker = config.LocalWorkerName
 
 type WorkerDef struct {
 	Name   string

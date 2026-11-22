@@ -132,6 +132,7 @@ func Revoke(c *config.Config, app string) {
 	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == app })
 	if name, ok := WorkerLabel(app); ok {
 		c.Workers = slices.DeleteFunc(c.Workers, func(w config.WorkerConfig) bool { return w.Name == name })
+		c.DropWorkerRefs(name)
 		return
 	}
 	if app == contract.AppMonloader {

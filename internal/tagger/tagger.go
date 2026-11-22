@@ -70,6 +70,10 @@ func (r Result) Shares() string {
 	if len(r.Tagged) < 2 {
 		return ""
 	}
+	return r.shares()
+}
+
+func (r Result) shares() string {
 	names := slices.Collect(maps.Keys(r.Tagged))
 	slices.SortFunc(names, func(a, b string) int { return cmp.Or(r.Tagged[b]-r.Tagged[a], strings.Compare(a, b)) })
 	parts := make([]string, len(names))
@@ -77,6 +81,24 @@ func (r Result) Shares() string {
 		parts[i] = fmt.Sprintf("%s %d", n, r.Tagged[n])
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// Total is the images the run stored.
+func (r Result) Total() int {
+	n := 0
+	for _, c := range r.Tagged {
+		n += c
+	}
+	return n
+}
+
+// Workers names every worker's images, most first, one worker included:
+// " (gpu-box 171)".
+func (r Result) Workers() string {
+	if len(r.Tagged) == 0 {
+		return ""
+	}
+	return r.shares()
 }
 
 // RunOn is RunWithTaggers on the workers named in only, all of them

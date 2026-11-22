@@ -72,6 +72,7 @@ type Scheduler struct {
 	lastDur       time.Duration
 	lastInfo      string
 	lookupInfo    []string
+	autotagInfo   []string
 	galleryOffset int
 	catchUpDay    time.Time
 }
@@ -122,6 +123,13 @@ func (s *Scheduler) clearLookup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lookupInfo = nil
+	s.autotagInfo = nil
+}
+
+func (s *Scheduler) recordAutotag(line string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autotagInfo = append(s.autotagInfo, line)
 }
 
 // Run returns once done closes.
@@ -523,17 +531,35 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 		return nil
 	}
 	cfg := s.host.Config()
+	opts := cfg.Schedule.AutotagOptions()
 	enabled := tagger.EnabledTaggersForGallery(cfg, cx.Name)
+	if len(opts.Taggers) > 0 {
+		enabled = slices.DeleteFunc(enabled, func(t tagger.TaggerStatus) bool { return !slices.Contains(opts.Taggers, t.Name) })
+	}
 	if len(enabled) == 0 {
 		return nil
+	}
+	var only []string
+	if len(opts.Workers) > 0 {
+		if only = workersUp(opts.Workers, tagger.CurrentPool().JobWorkers()); len(only) == 0 {
+			s.recordAutotag(fmt.Sprintf("[%s] Auto-tag skipped: %s.", cx.Name, offline(opts.Workers)))
+			return nil
+		}
+	}
+	if opts.MaxImages > 0 && len(ids) > opts.MaxImages {
+		ids = ids[:opts.MaxImages]
 	}
 	ctx, err := s.startPhase(r, models.JobTypeAutotag, "autotag", cx.Name)
 	if err != nil {
 		return err
 	}
 	peak := s.host.MemoryMark()
-	res, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, enabled, s.jobs)
+	started := time.Now()
+	res, err := tagger.RunOn(ctx, cx.Handle, cfg, ids, enabled, only, s.jobs)
 	finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(ids), res, err)
+	if n := res.Total(); n > 0 {
+		s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %d %s%s, %s.", cx.Name, n, models.Plural(n, "image", "images"), res.Workers(), time.Since(started).Round(time.Second)))
+	}
 	if finished {
 		peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(ids), models.Plural(len(ids), "image", "images")))
 	}
@@ -541,6 +567,24 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
 	}
 	return err
+}
+
+// workersUp keeps the named workers that can take a job now.
+func workersUp(names []string, up []tagger.JobWorker) []string {
+	var out []string
+	for _, name := range names {
+		if slices.ContainsFunc(up, func(w tagger.JobWorker) bool { return w.Name == name }) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func offline(names []string) string {
+	if len(names) == 1 {
+		return names[0] + " is offline"
+	}
+	return "none of " + strings.Join(names, ", ") + " is up"
 }
 
 func (s *Scheduler) recordRun(started time.Time, dur time.Duration, info string, persist bool) {
@@ -570,13 +614,15 @@ type Status struct {
 	NextRun     time.Time
 	NextRunNote string
 	LookupInfo  []string
+	AutotagInfo []string
 }
 
 func (s *Scheduler) Status() Status {
 	s.mu.Lock()
 	st := Status{
 		LastRun: s.lastRun, LastDur: s.lastDur, LastInfo: s.lastInfo,
-		LookupInfo: append([]string(nil), s.lookupInfo...),
+		LookupInfo:  append([]string(nil), s.lookupInfo...),
+		AutotagInfo: append([]string(nil), s.autotagInfo...),
 	}
 	s.mu.Unlock()
 	// This process has not run a pass yet; the stored run is the last one.

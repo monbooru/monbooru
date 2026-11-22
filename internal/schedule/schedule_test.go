@@ -15,6 +15,7 @@ import (
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 type fakeHost struct {
@@ -420,5 +421,22 @@ func TestAutotagCandidatesAreTheVisibleImagesNeverAutoTagged(t *testing.T) {
 	}
 	if !slices.Equal(ids, []int64{fresh}) {
 		t.Errorf("candidates without ffmpeg = %v, want only %d: a video or ffmpeg still would be skipped unstamped every night", ids, fresh)
+	}
+}
+
+func TestWorkersUpKeepsTheNamedWorkersThatCanTakeAJob(t *testing.T) {
+	t.Parallel()
+	up := []tagger.JobWorker{{Name: "local"}, {Name: "beta"}}
+	if got := workersUp([]string{"alpha", "beta"}, up); !slices.Equal(got, []string{"beta"}) {
+		t.Errorf("workersUp = %v, want [beta]", got)
+	}
+	if got := workersUp([]string{"alpha"}, up); got != nil {
+		t.Errorf("workersUp = %v, want none", got)
+	}
+	if got := offline([]string{"alpha"}); got != "alpha is offline" {
+		t.Errorf("offline = %q", got)
+	}
+	if got := offline([]string{"alpha", "gamma"}); got != "none of alpha, gamma is up" {
+		t.Errorf("offline = %q", got)
 	}
 }
