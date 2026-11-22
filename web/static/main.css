@@ -896,7 +896,9 @@ tr.tag-implications-row > td { padding: 8px 12px 10px; background: var(--bg-surf
 .tag-row:hover { background: var(--bg-surface); }
 .empty-gallery-hint { font-size: 12px; }
 .cat-table { margin-bottom: 10px; }
+.tag-table tr { background: var(--bg); }
 .tag-table tr:hover { background: var(--bg-surface); }
+.tag-table th:nth-child(2), .tag-table .tag-name-cell { position: sticky; left: 0; z-index: 1; background: inherit; box-shadow: 1px 0 0 var(--border); }
 
 #tagger-mode-badge { margin-left: auto; }
 
@@ -1608,6 +1610,7 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 }
 
 #tags-page-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 600px) { #tags-page-header > span:first-child { flex-basis: 100%; } }
 
 .meta-editable-separator { border: 0; border-top: 1px solid var(--border); margin: 8px 0; }
 .meta-editable { margin-top: 4px; }
