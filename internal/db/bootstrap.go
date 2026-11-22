@@ -399,6 +399,12 @@ func Bootstrap(db *DB) error {
 		BEGIN
 			DELETE FROM image_basename_alias_fts WHERE rowid = OLD.id;
 		END`)
+	b.backfillIfFreshTable("image_tagger_runs", `CREATE TABLE image_tagger_runs (
+			image_id    INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+			tagger_name TEXT    NOT NULL,
+			tagged_at   TEXT    NOT NULL,
+			PRIMARY KEY (image_id, tagger_name)
+		) WITHOUT ROWID`, backfillTaggerRunsSQL, "create image_tagger_runs")
 	// ANALYZE runs once per marker bump: over image_tags it can blow the
 	// start-up budget on a cold cache, and PRAGMA optimize covers the
 	// drift in between. 400 is SQLite's recommended analysis_limit; images
@@ -412,6 +418,21 @@ func Bootstrap(db *DB) error {
 	}
 	b.exec("pragma optimize", `PRAGMA optimize`)
 	return b.err
+}
+
+// An image whose stamp was cleared has new bytes: its old auto-tags are no
+// proof that a tagger read them.
+const backfillTaggerRunsSQL = `INSERT OR IGNORE INTO image_tagger_runs (image_id, tagger_name, tagged_at)
+	SELECT it.image_id, it.tagger_name, i.auto_tagged_at
+	FROM image_tags it JOIN images i ON i.id = it.image_id
+	WHERE it.is_auto = 1 AND it.tagger_name IS NOT NULL AND it.tagger_name != '' AND i.auto_tagged_at IS NOT NULL
+	GROUP BY it.image_id, it.tagger_name`
+
+// BackfillTaggerRuns records, for rows loaded from a document that does
+// not carry the runs, each tagger that left a tag on a stamped image.
+func BackfillTaggerRuns(x Execer) error {
+	_, err := x.Exec(backfillTaggerRunsSQL)
+	return err
 }
 
 type bootstrapper struct {

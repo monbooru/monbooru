@@ -6,6 +6,7 @@ package schedule
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -507,8 +508,18 @@ func (s *Scheduler) removeOrphans(r *jobs.Reservation, cx *library.Gallery) erro
 // A stamped image was tagged before, so tags the operator stripped since
 // stay stripped. Without ffmpeg the tagger skips the types only it frames
 // and leaves them unstamped, so they are left out rather than retried nightly.
-func autotagCandidates(d *db.DB, ffmpeg bool) ([]int64, error) {
-	q := `SELECT id FROM images WHERE is_missing = 0 AND auto_tagged_at IS NULL`
+// autotagGroup is the images that lack a run of the same taggers.
+type autotagGroup struct {
+	taggers []string
+	ids     []int64
+}
+
+// autotagBacklog is, for each tagger, the visible images it never read,
+// lowest ids first and limit at most (0 for all), grouped by the taggers
+// an image lacks so that one already read is not read again.
+func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int) ([]autotagGroup, error) {
+	q := `SELECT id FROM images i WHERE is_missing = 0
+		AND NOT EXISTS (SELECT 1 FROM image_tagger_runs r WHERE r.image_id = i.id AND r.tagger_name = ?)`
 	if !ffmpeg {
 		var skip []string
 		for _, ft := range models.FileTypes {
@@ -518,18 +529,36 @@ func autotagCandidates(d *db.DB, ffmpeg bool) ([]int64, error) {
 		}
 		q += ` AND file_type NOT IN (` + strings.Join(skip, ", ") + `)`
 	}
-	return db.QueryIDs(d.Read, q)
+	lacks := map[int64][]string{}
+	for _, name := range taggers {
+		ids, err := db.QueryIDs(d.Read, q, name)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			lacks[id] = append(lacks[id], name)
+		}
+	}
+	ids := slices.Sorted(maps.Keys(lacks))
+	if limit > 0 && len(ids) > limit {
+		ids = ids[:limit]
+	}
+	var groups []autotagGroup
+	at := map[string]int{}
+	for _, id := range ids {
+		key := strings.Join(lacks[id], "\x00")
+		g, ok := at[key]
+		if !ok {
+			g = len(groups)
+			at[key] = g
+			groups = append(groups, autotagGroup{taggers: lacks[id]})
+		}
+		groups[g].ids = append(groups[g].ids, id)
+	}
+	return groups, nil
 }
 
 func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
-	ids, err := autotagCandidates(cx.DB, gallery.FFmpegAvailable())
-	if err != nil {
-		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
-		return err
-	}
-	if len(ids) == 0 {
-		return nil
-	}
 	cfg := s.host.Config()
 	opts := cfg.Schedule.AutotagOptions()
 	enabled := tagger.EnabledTaggersForGallery(cfg, cx.Name)
@@ -539,6 +568,18 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	if len(enabled) == 0 {
 		return nil
 	}
+	names := make([]string, len(enabled))
+	for i, t := range enabled {
+		names[i] = t.Name
+	}
+	groups, err := autotagBacklog(cx.DB, gallery.FFmpegAvailable(), names, opts.MaxImages)
+	if err != nil {
+		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
+		return err
+	}
+	if len(groups) == 0 {
+		return nil
+	}
 	var only []string
 	if len(opts.Workers) > 0 {
 		if only = workersUp(opts.Workers, tagger.CurrentPool().JobWorkers()); len(only) == 0 {
@@ -546,27 +587,37 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 			return nil
 		}
 	}
-	if opts.MaxImages > 0 && len(ids) > opts.MaxImages {
-		ids = ids[:opts.MaxImages]
-	}
-	ctx, err := s.startPhase(r, models.JobTypeAutotag, "autotag", cx.Name)
-	if err != nil {
-		return err
-	}
-	peak := s.host.MemoryMark()
 	started := time.Now()
-	res, err := tagger.RunOn(ctx, cx.Handle, cfg, ids, enabled, only, s.jobs)
-	finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(ids), res, err)
-	if n := res.Total(); n > 0 {
-		s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %d %s%s, %s.", cx.Name, n, models.Plural(n, "image", "images"), res.Workers(), time.Since(started).Round(time.Second)))
+	total := tagger.Result{Tagged: map[string]int{}}
+	defer func() {
+		if n := total.Total(); n > 0 {
+			s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %d %s%s, %s.", cx.Name, n, models.Plural(n, "image", "images"), total.Workers(), time.Since(started).Round(time.Second)))
+		}
+	}()
+	for _, g := range groups {
+		if r.Cancelled() {
+			return nil
+		}
+		run := slices.DeleteFunc(slices.Clone(enabled), func(t tagger.TaggerStatus) bool { return !slices.Contains(g.taggers, t.Name) })
+		ctx, err := s.startPhase(r, models.JobTypeAutotag, "autotag", cx.Name)
+		if err != nil {
+			return err
+		}
+		peak := s.host.MemoryMark()
+		res, err := tagger.RunOn(ctx, cx.Handle, cfg, g.ids, run, only, s.jobs)
+		for name, n := range res.Tagged {
+			total.Tagged[name] += n
+		}
+		finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(g.ids), res, err)
+		if finished {
+			peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(g.ids), models.Plural(len(g.ids), "image", "images")))
+		}
+		if err != nil {
+			logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
+			return err
+		}
 	}
-	if finished {
-		peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(ids), models.Plural(len(ids), "image", "images")))
-	}
-	if err != nil {
-		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
-	}
-	return err
+	return nil
 }
 
 // workersUp keeps the named workers that can take a job now.

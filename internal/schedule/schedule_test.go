@@ -382,7 +382,7 @@ func TestACatchUpTheLaneRefusedRunsOnceTheLaneFrees(t *testing.T) {
 	}
 }
 
-func TestAutotagCandidatesAreTheVisibleImagesNeverAutoTagged(t *testing.T) {
+func TestAutotagBacklogIsEachTaggersOwn(t *testing.T) {
 	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -391,37 +391,52 @@ func TestAutotagCandidatesAreTheVisibleImagesNeverAutoTagged(t *testing.T) {
 	if err := db.Bootstrap(d); err != nil {
 		t.Fatal(err)
 	}
-	insert := func(name string, missing int, stamp any) int64 {
+	insert := func(name string, missing int, readBy ...string) int64 {
 		t.Helper()
-		res, err := d.Write.Exec(`INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, auto_tagged_at, ingested_at)
-			VALUES (?, ?, 1, ?, ?, ?, datetime('now'))`, "/g/"+name, models.ExtFileType(name), "sha-"+name, missing, stamp)
+		res, err := d.Write.Exec(`INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at)
+			VALUES (?, ?, 1, ?, ?, datetime('now'))`, "/g/"+name, models.ExtFileType(name), "sha-"+name, missing)
 		if err != nil {
 			t.Fatal(err)
 		}
 		id, _ := res.LastInsertId()
+		for _, tg := range readBy {
+			if _, err := d.Write.Exec(`INSERT INTO image_tagger_runs (image_id, tagger_name, tagged_at) VALUES (?, ?, '2026-01-01T00:00:00Z')`, id, tg); err != nil {
+				t.Fatal(err)
+			}
+		}
 		return id
 	}
-	fresh := insert("fresh.png", 0, nil)
-	insert("stripped.png", 0, "2026-01-01T00:00:00Z")
-	insert("gone.png", 1, nil)
+	fresh := insert("fresh.png", 0)
+	insert("both.png", 0, "wd", "joy")
+	wdOnly := insert("wd-only.png", 0, "wd")
+	insert("gone.png", 1)
+	video := insert("clip.mp4", 0)
+	still := insert("photo.avif", 0, "joy")
 
-	video := insert("clip.mp4", 0, nil)
-	still := insert("photo.avif", 0, nil)
-
-	ids, err := autotagCandidates(d, true)
-	if err != nil {
-		t.Fatal(err)
+	check := func(label string, ffmpeg bool, limit int, want ...autotagGroup) {
+		t.Helper()
+		got, err := autotagBacklog(d, ffmpeg, []string{"wd", "joy"}, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same := len(got) == len(want)
+		for i := 0; same && i < len(got); i++ {
+			same = slices.Equal(got[i].taggers, want[i].taggers) && slices.Equal(got[i].ids, want[i].ids)
+		}
+		if !same {
+			t.Errorf("%s: backlog = %+v, want %+v", label, got, want)
+		}
 	}
-	if !slices.Equal(ids, []int64{fresh, video, still}) {
-		t.Errorf("candidates with ffmpeg = %v, want the never-tagged visible images %d, %d, %d", ids, fresh, video, still)
-	}
-	ids, err = autotagCandidates(d, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(ids, []int64{fresh}) {
-		t.Errorf("candidates without ffmpeg = %v, want only %d: a video or ffmpeg still would be skipped unstamped every night", ids, fresh)
-	}
+	check("with ffmpeg", true, 0,
+		autotagGroup{[]string{"wd", "joy"}, []int64{fresh, video}},
+		autotagGroup{[]string{"joy"}, []int64{wdOnly}},
+		autotagGroup{[]string{"wd"}, []int64{still}})
+	check("without ffmpeg a video or an ffmpeg still would be skipped unread every night", false, 0,
+		autotagGroup{[]string{"wd", "joy"}, []int64{fresh}},
+		autotagGroup{[]string{"joy"}, []int64{wdOnly}})
+	check("the limit counts images, lowest ids first", true, 2,
+		autotagGroup{[]string{"wd", "joy"}, []int64{fresh}},
+		autotagGroup{[]string{"joy"}, []int64{wdOnly}})
 }
 
 func TestWorkersUpKeepsTheNamedWorkersThatCanTakeAJob(t *testing.T) {

@@ -948,3 +948,57 @@ func TestInWriteTxWaitsOutAnotherWriter(t *testing.T) {
 		t.Fatalf("a write that reads first, under another connection's write lock: %v", err)
 	}
 }
+
+func TestBootstrapBackfillsTaggerRunsFromTheAutoTagsOfStampedImages(t *testing.T) {
+	d := openTestDB(t)
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, d.Write, `DROP TABLE image_tagger_runs`)
+	img := func(name string, stamp any) int64 {
+		id, _ := mustExec(t, d.Write, `INSERT INTO images (canonical_path, file_type, file_size, sha256, auto_tagged_at, ingested_at)
+			VALUES (?, 'png', 1, ?, ?, datetime('now'))`, "/g/"+name, "sha-"+name, stamp).LastInsertId()
+		return id
+	}
+	tag := func(name string) int64 {
+		id, _ := mustExec(t, d.Write, `INSERT INTO tags (name, category_id) VALUES (?, (SELECT id FROM tag_categories WHERE name = 'general'))`, name).LastInsertId()
+		return id
+	}
+	put := func(image, tagID int64, auto int, tagger any) {
+		mustExec(t, d.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto, tagger_name) VALUES (?, ?, ?, ?)`, image, tagID, auto, tagger)
+	}
+	a, b, c := tag("a"), tag("b"), tag("c")
+	read := img("read.png", "2026-01-02T03:04:05Z")
+	put(read, a, 1, "wd")
+	put(read, b, 1, "wd")
+	put(read, c, 1, "joy")
+	replaced := img("replaced.png", nil)
+	put(replaced, a, 1, "wd")
+	sourced := img("sourced.png", "2026-01-02T03:04:05Z")
+	put(sourced, a, 0, "danbooru")
+	put(sourced, b, 0, nil)
+
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 2 {
+		t.Errorf("runs = %d, want the two taggers of the stamped image", n)
+	}
+	if n := countRows(t, d, "image_tagger_runs WHERE image_id = ? AND tagged_at = '2026-01-02T03:04:05Z' AND tagger_name IN ('wd', 'joy')", read); n != 2 {
+		t.Errorf("runs of the stamped image = %d, want wd and joy at its stamp", n)
+	}
+
+	mustExec(t, d.Write, `DELETE FROM image_tagger_runs`)
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 0 {
+		t.Errorf("a second start filled %d runs: the backfill belongs to the table's creation", n)
+	}
+	if err := BackfillTaggerRuns(d.Write); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 2 {
+		t.Errorf("runs after a loaded document = %d, want 2", n)
+	}
+}

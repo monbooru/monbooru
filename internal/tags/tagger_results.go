@@ -207,9 +207,15 @@ func (s *Service) ApplyTaggerResults(ctx context.Context, imageID int64, hits []
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE images SET auto_tagged_at = ? WHERE id = ?`,
-		time.Now().UTC().Format(time.RFC3339), imageID); err != nil {
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `UPDATE images SET auto_tagged_at = ? WHERE id = ?`, stamp, imageID); err != nil {
 		return fmt.Errorf("stamp auto_tagged_at on image %d: %w", imageID, err)
+	}
+	for _, name := range taggers {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO image_tagger_runs (image_id, tagger_name, tagged_at) VALUES (?, ?, ?)
+			ON CONFLICT (image_id, tagger_name) DO UPDATE SET tagged_at = excluded.tagged_at`, imageID, name, stamp); err != nil {
+			return fmt.Errorf("record the run of %s on image %d: %w", name, imageID, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err

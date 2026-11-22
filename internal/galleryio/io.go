@@ -1008,6 +1008,9 @@ func replaceDBFromJSON(srcPath, dbPath, thumbsPath string, b *gallery.Boundary, 
 		if err := loadExportStream(database, f); err != nil {
 			return err
 		}
+		if err := db.BackfillTaggerRuns(database.Write); err != nil {
+			return fmt.Errorf("backfill tagger runs: %w", err)
+		}
 		if err := sanitizeImportedAliasChains(database); err != nil {
 			return fmt.Errorf("sanitize alias chains: %w", err)
 		}

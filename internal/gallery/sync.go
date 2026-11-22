@@ -724,6 +724,11 @@ func applyInPlaceEdit(h Handle, path, newSHA, newMD5 string, newMtime, newMtimeN
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}
+		if oldSHA != newSHA {
+			if _, err := tx.Exec(`DELETE FROM image_tagger_runs WHERE image_id = ?`, imageID); err != nil {
+				return fmt.Errorf("forget tagger runs: %w", err)
+			}
+		}
 		// A placeholder read keeps its bytes, so its copies still match.
 		if err := rewroteBytesTx(tx, imageID, oldSHA != newSHA, facts.sd, facts.comfy); err != nil {
 			return err
