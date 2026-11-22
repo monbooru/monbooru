@@ -668,6 +668,7 @@ body.marquee-active { user-select: none; }
 .meta-table th { color: var(--fg-dim); width: 100px; word-break: normal; }
 .meta-table td.meta-prose { word-break: normal; }
 .meta-table .btn-link-accent { white-space: nowrap; }
+.meta-table ul { list-style: none; }
 
 .meta-table tr:has(> th) {
   display: flex;
