@@ -3,8 +3,10 @@ package web
 import (
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -169,4 +171,56 @@ func newEnvPinnedServer(t *testing.T, env, value string, edit func(*config.Confi
 	}
 	t.Cleanup(srv.Close)
 	return srv, path
+}
+
+func TestScheduleAutotagFormKeepsWhatWasNotDrawn(t *testing.T) {
+	t.Parallel()
+	post := func(form url.Values) (*config.Config, string) {
+		r := httptest.NewRequest(http.MethodPost, "/settings/schedule", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &config.Config{Workers: []config.WorkerConfig{{Name: "gpu-box"}}}
+		cfg.Schedule.SetAutotagOptions(config.ScheduleAutotag{Workers: []string{"gpu-box"}, Taggers: []string{"joytag"}})
+		apply, refusal := scheduleAutotagForm(r)
+		if refusal == "" {
+			apply(cfg)
+		}
+		return cfg, refusal
+	}
+	for _, tc := range []struct {
+		name    string
+		form    url.Values
+		refusal string
+		want    config.ScheduleAutotag
+	}{
+		{"BlockNotDrawn", url.Values{}, "", config.ScheduleAutotag{Workers: []string{"gpu-box"}, Taggers: []string{"joytag"}}},
+		{"OnlyTheLimitDrawn", url.Values{"autotag_opts": {"1"}, "autotag_max_images": {"500"}}, "",
+			config.ScheduleAutotag{Workers: []string{"gpu-box"}, Taggers: []string{"joytag"}, MaxImages: 500}},
+		{"EveryTaggerAnyWorker", url.Values{"autotag_opts": {"1"}, "autotag_taggers_drawn": {"1"}, "every_autotag_taggers": {"on"},
+			"autotag_workers_drawn": {"1"}, "autotag_worker_mode": {"any"}}, "", config.ScheduleAutotag{}},
+		{"NamedWorkersDropUnknown", url.Values{"autotag_opts": {"1"}, "autotag_workers_drawn": {"1"}, "autotag_worker_mode": {"named"},
+			"autotag_worker": {"local", "gone", "gpu-box"}}, "", config.ScheduleAutotag{Workers: []string{"local", "gpu-box"}, Taggers: []string{"joytag"}}},
+		{"NoWorkerTicked", url.Values{"run_auto_taggers": {"on"}, "autotag_opts": {"1"}, "autotag_workers_drawn": {"1"},
+			"autotag_worker_mode": {"named"}}, "Tick a worker.", config.ScheduleAutotag{}},
+		{"NoWorkerTickedWhileOff", url.Values{"autotag_opts": {"1"}, "autotag_workers_drawn": {"1"}, "autotag_worker_mode": {"named"}}, "",
+			config.ScheduleAutotag{Workers: []string{"gpu-box"}, Taggers: []string{"joytag"}}},
+		{"NoTaggerTicked", url.Values{"run_auto_taggers": {"on"}, "autotag_opts": {"1"}, "autotag_taggers_drawn": {"1"}}, "Tick a tagger.", config.ScheduleAutotag{}},
+		{"BadLimit", url.Values{"autotag_opts": {"1"}, "autotag_max_images": {"0"}}, "The image limit must be a number above 0, or empty.", config.ScheduleAutotag{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, refusal := post(tc.form)
+			if refusal != tc.refusal {
+				t.Fatalf("refusal = %q, want %q", refusal, tc.refusal)
+			}
+			if refusal != "" {
+				return
+			}
+			if got := cfg.Schedule.AutotagOptions(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("options = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }

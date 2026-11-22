@@ -910,6 +910,13 @@ tr.tag-implications-row > td { padding: 8px 12px 10px; background: var(--bg-surf
 .schedule-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 24px; margin: 12px 0; }
 @media (max-width: 600px) { .schedule-grid { grid-template-columns: 1fr; } }
 .schedule-time-input { width: 6ch; text-align: center; }
+.schedule-autotag { margin: 4px 0 16px; }
+#settings-page .schedule-autotag > .field { margin-bottom: 0; }
+.schedule-autotag-opts { margin: 6px 0 0 6px; padding: 8px 0 4px 16px; border-left: 2px solid var(--tagger); }
+.schedule-autotag-opts.scope-off { opacity: 0.45; }
+#settings-page .schedule-autotag-opts label > .field-hint { display: inline; margin: 0; }
+.schedule-autotag-workers { padding-left: 1.4rem; }
+.schedule-max-input { width: 9ch; text-align: center; }
 #settings-page .field > label.schedule-time { margin-bottom: 8px; }
 .radio-grid.schedule-modes { grid-template-columns: minmax(0, 1fr); }
 .schedule-scope-table { border-collapse: collapse; }

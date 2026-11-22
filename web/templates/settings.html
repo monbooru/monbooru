@@ -1100,9 +1100,6 @@
           <label><input type="checkbox" name="remove_orphans"{{if $sched.RemoveOrphans}} checked{{end}}> Remove orphaned thumbnails</label>
         </div>
         <div class="field">
-          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
-        </div>
-        <div class="field">
           <label><input type="checkbox" name="find_relation_pairs"{{if $sched.FindRelationPairs}} checked{{end}}> Find relation pairs</label>
         </div>
         {{if .MonloaderPaired}}
@@ -1112,6 +1109,42 @@
         </div>
         <div class="field">
           <label class="peer-accent{{if not .MonloaderUsable}} label-off{{end}}"{{if not .MonloaderUsable}} title="{{monloaderOffReason .MonloaderConn}}"{{end}}><input type="checkbox" name="lookup_booru"{{if $sched.LookupBooru}} checked{{end}}> Look up unsourced images on online boorus</label>
+        </div>
+        {{end}}
+      </div>
+      {{$at := .ScheduleAutotag}}
+      <div class="schedule-autotag">
+        <div class="field">
+          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
+        </div>
+        {{if $at.Show}}
+        <div class="schedule-autotag-opts{{if not $sched.RunAutoTaggers}} scope-off{{end}}" data-scope-col="run_auto_taggers">
+          <input type="hidden" name="autotag_opts" value="1">
+          <div class="settings-cols">
+            {{if $at.ShowTaggers}}
+            <div class="field">
+              <label>Taggers</label>
+              <input type="hidden" name="autotag_taggers_drawn" value="1">
+              <label><input type="checkbox" name="every_autotag_taggers" value="on" data-scope-every="autotag_taggers"{{if $at.EveryTagger}} checked{{end}}> All enabled taggers</label>
+              {{range $at.Taggers}}<label><input type="checkbox" name="on_autotag_taggers" value="{{.Name}}"{{if or $at.EveryTagger .On}} checked{{end}}{{if $at.EveryTagger}} disabled{{end}}> {{.Name}}</label>
+              {{end}}
+            </div>
+            {{end}}
+            {{if $at.ShowWorkers}}
+            <div class="field">
+              <label>Workers</label>
+              <input type="hidden" name="autotag_workers_drawn" value="1">
+              <label><input type="radio" name="autotag_worker_mode" value="any"{{if $at.AnyWorker}} checked{{end}}> Any worker <span class="field-hint">paired ones first, this machine when none is up</span></label>
+              <label><input type="radio" name="autotag_worker_mode" value="named"{{if not $at.AnyWorker}} checked{{end}}> These workers</label>
+              <div class="schedule-autotag-workers">
+                {{range $at.Workers}}<label><input type="checkbox" name="autotag_worker" value="{{.Name}}"{{if .On}} checked{{end}}{{if $at.AnyWorker}} disabled{{end}}> {{.Name}} <span class="field-hint">{{.Hint}}</span></label>
+                {{end}}
+              </div>
+              <span class="field-hint">With none of them up, the run skips auto-tagging and says so above.</span>
+            </div>
+            {{end}}
+          </div>
+          <label class="schedule-max" for="autotag_max_images">At most <input type="number" id="autotag_max_images" name="autotag_max_images" min="1" step="1" inputmode="numeric" class="schedule-max-input" value="{{with $at.MaxImages}}{{.}}{{end}}"> images a run <span class="field-hint">empty for no limit</span></label>
         </div>
         {{end}}
       </div>
@@ -1170,6 +1203,12 @@
       form.querySelectorAll('input[name="on_' + every + '"]').forEach(function(b) {
         b.disabled = box.checked;
         if (box.checked) b.checked = true;
+      });
+      return;
+    }
+    if (box.name === 'autotag_worker_mode') {
+      form.querySelectorAll('input[name="autotag_worker"]').forEach(function(b) {
+        b.disabled = box.value === 'any';
       });
       return;
     }
