@@ -649,6 +649,10 @@ body.marquee-active { user-select: none; }
   .batch-ramp { flex-wrap: wrap; gap: 6px; }
   .batch-ramp button + button { margin-left: 0; }
 }
+@media (max-width: 600px) {
+  #batch-bar .batch-group, #batch-bar .batch-ramp { display: contents; }
+  #batch-bar .batch-group-label, #batch-bar .batch-bar-spacer { display: none; }
+}
 
 .meta-table {
   border-collapse: collapse;
