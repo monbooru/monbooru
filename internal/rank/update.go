@@ -5,9 +5,9 @@ import (
 )
 
 // minShrink is Weng & Lin's κ, their Section 6 value: one vote can shrink
-// uncert² to at most this fraction of what it was. In a two-image vote the
-// shrink is under ¼, so this never applies; it's kept so the formula reads
-// like their Algorithm 1.
+// the variance (uncertainty²) to at most this fraction of what it was. In a
+// two-image vote the shrink is under ¼, so this never applies; it's kept so
+// the formula reads like their Algorithm 1.
 const minShrink = 0.0001
 
 // Update is the quick update after one vote: Weng & Lin (2011), Algorithm 1,
@@ -24,7 +24,7 @@ func (m *Model) Update(left, right Estimate, outcome Outcome) (Estimate, Estimat
 }
 
 // updateOne updates image me after a vote against opponent, where score is
-// me's outcome_value (1 won, ½ tie, 0 lost). The paper's symbols are in
+// me's score (1 won, ½ tie, 0 lost). The paper's symbols are in
 // brackets. Some equations are simplified because our team size is 1.
 func (m *Model) updateOne(me, opponent Estimate, score float64) Estimate {
 	variance := me.Uncertainty * me.Uncertainty // [σi²]

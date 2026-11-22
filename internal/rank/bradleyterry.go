@@ -5,8 +5,7 @@ import (
 	"math"
 )
 
-// Settings are Bradley–Terry's tunable values. V1 always uses
-// DefaultSettings.
+// Settings are Bradley–Terry's tunable values.
 type Settings struct {
 	// StartUncertainty is a brand-new image's uncertainty: the width of the
 	// bell-curve starting assumption, in strength units. There's no standard

@@ -10,9 +10,13 @@ import (
 // k ≤ 2n − 1, so with 30 points every even power up to 58 must come out as
 // its known integral, Γ((k+1)/2). (Odd powers are 0 by symmetry.)
 func TestGaussHermitePoints(t *testing.T) {
-	nodes, weights := hermiteNodes, hermiteWeights
+	nodes, weights := hermiteRule()
 	if len(nodes) != 30 || len(weights) != 30 {
 		t.Fatalf("%d nodes and %d weights, want 30 of each", len(nodes), len(weights))
+	}
+	// Computed once: later calls hand back the same table.
+	if again, _ := hermiteRule(); &again[0] != &nodes[0] {
+		t.Errorf("hermiteRule computed a new table on its second call")
 	}
 	for i := range nodes {
 		if i > 0 && nodes[i] <= nodes[i-1] {
@@ -243,7 +247,7 @@ func TestPickBestNothingToPick(t *testing.T) {
 	}
 }
 
-// BenchmarkPairInformation: the plan expects microseconds per pair, so a few
+// BenchmarkPairInformation: about a microsecond per pair, so a few
 // hundred candidates score in well under a millisecond.
 func BenchmarkPairInformation(b *testing.B) {
 	a, c := Estimate{0.3, 1.2}, Estimate{-0.4, 0.8}

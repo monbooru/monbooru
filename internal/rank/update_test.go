@@ -23,25 +23,27 @@ func checkEstimate(t *testing.T, name string, got, want Estimate) {
 }
 
 // The next three tests are hand-computed from Weng & Lin (2011), Algorithm 1,
-// with one image per team and perf_variance ½, using the plan's names:
+// with one image per team and PerfVariance ½, in updateOne's names:
 //
-//	spread      = √(uncert² + opponent_uncert² + 2 × perf_variance)
-//	win_chance  = sigmoid((strength − opponent_strength) / spread)
-//	strength   += uncert² / spread × (outcome_value − win_chance)
-//	shrink_rate = uncert / spread                       (their Section 6)
-//	shrink      = shrink_rate × uncert² / spread² × win_chance × (1 − win_chance)
-//	uncert²    ×= 1 − shrink
+//	spread     = √(variance + opponent's variance + 2 × PerfVariance)
+//	winChance  = sigmoid((strength − opponent's strength) / spread)
+//	strength  += variance / spread × (score − winChance)
+//	shrinkRate = uncertainty / spread                    (their Section 6)
+//	shrink     = shrinkRate × variance / spread² × winChance × (1 − winChance)
+//	variance  ×= 1 − shrink
 //
+// where variance is uncertainty², and score is 1 for a win, ½ for a tie and
+// 0 for a loss.
 // The wanted values were also checked with a separate Python script.
 
 func TestUpdateTwoNewImages(t *testing.T) {
 	bt := newTest(t)
 	start := bt.Start()
-	// spread      = √(4 + 4 + 1) = 3
-	// win_chance  = sigmoid(0 / 3) = ½
-	// strength    = 0 ± 4/3 × ½ = ±2/3
-	// shrink      = 2/3 × 4/9 × ½ × ½ = 2/27
-	// uncert²     = 4 × (1 − 2/27) = 100/27, so uncert = 10/√27 ≈ 1.924501
+	// spread    = √(4 + 4 + 1) = 3
+	// winChance = sigmoid(0 / 3) = ½
+	// strength  = 0 ± 4/3 × ½ = ±2/3
+	// shrink    = 2/3 × 4/9 × ½ × ½ = 2/27
+	// variance  = 4 × (1 − 2/27) = 100/27, so uncertainty = 10/√27 ≈ 1.924501
 	l, r := update(t, bt, start, start, LeftWins)
 	checkEstimate(t, "winner", l, Estimate{Strength: 2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
 	checkEstimate(t, "loser", r, Estimate{Strength: -2.0 / 3, Uncertainty: 10 / math.Sqrt(27)})
@@ -52,14 +54,14 @@ func TestUpdateUpset(t *testing.T) {
 	// A fairly certain strong image loses to an unsure average one.
 	strong := Estimate{Strength: 1, Uncertainty: 0.5}
 	unsure := Estimate{Strength: 0, Uncertainty: 1.5}
-	// spread            = √(0.25 + 2.25 + 1) = √3.5 ≈ 1.870829
-	// strong win_chance = sigmoid(1 / 1.870829) ≈ 0.630537
-	// strong strength   = 1 + 0.25 / 1.870829 × (0 − 0.630537) ≈ 0.915741
-	// strong shrink     = (0.5 / 1.870829) × (0.25 / 3.5) × 0.630537 × 0.369463 ≈ 0.004447
-	// strong uncert     = 0.5 × √(1 − 0.004447) ≈ 0.498887
-	// unsure strength   = 0 + 2.25 / 1.870829 × (1 − 0.369463) ≈ 0.758332
-	// unsure shrink     = (1.5 / 1.870829) × (2.25 / 3.5) × 0.630537 × 0.369463 ≈ 0.120075
-	// unsure uncert     = 1.5 × √(1 − 0.120075) ≈ 1.407065
+	// spread             = √(0.25 + 2.25 + 1) = √3.5 ≈ 1.870829
+	// strong winChance   = sigmoid(1 / 1.870829) ≈ 0.630537
+	// strong strength    = 1 + 0.25 / 1.870829 × (0 − 0.630537) ≈ 0.915741
+	// strong shrink      = (0.5 / 1.870829) × (0.25 / 3.5) × 0.630537 × 0.369463 ≈ 0.004447
+	// strong uncertainty = 0.5 × √(1 − 0.004447) ≈ 0.498887
+	// unsure strength    = 0 + 2.25 / 1.870829 × (1 − 0.369463) ≈ 0.758332
+	// unsure shrink      = (1.5 / 1.870829) × (2.25 / 3.5) × 0.630537 × 0.369463 ≈ 0.120075
+	// unsure uncertainty = 1.5 × √(1 − 0.120075) ≈ 1.407065
 	l, r := update(t, bt, strong, unsure, RightWins)
 	checkEstimate(t, "strong loser", l, Estimate{Strength: 0.9157409103463072, Uncertainty: 0.49888695428742236})
 	checkEstimate(t, "unsure winner", r, Estimate{Strength: 0.7583318068832351, Uncertainty: 1.407064652899043})
@@ -74,12 +76,12 @@ func TestUpdateTie(t *testing.T) {
 	bt := newTest(t)
 	higher := Estimate{Strength: 1, Uncertainty: 1}
 	lower := Estimate{Strength: 0, Uncertainty: 1}
-	// spread            = √(1 + 1 + 1) = √3 ≈ 1.732051
-	// higher win_chance = sigmoid(1 / 1.732051) ≈ 0.640457
-	// higher strength   = 1 + 1 / 1.732051 × (0.5 − 0.640457) ≈ 0.918907
-	// lower strength    = 0 + 1 / 1.732051 × (0.5 − 0.359543) ≈ 0.081093
-	// shrink (both)     = (1 / 1.732051) × (1 / 3) × 0.640457 × 0.359543 ≈ 0.044316
-	// uncert (both)     = √(1 − 0.044316) ≈ 0.977591
+	// spread             = √(1 + 1 + 1) = √3 ≈ 1.732051
+	// higher winChance   = sigmoid(1 / 1.732051) ≈ 0.640457
+	// higher strength    = 1 + 1 / 1.732051 × (0.5 − 0.640457) ≈ 0.918907
+	// lower strength     = 0 + 1 / 1.732051 × (0.5 − 0.359543) ≈ 0.081093
+	// shrink (both)      = (1 / 1.732051) × (1 / 3) × 0.640457 × 0.359543 ≈ 0.044316
+	// uncertainty (both) = √(1 − 0.044316) ≈ 0.977591
 	l, r := update(t, bt, higher, lower, Tie)
 	checkEstimate(t, "higher", l, Estimate{Strength: 0.9189068386060943, Uncertainty: 0.9775910142533948})
 	checkEstimate(t, "lower", r, Estimate{Strength: 0.08109316139390564, Uncertainty: 0.9775910142533948})
@@ -141,7 +143,7 @@ func TestUpdateDirection(t *testing.T) {
 }
 
 // What one image gains, the other loses, in proportion to how unsure we are
-// about each: change / uncert² is equal and opposite.
+// about each: change / uncertainty² is equal and opposite.
 func TestUpdateBalance(t *testing.T) {
 	bt := newTest(t)
 	for _, a := range updateSamples {
@@ -151,7 +153,7 @@ func TestUpdateBalance(t *testing.T) {
 				leftShare := (l.Strength - a.Strength) / (a.Uncertainty * a.Uncertainty)
 				rightShare := (r.Strength - b.Strength) / (b.Uncertainty * b.Uncertainty)
 				if !near(leftShare, -rightShare, 1e-9) {
-					t.Errorf("%+v vs %+v, %+v: change/uncert² = %v and %v, want equal and opposite", a, b, o, leftShare, rightShare)
+					t.Errorf("%+v vs %+v, %+v: change/uncertainty² = %v and %v, want equal and opposite", a, b, o, leftShare, rightShare)
 				}
 			}
 		}
@@ -159,7 +161,7 @@ func TestUpdateBalance(t *testing.T) {
 }
 
 // Every vote teaches something, so uncertainty shrinks, but by less than a
-// quarter of uncert² per vote (shrink ≤ ¼), and never to 0.
+// quarter of the variance per vote (shrink ≤ ¼), and never to 0.
 func TestUpdateShrinksUncertaintyGently(t *testing.T) {
 	bt := newTest(t)
 	for _, a := range updateSamples {
@@ -169,7 +171,7 @@ func TestUpdateShrinksUncertaintyGently(t *testing.T) {
 				for _, pair := range [][2]Estimate{{a, l}, {b, r}} {
 					before, after := pair[0].Uncertainty, pair[1].Uncertainty
 					if after >= before || after*after < 0.75*before*before {
-						t.Errorf("%+v vs %+v, %+v: uncertainty %v → %v, want smaller, and uncert² down by at most ¼", a, b, o, before, after)
+						t.Errorf("%+v vs %+v, %+v: uncertainty %v → %v, want smaller, and uncertainty² down by at most ¼", a, b, o, before, after)
 					}
 				}
 			}
@@ -208,10 +210,10 @@ func TestUpdateUnsureImagesMoveMore(t *testing.T) {
 	}
 }
 
-// The plan's claim: with perf_variance ½, once both images are certain the
-// quick update predicts with the refit's sigmoid(gap), so both parts use
-// the same strength units. With uncertainties near 0, spread is near 1, and
-// a win moves strength by uncert² × (1 − sigmoid(gap)).
+// With PerfVariance ½, once both images are certain the quick update
+// predicts with the refit's sigmoid(gap), so both use the same strength
+// units. With uncertainties near 0, spread is near 1, and a win moves
+// strength by uncertainty² × (1 − sigmoid(gap)).
 func TestUpdateMatchesRefitUnitsWhenCertain(t *testing.T) {
 	bt := newTest(t)
 	const u = 1e-4

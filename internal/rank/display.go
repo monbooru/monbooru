@@ -8,10 +8,9 @@ import "math"
 // rank of 1500, and 100x more likely to be picked than an image with a
 // rank of 1100. We've decided to apply this scale factor to Bradley-Terry, as
 // it doesn't have a set scale factor of its own, and using a shared scale
-// factor means it'll be easier for user with an intuition of which Glicko-2
-// rankings are high/low to transition to our Bradley-Terry rankings.
+// factor means it'll be easier for users with an intuition of which Glicko-2
+// ranks are high/low to transition to our Bradley-Terry ranks.
 const (
-	// See comment above
 	pointsPerStrength = 400 / math.Ln10
 	// This is the rank of a brand new image (with a strength of 0). Note
 	// that some places show a lower value, where a rank of 1200 might be

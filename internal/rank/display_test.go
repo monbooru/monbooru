@@ -38,7 +38,8 @@ func TestRDFromUncertainty(t *testing.T) {
 	}{
 		{0, 0},
 		{1, 400 / math.Ln10},
-		// Bradley–Terry's start_uncert of 2 sits just under Glicko-2's RD 350.
+		// The default StartUncertainty of 2 sits just under Glicko-2's
+		// starting RD of 350.
 		{2, 800 / math.Ln10},
 	}
 	for _, c := range cases {

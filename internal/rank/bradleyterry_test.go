@@ -64,7 +64,7 @@ func TestStart(t *testing.T) {
 func TestSigmoid(t *testing.T) {
 	cases := []struct{ x, want float64 }{
 		{0, 0.5},
-		{1, 0.7310585786300049}, // the plan's "a gap of 1 is 73%"
+		{1, 0.7310585786300049}, // "a gap of 1 is 73% to 27% odds" (Estimate.Strength)
 		{-1, 0.2689414213699951},
 		{2, 0.8807970779778823},
 		{3, 0.9525741268224334},

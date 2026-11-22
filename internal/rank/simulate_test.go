@@ -110,7 +110,7 @@ func TestQuickUpdateTracksSimulatedStrengths(t *testing.T) {
 	}
 }
 
-// The sparse case from the plan's assumptions: most images get only one to
+// The sparse case, normal for a large library: most images get only one to
 // three votes. The refit must still finish with finite numbers, and its
 // uncertainty must be honest: a vote or two can't say much, and the
 // uncertainty has to admit it.

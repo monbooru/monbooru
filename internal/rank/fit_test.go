@@ -45,7 +45,8 @@ func sameFit(t *testing.T, name string, got, want map[int64]Estimate, tolerance 
 	}
 }
 
-// metricGateVotes is MetricGate's Bradley–Terry (Extended) example as votes.
+// metricGateVotes is MetricGate's Bradley–Terry (Extended) example as votes
+// (https://metricgate.com/docs/bradley-terry-paired-comparison-extended).
 // Row i, column j is how often image i beat image j; images 1–4 are Alpha,
 // Bravo, Charlie and Delta.
 func metricGateVotes() []Vote {
@@ -146,7 +147,7 @@ func TestFitWithoutPriorObservedEqualsExpected(t *testing.T) {
 }
 
 // With the starting assumption, the votes' pull balances the assumption's
-// pull back towards 0: observed − expected = strength / start_uncert².
+// pull back towards 0: observed − expected = strength / StartUncertainty².
 func TestFitWithPriorBalancesVotesAndAssumption(t *testing.T) {
 	sets := map[string][]Vote{
 		"MetricGate": metricGateVotes(),
@@ -159,7 +160,7 @@ func TestFitWithPriorBalancesVotesAndAssumption(t *testing.T) {
 			strengths := strengthsOf(fitStrengths(t, votes, startUncertainty))
 			for id, b := range balances(t, votes, strengths) {
 				if want := strengths[id] / (startUncertainty * startUncertainty); !near(b, want, 1e-7) {
-					t.Errorf("%s, start uncertainty %v: image %d observed − expected = %v, want strength/start_uncert² = %v",
+					t.Errorf("%s, start uncertainty %v: image %d observed − expected = %v, want strength/StartUncertainty² = %v",
 						name, startUncertainty, id, b, want)
 				}
 			}
@@ -183,7 +184,7 @@ func TestFitWithPriorAveragesZero(t *testing.T) {
 	}
 }
 
-// One vote between two new images, start_uncert 2. By symmetry the winner
+// One vote between two new images, StartUncertainty 2. By symmetry the winner
 // is at +t and the loser at −t, where the balance gives
 // 1 − sigmoid(2t) = t/4, so t ≈ 0.740774 (solved by bisection in Python).
 // Uncertainty = 1/√(sigmoid(2t) × (1 − sigmoid(2t)) + 1/4) ≈ 1.579369.
@@ -199,8 +200,8 @@ func TestFitOneVote(t *testing.T) {
 	}
 }
 
-// The plan's "no prior" mode: as the starting assumption gets wider, the
-// fit approaches plain textbook Bradley–Terry, getting closer every time.
+// As the starting assumption gets wider, the fit approaches plain textbook
+// Bradley–Terry (no starting assumption), getting closer every time.
 func TestFitWideningPriorApproachesNoPrior(t *testing.T) {
 	votes := metricGateVotes()
 	noPrior := fitStrengths(t, votes, math.Inf(1))
@@ -347,8 +348,8 @@ func TestFitUndefeatedImage(t *testing.T) {
 }
 
 // After a refit, uncertainty = 1/√certainty, where certainty adds up
-// win_chance × (1 − win_chance) for each of the image's votes, plus
-// 1/start_uncert² from the starting assumption.
+// win chance × (1 − win chance) for each of the image's votes, plus
+// 1/StartUncertainty² from the starting assumption.
 func TestFitUncertainty(t *testing.T) {
 	votes := mixedVotes()
 	fit := fitStrengths(t, votes, 2)

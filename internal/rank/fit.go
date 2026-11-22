@@ -36,11 +36,11 @@ func (m *Model) Fit(ctx context.Context, votes []Vote) (map[int64]Estimate, erro
 // match is one vote, seen from one of its images.
 type match struct {
 	opponent int     // the opponent's position in the fit
-	score    float64 // this image's outcome_value: 1 won, ½ tie, 0 lost
+	score    float64 // this image's result: 1 won, ½ tie, 0 lost
 }
 
 // fitVotes is Fit with the starting assumption given as its
-// certainty, 1 / start_uncert². 0 means no starting assumption: plain
+// certainty, 1 / StartUncertainty². 0 means no starting assumption: plain
 // textbook Bradley–Terry (maximum likelihood), which the tests compare with
 // published examples.
 //
@@ -48,15 +48,16 @@ type match struct {
 // votes and the starting assumption balance, given everyone else's current
 // strength. For each image:
 //
-//	balance    = Σ (outcome_value − win_chance) − strength / start_uncert²
-//	certainty  = Σ win_chance × (1 − win_chance) + 1 / start_uncert²
+//	balance    = Σ (score − win chance) − strength / StartUncertainty²
+//	certainty  = Σ win chance × (1 − win chance) + 1 / StartUncertainty²
 //	strength  += balance / certainty   (at most fitMaxStep either way)
 //
-// The sums are over the image's votes. After each pass over all images,
+// The sums are over the image's votes, where score is 1 for a win, ½ for a
+// tie and 0 for a loss. After each pass over all images,
 // each group of linked images is shifted to average 0 (see
 // shiftToAverageZero), and passes repeat until nothing moves. At the best
-// guess every balance is 0, and the image's uncertainty is 1/√certainty (the
-// plan's per-image approximation, "diagonal Laplace").
+// guess every balance is 0, and the image's uncertainty is 1/√certainty (a
+// per-image approximation, known as "diagonal Laplace").
 func fitVotes(ctx context.Context, votes []Vote, priorPrecision float64) (map[int64]Estimate, error) {
 	scores := make([]float64, len(votes))
 	position := map[int64]int{}
@@ -129,10 +130,10 @@ func imageBalance(strength []float64, i int, matches []match, priorPrecision flo
 	certainty = priorPrecision
 	for _, m := range matches {
 		gap := strength[i] - strength[m.opponent]
-		// win_chance and 1 − win_chance, each computed directly so neither
-		// rounds to 0 while the other is close to 1.
+		// The win chance and 1 − win chance, each computed directly so
+		// neither rounds to 0 while the other is close to 1.
 		win, lose := sigmoid(gap), sigmoid(-gap)
-		balance += m.score*lose - (1-m.score)*win // = outcome_value − win_chance
+		balance += m.score*lose - (1-m.score)*win // = score − win chance
 		certainty += win * lose
 	}
 	return balance, certainty
@@ -173,7 +174,7 @@ func connectedGroups(matches [][]match) (group []int, count int) {
 // Why that's always a step towards the best guess: moving a whole group
 // changes no gap that any vote sees, so the votes are explained exactly as
 // well; and the best guess averages 0 within each group (its balances add up
-// to Σ strength / start_uncert², which must be 0). Without a starting
+// to Σ strength / StartUncertainty², which must be 0). Without a starting
 // assumption only gaps matter at all, and average 0 is just the convention.
 // The image-by-image steps are slowest in exactly this direction, so this
 // saves many passes. It relies on every image having the same starting

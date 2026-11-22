@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"sync"
 )
 
 // PairInformation is how much a vote between images a and b is expected to
@@ -24,7 +25,8 @@ import (
 // Like the paper, it treats a vote as a win or a loss; "about the same" isn't
 // part of the score.
 func PairInformation(a, b Estimate) float64 {
-	return pairInformation(a, b, hermiteNodes, hermiteWeights)
+	nodes, weights := hermiteRule()
+	return pairInformation(a, b, nodes, weights)
 }
 
 // pairInformation is PairInformation with a given quadrature rule, so the
@@ -78,10 +80,12 @@ func xLogX(x float64) float64 {
 // sufficiently accurate".
 const hermitePoints = 30
 
-// hermiteNodes and hermiteWeights are the 30-point Gauss–Hermite rule:
+// hermiteRule returns the 30-point Gauss–Hermite rule's nodes and weights:
 // ∫ f(x) e^(−x²) dx ≈ Σ wᵢ f(xᵢ), exact when f is a polynomial of degree up
-// to 59. Computed once, when the program starts.
-var hermiteNodes, hermiteWeights = gaussHermite(hermitePoints)
+// to 59. Computed on first use, then reused.
+var hermiteRule = sync.OnceValues(func() (nodes, weights []float64) {
+	return gaussHermite(hermitePoints)
+})
 
 // gaussHermite computes the n-point rule. The nodes are the roots of the
 // n-th Hermite polynomial, found by scanning for sign changes and refining
