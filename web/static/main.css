@@ -38,8 +38,8 @@
   .footer-hidden-n::after { content: ")"; }
 }
 @media (max-width: 600px) {
-  #footer-left .footer-sep-strong { margin: 0 2px; }
-  #footer-hidden .footer-sep-strong { display: none; }
+  #footer-left .footer-sep-strong { display: none; }
+  .footer-gallery { margin-right: 5px; }
 }
 
 .footer-gallery { color: var(--link); }
