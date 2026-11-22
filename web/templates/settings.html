@@ -1189,14 +1189,14 @@
     <div class="settings-sub">
       <h4>Database size per gallery</h4>
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Gallery</th><th>DB path</th><th>Size</th></tr></thead>
         <tbody>
           {{range $stats.Galleries}}
           <tr>
-            <td><strong>{{.Name}}</strong></td>
-            <td class="stats-path"><code>{{.DBPath}}</code></td>
-            <td>{{humanBytes .DBSize}}</td>
+            <td class="stack-head"><strong>{{.Name}}</strong></td>
+            <td class="stats-path" data-label="DB path"><code>{{.DBPath}}</code></td>
+            <td data-label="Size">{{humanBytes .DBSize}}</td>
           </tr>
           {{end}}
         </tbody>
@@ -1207,16 +1207,16 @@
       <h4>Filesystem free space</h4>
       {{if $stats.Mounts}}
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th>Used %</th></tr></thead>
         <tbody>
           {{range $stats.Mounts}}
           <tr>
-            <td>{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
-            <td>{{humanBytes .UsedSize}}</td>
-            <td>{{humanBytes .FreeSize}}</td>
-            <td>{{humanBytes .TotalSize}}</td>
-            <td>{{.UsedPct}}%</td>
+            <td class="stack-head">{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
+            <td data-label="Used">{{humanBytes .UsedSize}}</td>
+            <td data-label="Free">{{humanBytes .FreeSize}}</td>
+            <td data-label="Total">{{humanBytes .TotalSize}}</td>
+            <td data-label="Used %">{{.UsedPct}}%</td>
           </tr>
           {{end}}
         </tbody>
