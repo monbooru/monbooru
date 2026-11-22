@@ -403,6 +403,7 @@ a.btn-sm:hover { text-decoration: none; }
   text-decoration: none;
 }
 .btn-link-accent:hover { text-decoration: underline; }
+@media (pointer: coarse) { .btn-link-accent { padding-top: 4px; padding-bottom: 4px; } }
 
 .peer-accent { color: var(--peer); }
 .btn-sm.peer-accent { background: color-mix(in srgb, var(--peer) 16%, transparent); }
