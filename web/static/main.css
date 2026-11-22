@@ -1566,6 +1566,9 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .tag-entry:has(.tag-entry-remove):hover .tag-count,
 .tag-entry:has(.tag-entry-remove):focus-within .tag-count,
 .tag-entry.focused:has(.tag-entry-remove) .tag-count { visibility: hidden; }
+@media (pointer: coarse) {
+  .tag-entry { padding-top: 5px; padding-bottom: 5px; }
+}
 @media (hover: none) {
   .tag-entry-remove { position: static; transform: none; opacity: 1; }
   .tag-entry:has(.tag-entry-remove):hover .tag-count { visibility: visible; }
