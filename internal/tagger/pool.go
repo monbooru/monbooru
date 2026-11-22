@@ -509,10 +509,16 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []strin
 // once, each call carrying one group of models; 0 when none may. A non-nil
 // only keeps the workers it names.
 func (p *Pool) Slots(groups [][]string, only []string) int {
+	n, _ := p.JobSlots(groups, only)
+	return n
+}
+
+// JobSlots is Slots, and whether a worker other than the local one is
+// among those that may take the calls.
+func (p *Pool) JobSlots(groups [][]string, only []string) (n int, remote bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	seen := map[*poolWorker]bool{}
-	n := 0
 	for _, models := range groups {
 		ws := p.eligible(models, nil, only)
 		if len(ws) == 0 {
@@ -524,10 +530,11 @@ func (p *Pool) Slots(groups [][]string, only []string) int {
 			if !seen[w] {
 				seen[w] = true
 				n += w.slots()
+				remote = remote || !w.def.Local
 			}
 		}
 	}
-	return n
+	return n, remote
 }
 
 // Tag runs frames through models on a worker that holds them all, waiting

@@ -265,6 +265,9 @@ type TaggerConfig struct {
 	// CPUThreads bounds the threads the local worker's models use, and
 	// the frames monbooru prepares at once; 0 is every core.
 	CPUThreads int `toml:"cpu_threads"`
+	// PrepareParallel is how many images a job prepares at once; 0 leaves
+	// it to the slots of the workers that take the job.
+	PrepareParallel int `toml:"prepare_parallel"`
 	// 0 disables the cache: each run loads the model fresh.
 	IdleReleaseAfterMinutes int                  `toml:"idle_release_after_minutes"`
 	Aggregation             TaggerAggregationCfg `toml:"aggregation"`
@@ -999,6 +1002,10 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Relations.DefaultDistance < 0 || cfg.Relations.DefaultDistance > MaxPhashDistance {
 		cfg.Relations.DefaultDistance = defaultRelationsDistance
+	}
+	if cfg.Tagger.PrepareParallel < 0 {
+		logx.Warnf("config: tagger.prepare_parallel %d is negative; using 0", cfg.Tagger.PrepareParallel)
+		cfg.Tagger.PrepareParallel = 0
 	}
 	if cfg.Tagger.Parallel < 1 {
 		cfg.Tagger.Parallel = defaultTaggerParallel
