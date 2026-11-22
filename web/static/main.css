@@ -596,7 +596,7 @@ body.marquee-active { user-select: none; }
 
 #batch-bars {
   position: sticky;
-  top: 0;
+  top: -16px;
   z-index: 10;
   background: var(--bg);
 }
