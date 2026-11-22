@@ -1,4 +1,4 @@
-package ranking
+package rank
 
 import "testing"
 

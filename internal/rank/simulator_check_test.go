@@ -1,23 +1,16 @@
-package rankingtest
+package rank
 
 import (
-	"math"
 	"math/rand/v2"
 	"slices"
 	"testing"
-
-	"github.com/monbooru/monbooru/internal/ranking"
 )
-
-func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
-
-func sigmoid(x float64) float64 { return 1 / (1 + math.Exp(-x)) }
 
 // At fixed gaps, the simulated answers follow Rao & Kupper's chances.
 func TestAnswerChances(t *testing.T) {
 	const draws = 200_000 // chance moves each share by about 0.1%
 	rng := rand.New(rand.NewPCG(502, 754))
-	for _, a := range []Answerer{TiesAndSkips, SidesOnly} {
+	for _, a := range []answerer{tiesAndSkips, sidesOnly} {
 		for _, gap := range []float64{-1, 0, 1, 2, 4} {
 			counts := map[string]float64{}
 			for range draws {
@@ -49,7 +42,7 @@ func TestAnswerChances(t *testing.T) {
 	}
 }
 
-// Over random pairs of typical images, TiesAndSkips gives its targets: 10%
+// Over random pairs of typical images, tiesAndSkips gives its targets: 10%
 // skips, 10% ties, and left and right about 40% each.
 func TestSimulateVotesMix(t *testing.T) {
 	const shown = 100_000
@@ -58,8 +51,8 @@ func TestSimulateVotesMix(t *testing.T) {
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
-	counts := map[ranking.Winner]int{}
-	votes := SimulateVotes(rng, truth, shown, TiesAndSkips)
+	counts := map[Winner]int{}
+	votes := simulateVotes(rng, truth, shown, tiesAndSkips)
 	for _, v := range votes {
 		counts[v.Outcome.Winner]++
 		if v.Left == v.Right || v.Left < 1 || v.Left > 1000 || v.Right < 1 || v.Right > 1000 {
@@ -72,9 +65,9 @@ func TestSimulateVotesMix(t *testing.T) {
 		got, want float64
 	}{
 		{"skip", float64(shown-len(votes)) / shown, 0.1},
-		{"tie", float64(counts[ranking.WinnerTie]) / shown, 0.1},
-		{"left", float64(counts[ranking.WinnerLeft]) / shown, 0.4},
-		{"right", float64(counts[ranking.WinnerRight]) / shown, 0.4},
+		{"tie", float64(counts[WinnerTie]) / shown, 0.1},
+		{"left", float64(counts[WinnerLeft]) / shown, 0.4},
+		{"right", float64(counts[WinnerRight]) / shown, 0.4},
 	}
 	for _, s := range shares {
 		if !near(s.got, s.want, 0.01) {
@@ -89,7 +82,7 @@ func TestSimulateOneVoteEach(t *testing.T) {
 	for i := range truth {
 		truth[i] = rng.NormFloat64()
 	}
-	votes := SimulateOneVoteEach(rng, truth, TiesAndSkips)
+	votes := simulateOneVoteEach(rng, truth, tiesAndSkips)
 	if len(votes) != 500 {
 		t.Errorf("%d votes, want 500 (half of 2000 images, two per vote)", len(votes))
 	}
@@ -120,10 +113,10 @@ func TestSimulateOneVoteEach(t *testing.T) {
 }
 
 func TestSpacedTruth(t *testing.T) {
-	got := SpacedTruth(5)
+	got := spacedTruth(5)
 	want := []float64{-2, -1, 0, 1, 2}
 	if !slices.Equal(got, want) {
-		t.Errorf("SpacedTruth(5) = %v, want %v", got, want)
+		t.Errorf("spacedTruth(5) = %v, want %v", got, want)
 	}
 }
 
@@ -140,8 +133,8 @@ func TestCorrelation(t *testing.T) {
 		{"unrelated", []float64{1, -1, -1, 1}, 0},
 	}
 	for _, c := range cases {
-		if got := Correlation(a, c.b); !near(got, c.want, 1e-12) {
-			t.Errorf("%s: Correlation = %v, want %v", c.name, got, c.want)
+		if got := correlation(a, c.b); !near(got, c.want, 1e-12) {
+			t.Errorf("%s: correlation = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -158,8 +151,8 @@ func TestSlope(t *testing.T) {
 		{"b flat", []float64{7, 7, 7, 7}, 0},
 	}
 	for _, c := range cases {
-		if got := Slope(a, c.b); !near(got, c.want, 1e-12) {
-			t.Errorf("%s: Slope = %v, want %v", c.name, got, c.want)
+		if got := slope(a, c.b); !near(got, c.want, 1e-12) {
+			t.Errorf("%s: slope = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -173,11 +166,11 @@ func TestAccuracy(t *testing.T) {
 	// Image 201's truth is 0, inside its 0 ± 0.5; image 1's truth is −2,
 	// outside its 0 ± 1.5. The average uncertainty is 1, and −1 to 1 holds
 	// 201 of the 401 true strengths.
-	estimates := map[int64]ranking.Estimate{
+	estimates := map[int64]Estimate{
 		201: {Strength: 0, Uncertainty: 0.5},
 		1:   {Strength: 0, Uncertainty: 1.5},
 	}
-	avgUncertainty, impliedRange, withinRange := Accuracy(estimates, truth, truth)
+	avgUncertainty, impliedRange, withinRange := accuracy(estimates, truth, truth)
 	if !near(avgUncertainty, 1, 1e-12) {
 		t.Errorf("avgUncertainty = %v, want 1", avgUncertainty)
 	}
@@ -199,7 +192,7 @@ func TestAccuracy(t *testing.T) {
 		bell[i] = rng.NormFloat64()
 	}
 	slices.Sort(bell)
-	_, impliedRange, _ = Accuracy(map[int64]ranking.Estimate{1: {Strength: 0, Uncertainty: 1}}, bell, bell)
+	_, impliedRange, _ = accuracy(map[int64]Estimate{1: {Strength: 0, Uncertainty: 1}}, bell, bell)
 	if !near(impliedRange, 0.6827, 0.005) {
 		t.Errorf("uncertainty 1 on a bell curve of width 1 spans %v of the library, want about 0.68", impliedRange)
 	}

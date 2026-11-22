@@ -1,4 +1,4 @@
-package bradleyterry
+package rank
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-
-	"github.com/monbooru/monbooru/internal/ranking"
 )
 
 // How the refit searches. These only control how precisely the best guess
@@ -30,7 +28,7 @@ const (
 // that best explain the votes together with the bell-curve starting
 // assumption (the MAP estimate), and how unsure each one is. Vote order
 // doesn't matter. Images without votes aren't in the result.
-func (m *Model) Fit(ctx context.Context, votes []ranking.Vote) (map[int64]ranking.Estimate, error) {
+func (m *Model) Fit(ctx context.Context, votes []Vote) (map[int64]Estimate, error) {
 	u := m.settings.StartUncertainty
 	return fitVotes(ctx, votes, 1/(u*u))
 }
@@ -59,7 +57,7 @@ type match struct {
 // shiftToAverageZero), and passes repeat until nothing moves. At the best
 // guess every balance is 0, and the image's uncertainty is 1/√certainty (the
 // plan's per-image approximation, "diagonal Laplace").
-func fitVotes(ctx context.Context, votes []ranking.Vote, priorPrecision float64) (map[int64]ranking.Estimate, error) {
+func fitVotes(ctx context.Context, votes []Vote, priorPrecision float64) (map[int64]Estimate, error) {
 	scores := make([]float64, len(votes))
 	position := map[int64]int{}
 	for k, v := range votes {
@@ -110,10 +108,10 @@ func fitVotes(ctx context.Context, votes []ranking.Vote, priorPrecision float64)
 		}
 	}
 
-	out := make(map[int64]ranking.Estimate, len(ids))
+	out := make(map[int64]Estimate, len(ids))
 	for i, id := range ids {
 		_, certainty := imageBalance(strength, i, matches[i], priorPrecision)
-		e := ranking.Estimate{Strength: strength[i], Uncertainty: 1 / math.Sqrt(certainty)}
+		e := Estimate{Strength: strength[i], Uncertainty: 1 / math.Sqrt(certainty)}
 		if !usable(e) {
 			// Only possible without a starting assumption, e.g. for an image
 			// that never lost, whose strength runs off to infinity.
@@ -197,7 +195,7 @@ func shiftToAverageZero(strength []float64, group []int, groupCount int) {
 // half a loss (Weng & Lin 2011, eq. 51). 0 is a perfect fit; more negative
 // is worse. Images missing from strengths count as 0. MetricGate's
 // "deviance" is −2 times this.
-func logLikelihood(votes []ranking.Vote, strengths map[int64]float64) (float64, error) {
+func logLikelihood(votes []Vote, strengths map[int64]float64) (float64, error) {
 	total := 0.0
 	for _, v := range votes {
 		score, err := v.Outcome.LeftScore()

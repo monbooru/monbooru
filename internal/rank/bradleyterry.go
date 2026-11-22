@@ -1,14 +1,8 @@
-// Package bradleyterry is the Bradley–Terry ranking model (Bradley & Terry
-// 1952): an image with strength a beats one with strength b with chance
-// sigmoid(a − b). Each vote updates its two images (Weng & Lin 2011), and Fit
-// recomputes everything from all votes.
-package bradleyterry
+package rank
 
 import (
 	"fmt"
 	"math"
-
-	"github.com/monbooru/monbooru/internal/ranking"
 )
 
 // Settings are Bradley–Terry's tunable values. V1 always uses
@@ -50,13 +44,13 @@ func positiveFinite(x float64) bool { return x > 0 && !math.IsInf(x, 1) }
 
 // usable reports whether e is a real estimate: a finite strength and a
 // positive, finite uncertainty.
-func usable(e ranking.Estimate) bool {
+func usable(e Estimate) bool {
 	return !math.IsNaN(e.Strength) && !math.IsInf(e.Strength, 0) && positiveFinite(e.Uncertainty)
 }
 
 // Start is "probably average": strength 0, as unsure as the settings say.
-func (m *Model) Start() ranking.Estimate {
-	return ranking.Estimate{Strength: 0, Uncertainty: m.settings.StartUncertainty}
+func (m *Model) Start() Estimate {
+	return Estimate{Strength: 0, Uncertainty: m.settings.StartUncertainty}
 }
 
 // sigmoid is 1 / (1 + e^(−x)): the chance that an image beats one x weaker.

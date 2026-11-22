@@ -1,10 +1,8 @@
-package bradleyterry
+package rank
 
 import (
 	"math"
 	"testing"
-
-	"github.com/monbooru/monbooru/internal/ranking"
 )
 
 // newTest is Bradley–Terry with the default settings.
@@ -16,8 +14,6 @@ func newTest(t testing.TB) *Model {
 	}
 	return bt
 }
-
-func near(a, b, tolerance float64) bool { return math.Abs(a-b) <= tolerance }
 
 func TestDefaultBradleyTerrySettings(t *testing.T) {
 	got := DefaultSettings()
@@ -52,7 +48,7 @@ func TestNewRejectsBadSettings(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	bt := newTest(t)
-	if got, want := bt.Start(), (ranking.Estimate{Strength: 0, Uncertainty: 2}); got != want {
+	if got, want := bt.Start(), (Estimate{Strength: 0, Uncertainty: 2}); got != want {
 		t.Errorf("Start() = %+v, want %+v", got, want)
 	}
 	// Start follows the settings.
@@ -60,7 +56,7 @@ func TestStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := wide.Start(), (ranking.Estimate{Strength: 0, Uncertainty: 3}); got != want {
+	if got, want := wide.Start(), (Estimate{Strength: 0, Uncertainty: 3}); got != want {
 		t.Errorf("Start() with StartUncertainty 3 = %+v, want %+v", got, want)
 	}
 }
@@ -101,14 +97,14 @@ func TestLogSigmoid(t *testing.T) {
 
 func TestUsable(t *testing.T) {
 	inf, nan := math.Inf(1), math.NaN()
-	for _, e := range []ranking.Estimate{
+	for _, e := range []Estimate{
 		{Strength: 0, Uncertainty: 2}, {Strength: -3.25, Uncertainty: 0.1}, {Strength: 1e300, Uncertainty: 1e-300},
 	} {
 		if !usable(e) {
 			t.Errorf("usable(%+v) = false, want true", e)
 		}
 	}
-	for _, e := range []ranking.Estimate{
+	for _, e := range []Estimate{
 		{Strength: nan, Uncertainty: 1}, {Strength: inf, Uncertainty: 1}, {Strength: -inf, Uncertainty: 1},
 		{Strength: 0, Uncertainty: 0}, {Strength: 0, Uncertainty: -1}, {Strength: 0, Uncertainty: inf}, {Strength: 0, Uncertainty: nan},
 	} {

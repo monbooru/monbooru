@@ -1,24 +1,21 @@
-// Package rankingtest helps test ranking algorithms against simulated votes:
-// a simulated person answering pairs of images whose true strengths are
-// known, and measures of how close a fit came to the truth. Only tests
-// import it.
-package rankingtest
+package rank
+
+// Test helpers: a simulated person answering pairs of images whose true
+// strengths are known, and measures of how close a fit came to the truth.
 
 import (
 	"math"
 	"math/rand/v2"
 	"sort"
-
-	"github.com/monbooru/monbooru/internal/ranking"
 )
 
 var (
-	leftWins  = ranking.Outcome{Winner: ranking.WinnerLeft}
-	tie       = ranking.Outcome{Winner: ranking.WinnerTie}
-	rightWins = ranking.Outcome{Winner: ranking.WinnerRight}
+	leftWins  = Outcome{Winner: WinnerLeft}
+	tie       = Outcome{Winner: WinnerTie}
+	rightWins = Outcome{Winner: WinnerRight}
 )
 
-// Answerer is a simulated person answering pairs, following Rao & Kupper's
+// answerer is a simulated person answering pairs, following Rao & Kupper's
 // (1967) tie model. Each time a pair is shown, they feel a preference: the
 // true strength gap plus random noise. If the feeling is weaker than
 // Threshold, they don't pick a side, and either call it a tie or skip, 50/50.
@@ -30,25 +27,25 @@ var (
 //
 // Close images are often left undecided; far apart ones almost never. With a
 // Threshold of 0 it's plain Bradley–Terry: left wins with sigmoid(gap).
-type Answerer struct{ Threshold float64 }
+type answerer struct{ Threshold float64 }
 
 var (
-	// TiesAndSkips is a rough guess, not based on real data. For random pairs
+	// tiesAndSkips is a rough guess, not based on real data. For random pairs
 	// of typical images, we'll assume that about 10% are ties, about 10% are
 	// skips, about 40% of the time the user picks left and about 40% of the
 	// time the user picks right. Per gap (worked out in Python):
 	//
 	//	gap (ranking points)   0     1 (174)  2 (347)  3 (521)  4 (695)
 	//	tie chance             13.6%  10.9%    6.0%     2.6%     1.0%
-	TiesAndSkips = Answerer{Threshold: 0.56}
-	// SidesOnly always picks a side, by the win chance alone: exactly what
+	tiesAndSkips = answerer{Threshold: 0.56}
+	// sidesOnly always picks a side, by the win chance alone: exactly what
 	// Bradley–Terry assumes, for checking that a fit itself is right.
-	SidesOnly = Answerer{}
+	sidesOnly = answerer{}
 )
 
 // Answer is one answer to a pair whose true strengths differ by gap (left −
 // right). skipped means no vote is stored.
-func (a Answerer) Answer(rng *rand.Rand, gap float64) (o ranking.Outcome, skipped bool) {
+func (a answerer) Answer(rng *rand.Rand, gap float64) (o Outcome, skipped bool) {
 	u := rng.Float64()
 	felt := gap + math.Log(u/(1-u)) // logistic noise: P(felt > 0) = sigmoid(gap)
 	switch {
@@ -59,15 +56,15 @@ func (a Answerer) Answer(rng *rand.Rand, gap float64) (o ranking.Outcome, skippe
 	case rng.IntN(2) == 0:
 		return tie, false
 	default:
-		return ranking.Outcome{}, true
+		return Outcome{}, true
 	}
 }
 
-// SimulateVotes shows n random pairs of images whose true strengths are
+// simulateVotes shows n random pairs of images whose true strengths are
 // known, and returns the votes. Skipped pairs leave no vote, so with
-// TiesAndSkips there are about 0.9 × n. Image i has id i+1.
-func SimulateVotes(rng *rand.Rand, truth []float64, n int, a Answerer) []ranking.Vote {
-	votes := make([]ranking.Vote, 0, n)
+// tiesAndSkips there are about 0.9 × n. Image i has id i+1.
+func simulateVotes(rng *rand.Rand, truth []float64, n int, a answerer) []Vote {
+	votes := make([]Vote, 0, n)
 	for range n {
 		i := rng.IntN(len(truth))
 		j := rng.IntN(len(truth) - 1)
@@ -75,28 +72,28 @@ func SimulateVotes(rng *rand.Rand, truth []float64, n int, a Answerer) []ranking
 			j++ // any image but i
 		}
 		if o, skipped := a.Answer(rng, truth[i]-truth[j]); !skipped {
-			votes = append(votes, ranking.Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
+			votes = append(votes, Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
 		}
 	}
 	return votes
 }
 
-// SimulateOneVoteEach is the very sparse case: a random half of the images
+// simulateOneVoteEach is the very sparse case: a random half of the images
 // get exactly one vote each, and the other half none. The voted half is
 // paired off at random, so every vote is between two images that meet no one
 // else. When the simulated person skips a pair, they're simply asked about the
 // same pair again (a fresh random answer) until they pick a side or call a
 // tie: a shortcut that keeps the split exactly half and half. (The real Rank
 // page doesn't bring a skipped pair back.) Image i has id i+1.
-func SimulateOneVoteEach(rng *rand.Rand, truth []float64, a Answerer) []ranking.Vote {
+func simulateOneVoteEach(rng *rand.Rand, truth []float64, a answerer) []Vote {
 	order := rng.Perm(len(truth))
 	voted := order[:len(order)/2]
-	votes := make([]ranking.Vote, 0, len(voted)/2)
+	votes := make([]Vote, 0, len(voted)/2)
 	for k := 0; k+1 < len(voted); k += 2 {
 		i, j := voted[k], voted[k+1]
 		for {
 			if o, skipped := a.Answer(rng, truth[i]-truth[j]); !skipped {
-				votes = append(votes, ranking.Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
+				votes = append(votes, Vote{Left: int64(i + 1), Right: int64(j + 1), Outcome: o})
 				break
 			}
 		}
@@ -104,9 +101,9 @@ func SimulateOneVoteEach(rng *rand.Rand, truth []float64, a Answerer) []ranking.
 	return votes
 }
 
-// SpacedTruth gives n true strengths evenly spread from −2 to 2 (rankings
+// spacedTruth gives n true strengths evenly spread from −2 to 2 (rankings
 // about 1150 to 1850), so they average 0, like a fit does.
-func SpacedTruth(n int) []float64 {
+func spacedTruth(n int) []float64 {
 	truth := make([]float64, n)
 	for i := range truth {
 		truth[i] = -2 + 4*float64(i)/float64(n-1)
@@ -114,10 +111,10 @@ func SpacedTruth(n int) []float64 {
 	return truth
 }
 
-// Correlation is the Pearson correlation of two lists: 1 when one is an
+// correlation is the Pearson correlation of two lists: 1 when one is an
 // exact rising straight line of the other, −1 for a falling one, 0 when
 // unrelated.
-func Correlation(a, b []float64) float64 {
+func correlation(a, b []float64) float64 {
 	meanA, meanB := mean(a), mean(b)
 	var cov, varA, varB float64
 	for i := range a {
@@ -128,9 +125,9 @@ func Correlation(a, b []float64) float64 {
 	return cov / math.Sqrt(varA*varB)
 }
 
-// Slope is how much b changes per unit of a, on the best straight line
+// slope is how much b changes per unit of a, on the best straight line
 // through the points (least squares).
-func Slope(a, b []float64) float64 {
+func slope(a, b []float64) float64 {
 	meanA, meanB := mean(a), mean(b)
 	var cov, varA float64
 	for i := range a {
@@ -148,7 +145,7 @@ func mean(x []float64) float64 {
 	return total / float64(len(x))
 }
 
-// Accuracy sums up a fit against the known truth, over the images it ranked.
+// accuracy sums up a fit against the known truth, over the images it ranked.
 //
 //   - avgUncertainty: the average uncertainty, in strength units (× 173.72
 //     for RD in ranking points).
@@ -163,7 +160,7 @@ func mean(x []float64) float64 {
 //     About 0.68 if the uncertainty is honest, whatever its size.
 //
 // truth[i] is image i+1's true strength, and sortedTruth the same, sorted.
-func Accuracy(estimates map[int64]ranking.Estimate, truth, sortedTruth []float64) (avgUncertainty, impliedRange, withinRange float64) {
+func accuracy(estimates map[int64]Estimate, truth, sortedTruth []float64) (avgUncertainty, impliedRange, withinRange float64) {
 	for id, e := range estimates {
 		avgUncertainty += e.Uncertainty
 		if t := truth[id-1]; math.Abs(t-e.Strength) <= e.Uncertainty {

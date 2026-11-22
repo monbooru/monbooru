@@ -1,7 +1,9 @@
-// Package ranking turns pairwise votes ("I like this one more") into a
-// ranking per image, with Bradley–Terry (subpackage bradleyterry). Math
-// only: no database, routes or UI.
-package ranking
+// Package rank turns pairwise votes ("I like this one more") into a rank
+// per image, with the Bradley–Terry model (Bradley & Terry 1952): an image
+// with strength a beats one with strength b with chance sigmoid(a − b).
+// Each vote updates its two images (Weng & Lin 2011), and Fit recomputes
+// everything from all votes. Math only: no database, routes or UI.
+package rank
 
 // Estimate is what's known about one image.
 type Estimate struct {
