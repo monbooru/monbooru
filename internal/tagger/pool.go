@@ -709,7 +709,7 @@ func (p *Pool) Load() Load {
 	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && runnable(w) && w.up })
 	for _, w := range p.workers {
 		l.Busy = l.Busy || w.inUse > 0
-		if runnable(w) && w.up && !(w.def.Local && remoteUp) {
+		if runnable(w) && w.up && (!w.def.Local || !remoteUp) {
 			l.Free += max(0, w.slots()-w.inUse)
 		}
 	}
