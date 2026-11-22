@@ -930,6 +930,269 @@ var slideshow = (function () {
   };
 })();
 
+// A two-image session: swap sides, the prompt line, the compare slider and
+// the keys. A page opts in with #session-decision-form inside .session-pair
+// and the partials/session_*.html pieces. Swap sides fires session-swapped
+// on .session-pair, for anything else the page lays out by side.
+var pairSession = (function () {
+  var form = document.getElementById('session-decision-form');
+  if (!form) {
+    return { handleKey: function () { return false; } };
+  }
+  var pair = document.querySelector('.session-pair');
+  var leftInput = document.getElementById('session-left');
+
+  // Form restoration can leave a previous pair's id in the input, so
+  // anything but A or B falls back to A.
+  function currentLeftID() {
+    var v = leftInput ? leftInput.value : null;
+    return v === pair.dataset.b ? pair.dataset.b : pair.dataset.a;
+  }
+
+  function flipSides() {
+    var cells = pair.querySelector('.session-cells');
+    if (!cells) return;
+    var left = cells.children[0];
+    var bridge = cells.children[1];
+    var right = cells.children[2];
+    if (!left || !bridge || !right) return;
+    cells.insertBefore(right, left);
+    cells.insertBefore(bridge, left);
+    var newLeftCell = cells.children[0];
+    var newRightCell = cells.children[2];
+    var lh = newLeftCell.querySelector('.session-role');
+    var rh = newRightCell.querySelector('.session-role');
+    if (lh) { lh.textContent = 'Left'; lh.dataset.role = 'left'; }
+    if (rh) { rh.textContent = 'Right'; rh.dataset.role = 'right'; }
+    var newLeftSide = newLeftCell.dataset.side;
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+    leftInput.value = (newLeftSide === 'A') ? aID : bID;
+    pair.dispatchEvent(new CustomEvent('session-swapped'));
+  }
+
+  var swap = document.getElementById('session-swap');
+  if (swap) swap.addEventListener('click', flipSides);
+
+  var prompt = document.getElementById('session-prompt-text');
+  if (prompt) {
+    var defaultPrompt = prompt.getAttribute('data-default') || prompt.textContent;
+    function resolvePrompt(template) {
+      if (!leftInput || !pair) return template;
+      var leftID = currentLeftID();
+      var rightID = (leftID === pair.dataset.a) ? pair.dataset.b : pair.dataset.a;
+      return template.replace(/{left}/g, '#' + leftID).replace(/{right}/g, '#' + rightID);
+    }
+    var promptButtons = form.querySelectorAll('button[data-prompt-sentence]');
+    promptButtons.forEach(function(btn) {
+      var tmpl = btn.getAttribute('data-prompt-sentence');
+      btn.addEventListener('mouseenter', function() { prompt.textContent = resolvePrompt(tmpl); });
+      btn.addEventListener('focus',      function() { prompt.textContent = resolvePrompt(tmpl); });
+      btn.addEventListener('mouseleave', function() { prompt.textContent = defaultPrompt; });
+      btn.addEventListener('blur',       function() { prompt.textContent = defaultPrompt; });
+    });
+  }
+
+  var compareBtn = document.getElementById('session-compare');
+  var compareDlg = document.getElementById('session-compare-dialog');
+  var compareStage = document.getElementById('compare-stage');
+  var slotLeft = document.getElementById('compare-slot-left');
+  var slotRight = document.getElementById('compare-slot-right');
+  var divider = document.getElementById('compare-divider');
+  function setSplit(pct) {
+    if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
+    if (slotRight) slotRight.style.clipPath = 'inset(0 0 0 ' + pct + '%)';
+    if (divider) divider.style.left = pct + '%';
+  }
+  function mountMedia(slot, id, fileType) {
+    if (!slot) return;
+    while (slot.firstChild) slot.removeChild(slot.firstChild);
+    var isVideo = fileType === 'mp4' || fileType === 'webm';
+    // /view would hand an archive over as the zip itself.
+    var src = '/images/' + id + (isVideo ? '/file' : fileType === 'cbz' ? '/page/1' : '/view');
+    var el = document.createElement(isVideo ? 'video' : 'img');
+    if (isVideo) {
+      el.autoplay = true;
+      el.loop = true;
+      el.muted = true;
+      el.playsInline = true;
+      el.preload = 'auto';
+    } else {
+      el.alt = slot.id === 'compare-slot-left' ? 'left' : 'right';
+    }
+    el.src = src;
+    slot.appendChild(el);
+  }
+  function openCompare() {
+    if (!compareDlg || !compareStage) return;
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+    var aType = pair.dataset.aType || '';
+    var bType = pair.dataset.bType || '';
+    var leftID = currentLeftID();
+    var rightID = (leftID === aID) ? bID : aID;
+    var leftType = (leftID === aID) ? aType : bType;
+    var rightType = (leftID === aID) ? bType : aType;
+    mountMedia(slotLeft, leftID, leftType);
+    mountMedia(slotRight, rightID, rightType);
+    var capL = document.getElementById('compare-caption-left-id');
+    var capR = document.getElementById('compare-caption-right-id');
+    if (capL) capL.textContent = '#' + leftID;
+    if (capR) capR.textContent = '#' + rightID;
+    setSplit(50);
+    resetZoom();
+    compareDlg.showModal();
+  }
+  if (compareBtn) compareBtn.addEventListener('click', openCompare);
+  function clearCompareSlots() {
+    [slotLeft, slotRight].forEach(function(slot) {
+      if (!slot) return;
+      // Pause and unload the video first so its decoder is released at once.
+      var v = slot.querySelector('video');
+      if (v) { try { v.pause(); } catch (_) {} v.removeAttribute('src'); v.load(); }
+      while (slot.firstChild) slot.removeChild(slot.firstChild);
+    });
+  }
+  var compareClose = document.getElementById('compare-close');
+  if (compareClose) compareClose.addEventListener('click', function() {
+    if (compareDlg) compareDlg.close();
+  });
+  if (compareDlg) compareDlg.addEventListener('close', clearCompareSlots);
+  function trackSplit(evt) {
+    if (!compareStage) return;
+    var rect = compareStage.getBoundingClientRect();
+    setSplit((evt.clientX - rect.left) / rect.width * 100);
+  }
+
+  // One transform for both images keeps them aligned under the split.
+  var zoom = 1, panX = 0, panY = 0;
+  function applyZoom() {
+    // Keep the images covering the stage.
+    var w = compareStage.clientWidth, h = compareStage.clientHeight;
+    panX = Math.min(0, Math.max(w - w * zoom, panX));
+    panY = Math.min(0, Math.max(h - h * zoom, panY));
+    var transform = zoom > 1 ? 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')' : '';
+    [slotLeft, slotRight].forEach(function(slot) {
+      if (slot.firstElementChild) slot.firstElementChild.style.transform = transform;
+    });
+    compareStage.classList.toggle('zoomed', zoom > 1);
+  }
+  function resetZoom() {
+    zoom = 1;
+    applyZoom();
+  }
+  // Zooms around a stage point, so the image under it stays put.
+  function setZoom(next, x, y) {
+    next = Math.min(16, Math.max(1, next));
+    panX = x - (x - panX) * next / zoom;
+    panY = y - (y - panY) * next / zoom;
+    zoom = next;
+    applyZoom();
+  }
+  function stagePoint(e) {
+    var rect = compareStage.getBoundingClientRect();
+    return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+  }
+  function zoomOnWheel(e) {
+    e.preventDefault();
+    if (!e.deltaY) return;
+    var p = stagePoint(e);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    setZoom(zoom * Math.exp(-dy * 0.0018), p.x, p.y);
+  }
+
+  // Zoomed in, one finger or the mouse pans and the split moves by its
+  // handle; two fingers pinch.
+  var points = {}, drag = null, lastTap = 0;
+  function pinchOf() {
+    var p = Object.values(points);
+    return {
+      x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2,
+      dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+    };
+  }
+  function startDrag(e) {
+    if (e.button !== 0) return;
+    compareStage.setPointerCapture(e.pointerId);
+    var p = points[e.pointerId] = stagePoint(e);
+    if (Object.keys(points).length === 2) {
+      drag = {pinch: pinchOf()};
+      return;
+    }
+    var pan = zoom > 1 && !e.target.closest('.compare-divider-handle');
+    drag = {pan: pan, x: p.x - panX, y: p.y - panY, moved: false};
+    if (!pan) trackSplit(e);
+  }
+  function moveDrag(e) {
+    if (!drag || !points[e.pointerId]) return;
+    var p = points[e.pointerId] = stagePoint(e);
+    drag.moved = true;
+    if (drag.pinch) {
+      var now = pinchOf();
+      panX += now.x - drag.pinch.x;
+      panY += now.y - drag.pinch.y;
+      setZoom(zoom * now.dist / drag.pinch.dist, now.x, now.y);
+      drag.pinch = now;
+    } else if (drag.pan) {
+      panX = p.x - drag.x;
+      panY = p.y - drag.y;
+      applyZoom();
+    } else {
+      trackSplit(e);
+    }
+  }
+  function endDrag(e) {
+    delete points[e.pointerId];
+    // A double-click never fires for a finger, so a double tap resets here.
+    if (e.type === 'pointerup' && e.pointerType === 'touch' && drag && !drag.moved && !drag.pinch) {
+      if (e.timeStamp - lastTap < 300) resetZoom();
+      lastTap = e.timeStamp;
+    }
+    // The finger left on the glass after a pinch goes on panning.
+    var rest = Object.values(points);
+    drag = rest.length === 1 && zoom > 1 ? {pan: true, x: rest[0].x - panX, y: rest[0].y - panY, moved: true} : null;
+  }
+
+  if (compareStage) {
+    compareStage.addEventListener('wheel', zoomOnWheel, {passive: false});
+    compareStage.addEventListener('pointerdown', startDrag);
+    compareStage.addEventListener('pointermove', moveDrag);
+    compareStage.addEventListener('pointerup', endDrag);
+    compareStage.addEventListener('pointercancel', endDrag);
+    compareStage.addEventListener('dblclick', resetZoom);
+  }
+
+  // The keydown router asks first, before any chord: digits press the
+  // form's buttons in order, Space its skip. Esc back to the list is the
+  // router's own, from the page's data-esc-back.
+  function handleKey(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return false;
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (e.defaultPrevented || document.querySelector('.chord-leader-hint')) return false;
+    // With the slider open, Esc only closes it.
+    if (compareDlg && compareDlg.open) {
+      if (e.key !== 'Escape') return false;
+      e.preventDefault();
+      compareDlg.close();
+      return true;
+    }
+    if (document.querySelector('dialog[open]')) return false;
+    if (e.key === 'w' || e.key === 'W') { flipSides(); return true; }
+    if (e.key === 'c' || e.key === 'C') { openCompare(); return true; }
+    var btn = null;
+    if (e.key === ' ') {
+      e.preventDefault();
+      btn = form.querySelector('button[type="submit"][value="skip"]');
+    } else if (/^[1-9]$/.test(e.key)) {
+      btn = form.querySelectorAll('button[type="submit"]')[parseInt(e.key, 10) - 1];
+    }
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }
+
+  return { handleKey: handleKey };
+})();
+
 function openReaderJumpDialog() {
   var dlg = document.getElementById('reader-jump-dialog');
   if (!dlg) return false;
@@ -1011,6 +1274,7 @@ document.addEventListener('keydown', function(e) {
   var tag = e.target.tagName.toLowerCase();
   var isInput = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
 
+  if (pairSession.handleKey(e)) return;
   if (lightbox.handleKey(e)) return;
   if (!isInput && !chorded(e) && chordStep(e)) return;
   if (handleReaderKey(e)) return;
@@ -1035,8 +1299,7 @@ document.addEventListener('keydown', function(e) {
       detailBack();
       return;
     }
-    // A page handler may already have used this Esc, e.g. to close the
-    // compare slider.
+    // A page handler may already have used this Esc.
     if (e.defaultPrevented) return;
     var escBackEl = document.querySelector('[data-esc-back]');
     if (escBackEl) {
