@@ -89,6 +89,7 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	req.Repair = s.pairedWith(req.Paired())
+	req.PrivateSource = privateSource(r)
 	req.Auto = s.autoApproves(r, req)
 	accepted, f := s.pairs.Offer(req)
 	if f != nil {
@@ -213,7 +214,7 @@ func (s *Server) mintPairedToken(req peer.Req) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	if req.Auto {
+	if req.Auto || s.win.approved(req.ID) {
 		s.win.record(req)
 	} else {
 		s.win.forget(req.Paired())

@@ -313,3 +313,45 @@ func TestAWorkerPairedAutomaticallyIsNamedAndLeadsToItsBlock(t *testing.T) {
 	wantIn(t, body, "[! gpu-box paired automatically]")
 	wantIn(t, body, `<a id="auto-pair-notice" class="pair-notice" href="/settings#tagger"`)
 }
+
+func TestOpeningTheWindowApprovesWhatAlreadyWaits(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.cfg.Plugins = append(srv.cfg.Plugins, config.PluginConfig{Name: "monedit", APIURL: p.URL})
+	offer := func(app, label, at, remote string, headers ...[2]string) string {
+		id, st := offerFrom(t, srv, remote, `{"app":"`+app+`","label":"`+label+`","url":"`+at+`","peer_token":"sek","version":"1.15.0"}`, headers...)
+		if st != pairing.Pending {
+			t.Fatalf("%s %s: state = %q with the window closed, want pending", app, label, st)
+		}
+		return id
+	}
+	pairPeer(srv, "monworker:old")
+	monloader := offer("monloader", "", p.URL, "127.0.0.1:50000")
+	worker := offer("monworker", "nas", p.URL, "127.0.0.1:50001")
+	waits := map[string]string{
+		"a plugin":           offer("monedit", "", p.URL, "127.0.0.1:50000"),
+		"a forwarded worker": offer("monworker", "attic", p.URL, "127.0.0.1:50000", [2]string{"X-Forwarded-For", "192.168.1.9"}),
+		"a public worker":    offer("monworker", "far", p.URL, "203.0.113.5:50000"),
+		"an unreachable one": offer("monworker", "ghost", "http://127.0.0.1:1", "127.0.0.1:50000"),
+		"a re-pair":          offer("monworker", "old", p.URL, "127.0.0.1:50000"),
+	}
+
+	postForm(t, srv, "/settings/plugins/pair/window", url.Values{"open": {"1"}})
+
+	for name, id := range waits {
+		if got, _ := srv.pairs.Get(id); got.State != pairing.Pending {
+			t.Errorf("%s: state = %q, want still pending on its card", name, got.State)
+		}
+	}
+	for app, id := range map[string]string{"monloader": monloader, "monworker:nas": worker} {
+		if got, _ := srv.pairs.Get(id); got.State != pairing.Approved {
+			t.Fatalf("%s: state = %q, want approved when the window opened", app, got.State)
+		}
+		if _, out := pairStatus(t, srv, id); len(out["token"]) != 32 || !srv.pairedWith(app) {
+			t.Fatalf("%s: claim = %v, want its token", app, out)
+		}
+	}
+	if made := srv.win.list(); len(made) != 2 {
+		t.Errorf("trace = %+v, want monloader and nas listed as paired automatically", made)
+	}
+}
