@@ -1,6 +1,8 @@
 package web
 
 import (
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -99,6 +101,34 @@ func TestTheServerGivesThePoolItsLocalWorker(t *testing.T) {
 	}
 	if names := workerNames(srv); len(names) != 0 {
 		t.Errorf("pool = %v after the switch off", names)
+	}
+}
+
+func TestFreeMemoryRestartsTheLocalWorker(t *testing.T) {
+	path, envFile := standIn(t)
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	waitEnv(t, envFile, "MONWORKER_TOKEN=")
+	before := srv.peers.PID(localWorkerName)
+
+	if w := postForm(t, srv, "/settings/maintenance/free-memory", url.Values{}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "flash-ok") {
+		t.Fatalf("free memory: %d %s", w.Code, w.Body)
+	}
+	if after := srv.peers.PID(localWorkerName); after == 0 || after == before {
+		t.Errorf("the worker's pid is %d after, %d before: it did not restart", after, before)
+	}
+}
+
+func TestFreeMemoryStartsNoWorkerWhileItIsOff(t *testing.T) {
+	path, _ := standIn(t)
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	srv := newTestServerWith(t, false, nil)
+
+	if w := postForm(t, srv, "/settings/maintenance/free-memory", url.Values{}); w.Code != http.StatusOK {
+		t.Fatalf("free memory: %d %s", w.Code, w.Body)
+	}
+	if state := srv.peers.State(localWorkerName); state != "stopped" {
+		t.Errorf("the worker is %s after a free memory with local_worker off", state)
 	}
 }
 

@@ -985,7 +985,7 @@
           <table class="maintenance-table">
             <tbody>
               {{template "maintenance_row" dict "Title" "Vacuum database" "Desc" "Shrink the database file after deleting many images" "URL" "/settings/maintenance/vacuum-db" "Verb" "Vacuum" "Mark" "long job" "Confirm" "Compact the SQLite database now?" "ConfirmDanger" "Holds a database lock for the duration of the VACUUM; other jobs and queries will wait." "ConfirmOK" "Vacuum"}}
-              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, including a loaded tagger model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
+              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, and the local worker's model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
             </tbody>
           </table>
           </div>
