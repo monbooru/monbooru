@@ -37,7 +37,19 @@ func (s *Server) localOnly(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) browseDirs(w http.ResponseWriter, r *http.Request) {
-	l, ok := desktop.Browse(r.URL.Query().Get("into"), r.URL.Query().Get("path"), maxBrowseEntries)
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	for path != "" {
+		if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+			break
+		}
+		parent := filepath.Dir(path)
+		if parent == path || parent == "." {
+			path = ""
+			break
+		}
+		path = parent
+	}
+	l, ok := desktop.Browse(r.URL.Query().Get("into"), path, maxBrowseEntries)
 	if !ok {
 		http.Error(w, "bad target", http.StatusBadRequest)
 		return

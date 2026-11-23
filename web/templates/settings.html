@@ -240,7 +240,7 @@
             <input type="text" name="gallery_path" id="gallery-add-path" required>
             {{if .DesktopProfile}}
             <button type="button" class="btn-sm dir-picker-open" data-into="gallery-add-path"
-                    hx-get="/internal/browse?into=gallery-add-path" hx-target="#dir-picker-body">Browse</button>
+                    hx-get="/internal/browse?into=gallery-add-path" hx-vals='js:{path: document.getElementById("gallery-add-path").value}' hx-target="#dir-picker-body">Browse</button>
             {{end}}
           </div>
         </div>

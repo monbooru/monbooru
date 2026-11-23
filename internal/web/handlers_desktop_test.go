@@ -114,6 +114,18 @@ func TestBrowseListsSubdirectoriesOnly(t *testing.T) {
 	wantNotIn(t, body, ".hidden")
 }
 
+func TestBrowseOpensOnTheNearestFolderThatExists(t *testing.T) {
+	srv := newDesktopServer(t)
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, "kept"), 0o755)
+
+	w := callLocal(srv.browseDirs, "GET", "/internal/browse?into=gallery-add-path&path="+url.QueryEscape(filepath.Join(root, "gone", "deeper")), "")
+	mustCode(t, w, http.StatusOK)
+	body := w.Body.String()
+	wantIn(t, body, "kept/")
+	wantNotIn(t, body, "Cannot read this folder.")
+}
+
 func TestBrowseTruncatesTheAlphabeticalHead(t *testing.T) {
 	srv := newDesktopServer(t)
 	root := t.TempDir()
@@ -156,8 +168,13 @@ func TestBrowseListsASymlinkedFolder(t *testing.T) {
 
 func TestBrowseSurvivesAnUnreadableDirectory(t *testing.T) {
 	srv := newDesktopServer(t)
-	missing := filepath.Join(t.TempDir(), "not-here")
-	w := callLocal(srv.browseDirs, "GET", "/internal/browse?into=x&path="+url.QueryEscape(missing), "")
+	locked := filepath.Join(t.TempDir(), "locked")
+	mustMkdirAll(t, locked, 0o755)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	w := callLocal(srv.browseDirs, "GET", "/internal/browse?into=x&path="+url.QueryEscape(locked), "")
 	mustCode(t, w, http.StatusOK)
 	wantIn(t, w.Body.String(), "Cannot read this folder.")
 }
