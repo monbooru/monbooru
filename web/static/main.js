@@ -3563,9 +3563,8 @@ function initInboxUpload() {
     }
     // The result slot sits inside #gallery-grid, which the refresh below
     // replaces.
-    if (result && result.innerHTML.trim() !== '') {
-      showActionFlash(result.innerHTML, /flash-err/.test(result.innerHTML) ? 'err' : 'ok');
-    }
+    if (result && result.querySelector('.flash-err')) return;
+    if (result && result.innerHTML.trim() !== '') showActionFlash(result.innerHTML, 'ok');
     clearPending();
     refreshGalleryGrid();
   });
