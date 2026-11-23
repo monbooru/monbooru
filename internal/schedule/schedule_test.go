@@ -1,7 +1,11 @@
 package schedule
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,17 +20,22 @@ import (
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/tagger"
+	"github.com/monbooru/monbooru/internal/tagger/taggertest"
+	"github.com/monbooru/monbooru/internal/tags"
 )
 
 type fakeHost struct {
 	sched     config.ScheduleConfig
 	galleries []string
+	tagger    config.TaggerConfig
 }
 
 func (h *fakeHost) View() (config.ScheduleConfig, []string) { return h.sched, h.galleries }
-func (h *fakeHost) Config() *config.Config                  { return &config.Config{Schedule: h.sched} }
-func (h *fakeHost) Naming(string) gallery.Naming            { return gallery.Naming{} }
-func (h *fakeHost) MemoryMark() func(string)                { return func(string) {} }
+func (h *fakeHost) Config() *config.Config {
+	return &config.Config{Schedule: h.sched, Tagger: h.tagger}
+}
+func (h *fakeHost) Naming(string) gallery.Naming { return gallery.Naming{} }
+func (h *fakeHost) MemoryMark() func(string)     { return func(string) {} }
 
 type fakeLookups struct{}
 
@@ -415,7 +424,7 @@ func TestAutotagBacklogIsEachTaggersOwn(t *testing.T) {
 
 	check := func(label string, ffmpeg bool, limit int, want ...autotagGroup) {
 		t.Helper()
-		got, err := autotagBacklog(d, ffmpeg, []string{"wd", "joy"}, limit)
+		got, _, err := autotagBacklog(d, ffmpeg, []string{"wd", "joy"}, limit, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -437,6 +446,152 @@ func TestAutotagBacklogIsEachTaggersOwn(t *testing.T) {
 	check("the limit counts images, lowest ids first", true, 2,
 		autotagGroup{[]string{"wd", "joy"}, []int64{fresh}},
 		autotagGroup{[]string{"joy"}, []int64{wdOnly}})
+}
+
+func TestACappedAutotagTakesTheBacklogFromWhereTheLastRunStopped(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if err := db.Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	var good bytes.Buffer
+	if err := png.Encode(&good, image.NewRGBA(image.Rect(0, 0, 16, 12))); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 8 {
+		data := good.Bytes()
+		if i < 3 {
+			data = []byte("truncated download")
+		}
+		path := filepath.Join(dir, fmt.Sprintf("%d.png", i))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Write.Exec(`INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at)
+			VALUES (?, 'png', 1, ?, 0, datetime('now'))`, path, fmt.Sprintf("sha-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	taggertest.Use(t, map[string][]string{"stub": {"landscape"}})
+	mgr := jobs.NewManager()
+	s, host := newTestScheduler(t, config.ScheduleConfig{Autotag: &config.ScheduleAutotag{MaxImages: 3}})
+	s.jobs = mgr
+	host.tagger.Taggers = []config.TaggerInstance{{Name: "stub", Enabled: true, ConfidenceThreshold: 0.35}}
+	cx := &library.Gallery{Handle: gallery.Handle{Name: "default", DB: d, TagSvc: tags.New(d, nil)}}
+	at := time.Date(2026, 8, 23, 1, 0, 0, 0, time.UTC)
+	s.saveRun(at)
+
+	for night, want := range []struct {
+		stamped []int64
+		line    string
+	}{
+		{nil, "[default] Auto-tag: 0 images, 3 skipped, "},
+		{[]int64{4, 5, 6}, "[default] Auto-tag: 3 images (fake 3), "},
+		{[]int64{4, 5, 6, 7, 8}, "[default] Auto-tag: 2 images (fake 2), 1 skipped, "},
+	} {
+		s.clearLookup()
+		r, err := mgr.Reserve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.autotag(r, cx); err != nil {
+			t.Fatalf("night %d: %v", night+1, err)
+		}
+		r.Release()
+		stamped, err := db.QueryIDs(d.Read, `SELECT image_id FROM image_tagger_runs ORDER BY image_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(stamped, want.stamped) {
+			t.Errorf("night %d: images read = %v, want %v", night+1, stamped, want.stamped)
+		}
+		if lines := s.Status().AutotagInfo; len(lines) != 1 || !strings.HasPrefix(lines[0], want.line) {
+			t.Errorf("night %d: status = %q, want %q and the time", night+1, lines, want.line)
+		}
+	}
+	if st := s.readState(); !st.LastRun.Equal(at) || st.AutotagAfter["default"] != 1 {
+		t.Errorf("state = %+v, want the last run kept and the place after image 1", st)
+	}
+	host.sched.Autotag = nil
+	r, err := mgr.Reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.autotag(r, cx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.readState(); len(st.AutotagAfter) != 0 {
+		t.Errorf("state after a run nothing cut = %+v, want no place kept", st)
+	}
+}
+
+func TestAScheduleNamingNoWorkerLeavesOutATaggerOnlyAnOnDemandWorkerHolds(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if err := db.Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "pic.png")
+	var pic bytes.Buffer
+	if err := png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 16, 12))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, pic.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at)
+		VALUES (?, 'png', 1, 'sha', 0, datetime('now'))`, path); err != nil {
+		t.Fatal(err)
+	}
+
+	defs := []tagger.WorkerDef{{Name: "nas"}, {Name: "rented", OnDemand: true}}
+	taggertest.UsePool(t, map[string][]string{"wd": {"landscape"}}, defs[:1]...)
+	taggertest.UsePool(t, map[string][]string{"px": {"sky"}}, defs[1:]...)
+	p := tagger.NewPool("")
+	p.Set(defs)
+	p.Refresh(context.Background())
+	if err := p.Wake(context.Background(), []string{"rented"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	tagger.SetPool(p)
+
+	mgr := jobs.NewManager()
+	s, host := newTestScheduler(t, config.ScheduleConfig{})
+	s.jobs = mgr
+	host.tagger.Taggers = []config.TaggerInstance{{Name: "wd", Enabled: true, ConfidenceThreshold: 0.35}, {Name: "px", Enabled: true, ConfidenceThreshold: 0.35}}
+	cx := &library.Gallery{Handle: gallery.Handle{Name: "default", DB: d, TagSvc: tags.New(d, nil)}}
+	for _, step := range []struct {
+		workers []string
+		want    string
+	}{
+		{nil, "wd"},
+		{nil, "wd"},
+		{[]string{"rented"}, "px,wd"},
+	} {
+		host.sched.Autotag = &config.ScheduleAutotag{Workers: step.workers}
+		r, err := mgr.Reserve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.autotag(r, cx); err != nil {
+			t.Fatalf("workers %v: %v", step.workers, err)
+		}
+		r.Release()
+		var got string
+		if err := d.Read.QueryRow(`SELECT COALESCE(group_concat(tagger_name), '') FROM (SELECT tagger_name FROM image_tagger_runs ORDER BY 1)`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != step.want {
+			t.Errorf("workers %v: read by %q, want %q", step.workers, got, step.want)
+		}
+	}
 }
 
 func TestWorkersUpKeepsTheNamedWorkersThatCanTakeAJob(t *testing.T) {

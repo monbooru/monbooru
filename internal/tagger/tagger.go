@@ -112,7 +112,23 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	if len(taggers) == 0 {
 		return Result{}, fmt.Errorf("no tagger is enabled or available")
 	}
+	if only == nil {
+		all := taggers
+		if taggers = WithoutOnDemand(all); len(taggers) == 0 {
+			names := make([]string, len(all))
+			for i, t := range all {
+				names[i] = t.Name
+			}
+			return Result{}, fmt.Errorf("only a worker that starts on demand holds %s: name the worker for the job", strings.Join(names, ", "))
+		}
+	}
 	pool := currentPool()
+	started := time.Now()
+	if err := pool.Wake(ctx, only, func(name string, waited time.Duration) {
+		mgr.Update(0, len(ids), fmt.Sprintf("starting %s, %s", name, Spell(waited)))
+	}); err != nil {
+		return Result{}, err
+	}
 	database := h.DB
 	mangaCacheDir := gallery.MangaCacheDir(h.ThumbnailsPath)
 
@@ -187,12 +203,6 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	for i, g := range groups {
 		calls[i] = g.models
 	}
-	started := time.Now()
-	if err := pool.Wake(ctx, only, func(name string, waited time.Duration) {
-		mgr.Update(0, len(ids), fmt.Sprintf("starting %s, %s", name, Spell(waited)))
-	}); err != nil {
-		return Result{}, err
-	}
 	slots, remote := pool.JobSlots(calls, only)
 	parallel := min(prepareCount(cfg.Tagger, max(1, slots), remote), len(ids))
 	prep := make(semaphore, parallel)
@@ -237,6 +247,9 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		if err := database.Read.QueryRowContext(ctx,
 			`SELECT canonical_path, file_type FROM images WHERE id = ?`, imageID,
 		).Scan(&canonPath, &fileType); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logx.Warnf("tagger: skip image %d: lookup failed: %v", imageID, err)
 			skipped.Add(1)
 			return nil
@@ -266,7 +279,17 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		}
 		minHits := ResolveMinHits(cfg.Tagger.Aggregation.MinHitFraction, len(framePaths))
 		merged := mergeTaggers(taggers, plan, scores, minHits)
-		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), taggerNames); err != nil {
+		// A tagger whose every frame was refused did not read the image.
+		var ran []string
+		for i, name := range taggerNames {
+			if len(scores[i]) > 0 {
+				ran = append(ran, name)
+			}
+		}
+		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), ran); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logx.Warnf("tagger: store results for image %d: %v", imageID, err)
 			skipped.Add(1)
 			return nil

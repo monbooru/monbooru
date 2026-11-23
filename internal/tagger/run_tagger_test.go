@@ -2,6 +2,7 @@ package tagger
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"image/color"
 	"maps"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -290,5 +292,141 @@ func TestRunWithTaggers_SendsAnArchivesReadyPagesTogetherInOrder(t *testing.T) {
 		if r != uint8(10*i) {
 			t.Fatalf("frame %d reached the worker as page %d: the pages left their order (%v)", i, r/10, reds)
 		}
+	}
+}
+
+func runOn(t *testing.T, database *db.DB, ids []int64, only []string, names ...string) (Result, error) {
+	t.Helper()
+	mgr := jobs.NewManager()
+	if err := mgr.Start("autotag"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{}
+	cfg.Paths.DataPath = t.TempDir()
+	var taggers []TaggerStatus
+	for _, name := range names {
+		taggers = append(taggers, TaggerStatus{TaggerInstance: config.TaggerInstance{Name: name, Enabled: true, ConfidenceThreshold: 0.35}})
+	}
+	return RunOn(context.Background(), gallery.Handle{DB: database, TagSvc: tags.New(database, nil)}, cfg, ids, taggers, only, mgr)
+}
+
+func autoTags(t *testing.T, database *db.DB) []string {
+	t.Helper()
+	rows, err := database.Read.Query(`SELECT it.tagger_name || ':' || t.name FROM image_tags it JOIN tags t ON t.id = it.tag_id WHERE it.is_auto = 1 ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestAJobReadsAnOnDemandWorkersLabelsBeforeItPlans(t *testing.T) {
+	database := setupStoreResultsDB(t)
+	ids := insertPNGImages(t, database, 1)
+	rented := newFake(t, fakeModel{name: "wd", labels: labelsOf("cat", "dog")})
+	p := usePool(t, "", WorkerDef{Name: "rented", URL: serve(t, rented), Token: "tok", OnDemand: true})
+	if err := p.Wake(context.Background(), []string{"rented"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	etag := fmt.Sprintf("%q", t.Name()+"/replaced")
+	rented.Mu.Lock()
+	rented.Models[0].Digest, rented.Models[0].LabelsETag = "d-replaced", etag
+	rented.Labels["wd"] = worker.Labels{Model: "wd", ETag: etag, CategoryScheme: "wd14_numeric", Labels: labelsOf("dog", "cat")}
+	rented.Mu.Unlock()
+	if _, err := runOn(t, database, ids, []string{"rented"}, "wd"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := autoTags(t, database); !slices.Equal(got, []string{"wd:dog"}) {
+		t.Errorf("stored %v for a score of the worker's first label, want wd:dog", got)
+	}
+}
+
+func TestATaggerWhoseEveryFrameIsRefusedKeepsItsTagsAndIsNotStamped(t *testing.T) {
+	database := setupStoreResultsDB(t)
+	ids := insertPNGImages(t, database, 1)
+	f := useFakeWorker(t, fakeModel{name: "wd", labels: labelsOf("landscape")}, fakeModel{name: "px", labels: labelsOf("sky")})
+	if _, err := runOn(t, database, ids, nil, "wd", "px"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := database.Write.Exec(`DELETE FROM image_tagger_runs`); err != nil {
+		t.Fatal(err)
+	}
+	f.Mu.Lock()
+	f.Score = func(model string, _ []byte) worker.FrameScores {
+		if model == "px" {
+			return worker.FrameScores{Err: "CUDA out of memory"}
+		}
+		return worker.FrameScores{I: []int32{0}, S: []float32{0.9}}
+	}
+	f.Mu.Unlock()
+	if res, err := runOn(t, database, ids, nil, "wd", "px"); err != nil || res.Total() != 1 {
+		t.Fatalf("run with px refusing: %+v, %v", res, err)
+	}
+	if got := autoTags(t, database); !slices.Equal(got, []string{"px:sky", "wd:landscape"}) {
+		t.Errorf("tags = %v, want px's earlier tag kept", got)
+	}
+	var stamped string
+	if err := database.Read.QueryRow(`SELECT group_concat(tagger_name) FROM image_tagger_runs`).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != "wd" {
+		t.Errorf("stamped as read by %q, want wd alone", stamped)
+	}
+}
+
+func TestAFailedCallDoesNotCountTheImagesItCancelsAsSkipped(t *testing.T) {
+	database := setupStoreResultsDB(t)
+
+	ids := insertPNGImages(t, database, 8)
+	f := newFake(t, fakeModel{name: "wd", labels: labelsOf("landscape")})
+	readers := database.Read.Stats().MaxOpenConnections
+	held := make(chan *sql.Conn, readers)
+	holding := make(chan struct{})
+	var calls atomic.Int32
+	usePool(t, "", WorkerDef{Name: "fake", URL: serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != worker.PathTag {
+			f.ServeHTTP(w, r)
+			return
+		}
+		if calls.Add(1) != 1 {
+			<-holding
+			f.ServeHTTP(w, r)
+			return
+		}
+
+		for range readers {
+			c, err := database.Read.Conn(context.Background())
+			if err != nil {
+				t.Error(err)
+				break
+			}
+			held <- c
+		}
+		close(holding)
+		waited := database.Read.Stats().WaitCount
+		for deadline := time.Now().Add(5 * time.Second); database.Read.Stats().WaitCount == waited && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		http.Error(w, `{"error":"worker gone"}`, http.StatusInternalServerError)
+	})), Token: "tok"})
+	res, err := runOn(t, database, ids, nil, "wd")
+	close(held)
+	for c := range held {
+		_ = c.Close()
+	}
+	if err == nil {
+		t.Fatal("run: want the worker's failure")
+	}
+	if res.Skipped != 0 {
+		t.Errorf("skipped = %d, want the cancelled images left out of the count", res.Skipped)
 	}
 }

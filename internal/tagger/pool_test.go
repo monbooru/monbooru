@@ -3,6 +3,7 @@ package tagger
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -13,7 +14,10 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
+	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/shared/worker"
+	"github.com/monbooru/monbooru/internal/tags"
 )
 
 func tagOne(t *testing.T, p *Pool, priority string) (worker.TagResponse, error) {
@@ -69,6 +73,32 @@ func TestATransportFailureGoesToAnotherWorker(t *testing.T) {
 		if w.Name == "a" && w.Up {
 			t.Error("a is still up after its call failed")
 		}
+	}
+}
+
+func TestAWorkerThatStopsAnsweringIsDownAndItsCallGoesToAnother(t *testing.T) {
+	silent := newFake(t, wd())
+	good := &counting{f: newFake(t, wd())}
+	p := usePool(t, "",
+		WorkerDef{Name: "a", URL: serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == worker.PathTag {
+
+				_, _ = io.Copy(io.Discard, r.Body)
+				<-r.Context().Done()
+				return
+			}
+			silent.ServeHTTP(w, r)
+		})), Token: "tok"},
+		WorkerDef{Name: "b", URL: serve(t, good), Token: "tok"})
+	p.httpClient.Timeout = 100 * time.Millisecond
+	if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+		t.Fatalf("tag: %v", err)
+	}
+	if good.n() != 1 {
+		t.Errorf("b served %d calls, want 1", good.n())
+	}
+	if w := p.Workers()[0]; w.Up {
+		t.Error("a is still up after its call timed out")
 	}
 }
 
@@ -518,6 +548,26 @@ func TestAWorkerBehindAGatewayIsCalledWithBothTokens(t *testing.T) {
 	}
 }
 
+func TestAWorkersRedirectIsNotFollowed(t *testing.T) {
+	var reached atomic.Int32
+	other := serve(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Add(1) }))
+	def := WorkerDef{Name: "moved", URL: serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other+r.URL.Path, http.StatusTemporaryRedirect)
+	})), Token: "tok", Gateway: "gateway-key"}
+	p := NewPool("")
+	var se *worker.StatusError
+	if _, err := p.Probe(context.Background(), def); !errors.As(err, &se) || se.Status != http.StatusTemporaryRedirect {
+		t.Errorf("probe: %v, want the worker's 307", err)
+	}
+	c := worker.Client{BaseURL: def.URL, Token: def.Token, Gateway: def.Gateway, HTTP: p.httpClient}
+	if _, err := c.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}); !errors.As(err, &se) || se.Status != http.StatusTemporaryRedirect {
+		t.Errorf("tag: %v, want the worker's 307", err)
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("the host redirected to was called %d times", n)
+	}
+}
+
 type asleep struct {
 	f    *worker.Fake
 	mu   sync.Mutex
@@ -600,6 +650,52 @@ func TestAnOnDemandWorkerIsLeftAloneUntilAJobNamesIt(t *testing.T) {
 	}
 }
 
+func TestAJobNamingNoWorkerLeavesOutATaggerOnlyAnOnDemandWorkerHolds(t *testing.T) {
+	database := setupStoreResultsDB(t)
+	ids := insertPNGImages(t, database, 2)
+	p := usePool(t, "",
+		WorkerDef{Name: "nas", URL: serve(t, newFake(t, fakeModel{name: "wd", labels: labelsOf("landscape")})), Token: "tok"},
+		WorkerDef{Name: "rented", URL: serve(t, newFake(t, fakeModel{name: "px", labels: labelsOf("sky")})), Token: "tok", OnDemand: true})
+	if err := p.Wake(context.Background(), []string{"rented"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{}
+	cfg.Paths.DataPath = t.TempDir()
+	cfg.Tagger.Taggers = []config.TaggerInstance{{Name: "wd", Enabled: true, ConfidenceThreshold: 0.35}, {Name: "px", Enabled: true, ConfidenceThreshold: 0.35}}
+	run := func(only []string, name string) (Result, error) {
+		t.Helper()
+		taggers, err := SelectForGallery(cfg, "default", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mgr := jobs.NewManager()
+		if err := mgr.Start("autotag"); err != nil {
+			t.Fatal(err)
+		}
+		return RunOn(context.Background(), gallery.Handle{DB: database, TagSvc: tags.New(database, nil)}, cfg, ids, taggers, only, mgr)
+	}
+	stamped := func() (out string) {
+		t.Helper()
+		if err := database.Read.QueryRow(`SELECT COALESCE(group_concat(DISTINCT tagger_name), '') FROM image_tagger_runs`).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	if res, err := run(nil, ""); err != nil || res.Total() != 2 {
+		t.Fatalf("every enabled tagger, no worker named: %+v, %v, want wd run on both images", res, err)
+	}
+	if got := stamped(); got != "wd" {
+		t.Errorf("read by %q, want wd alone", got)
+	}
+	if _, err := run(nil, "px"); err == nil || !strings.Contains(err.Error(), "on demand") {
+		t.Errorf("px alone, no worker named: %v, want a failure that names the cause", err)
+	}
+	if res, err := run([]string{"rented"}, "px"); err != nil || res.Tagged["rented"] != 2 {
+		t.Errorf("px on the worker named: %+v, %v", res, err)
+	}
+}
+
 func TestWakeGivesUpOnAWorkerThatRefusesTheToken(t *testing.T) {
 	f := newFake(t, wd())
 	p := usePool(t, "", WorkerDef{Name: "rented", URL: serve(t, f), Token: "wrong", OnDemand: true})
@@ -610,6 +706,32 @@ func TestWakeGivesUpOnAWorkerThatRefusesTheToken(t *testing.T) {
 	if v := p.Workers()[0]; v.Up || !v.Checked {
 		t.Errorf("after a failed start: %+v, want it down", v)
 	}
+}
+
+func TestTheWorkersAreSavedWhileTheyAreCalled(t *testing.T) {
+	defs := []WorkerDef{
+		{Name: "a", URL: serve(t, newFake(t, wd())), Token: "tok"},
+		{Name: "rented", URL: serve(t, newFake(t, wd())), Token: "tok", OnDemand: true}}
+	p := usePool(t, "", defs...)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for ctx.Err() == nil {
+			p.Set(defs)
+		}
+	})
+	for range 20 {
+		if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+			t.Errorf("tag: %v", err)
+		}
+		p.Refresh(ctx)
+		p.Glance(ctx)
+		if err := p.Wake(ctx, []string{"rented"}, nil); err != nil {
+			t.Errorf("wake: %v", err)
+		}
+	}
+	cancel()
+	wg.Wait()
 }
 
 func TestSpell(t *testing.T) {

@@ -516,8 +516,10 @@ type autotagGroup struct {
 
 // autotagBacklog is, for each tagger, the visible images it never read,
 // lowest ids first and limit at most (0 for all), grouped by the taggers
-// an image lacks so that one already read is not read again.
-func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int) ([]autotagGroup, error) {
+// an image lacks so that one already read is not read again. When the
+// limit cuts, the ids past after come first, then the lower ones, and last
+// is the final one taken; it is 0 when nothing was cut.
+func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int, after int64) (_ []autotagGroup, last int64, _ error) {
 	q := `SELECT id FROM images i WHERE is_missing = 0
 		AND NOT EXISTS (SELECT 1 FROM image_tagger_runs r WHERE r.image_id = i.id AND r.tagger_name = ?)`
 	if !ffmpeg {
@@ -533,7 +535,7 @@ func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int) ([]autot
 	for _, name := range taggers {
 		ids, err := db.QueryIDs(d.Read, q, name)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, id := range ids {
 			lacks[id] = append(lacks[id], name)
@@ -541,7 +543,9 @@ func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int) ([]autot
 	}
 	ids := slices.Sorted(maps.Keys(lacks))
 	if limit > 0 && len(ids) > limit {
-		ids = ids[:limit]
+		i, _ := slices.BinarySearch(ids, after+1)
+		ids = slices.Concat(ids[i:], ids[:i])[:limit]
+		last = ids[limit-1]
 	}
 	var groups []autotagGroup
 	at := map[string]int{}
@@ -555,7 +559,7 @@ func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int) ([]autot
 		}
 		groups[g].ids = append(groups[g].ids, id)
 	}
-	return groups, nil
+	return groups, last, nil
 }
 
 func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
@@ -565,6 +569,9 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	if len(opts.Taggers) > 0 {
 		enabled = slices.DeleteFunc(enabled, func(t tagger.TaggerStatus) bool { return !slices.Contains(opts.Taggers, t.Name) })
 	}
+	if len(opts.Workers) == 0 {
+		enabled = tagger.WithoutOnDemand(enabled)
+	}
 	if len(enabled) == 0 {
 		return nil
 	}
@@ -572,7 +579,8 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	for i, t := range enabled {
 		names[i] = t.Name
 	}
-	groups, err := autotagBacklog(cx.DB, gallery.FFmpegAvailable(), names, opts.MaxImages)
+	after := s.readState().AutotagAfter[cx.Name]
+	groups, last, err := autotagBacklog(cx.DB, gallery.FFmpegAvailable(), names, opts.MaxImages, after)
 	if err != nil {
 		logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
 		return err
@@ -590,9 +598,15 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	started := time.Now()
 	total := tagger.Result{Tagged: map[string]int{}}
 	defer func() {
-		if n := total.Total(); n > 0 {
-			s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %d %s%s, %s.", cx.Name, n, models.Plural(n, "image", "images"), total.Workers(), time.Since(started).Round(time.Second)))
+		n := total.Total()
+		if n == 0 && total.Skipped == 0 {
+			return
 		}
+		skipped := ""
+		if total.Skipped > 0 {
+			skipped = fmt.Sprintf(", %d skipped", total.Skipped)
+		}
+		s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %d %s%s%s, %s.", cx.Name, n, models.Plural(n, "image", "images"), total.Workers(), skipped, time.Since(started).Round(time.Second)))
 	}()
 	for _, g := range groups {
 		if r.Cancelled() {
@@ -608,6 +622,7 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 		for name, n := range res.Tagged {
 			total.Tagged[name] += n
 		}
+		total.Skipped += res.Skipped
 		finished, err := tagger.Settle(ctx, s.jobs, "["+cx.Name+"] ", "", len(g.ids), res, err)
 		if finished {
 			peak(fmt.Sprintf("scheduled %s %d %s", cx.Name, len(g.ids), models.Plural(len(g.ids), "image", "images")))
@@ -616,6 +631,18 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 			logx.Warnf("scheduler autotag %q: %v", cx.Name, err)
 			return err
 		}
+	}
+	if last != after {
+		s.updateState(func(st *state) {
+			if last == 0 {
+				delete(st.AutotagAfter, cx.Name)
+				return
+			}
+			if st.AutotagAfter == nil {
+				st.AutotagAfter = map[string]int64{}
+			}
+			st.AutotagAfter[cx.Name] = last
+		})
 	}
 	return nil
 }
@@ -704,23 +731,33 @@ func (s *Scheduler) Status() Status {
 
 type state struct {
 	LastRun time.Time `toml:"last_scheduled_run"`
+	// AutotagAfter is, per gallery, the last image a capped auto-tag took.
+	AutotagAfter map[string]int64 `toml:"autotag_after,omitempty"`
 }
 
 // LastRun is the last pass the state file records.
-func (s *Scheduler) LastRun() time.Time {
+func (s *Scheduler) LastRun() time.Time { return s.readState().LastRun }
+
+func (s *Scheduler) readState() state {
 	var st state
 	if _, err := toml.DecodeFile(s.statePath, &st); err != nil {
 		if !os.IsNotExist(err) {
 			logx.Warnf("schedule state: %v", err)
 		}
-		return time.Time{}
+		return state{}
 	}
-	return st.LastRun
+	return st
 }
 
 func (s *Scheduler) saveRun(at time.Time) {
+	s.updateState(func(st *state) { st.LastRun = at.UTC() })
+}
+
+func (s *Scheduler) updateState(change func(*state)) {
+	st := s.readState()
+	change(&st)
 	err := fsx.WriteAtomic(s.statePath, ".state.toml.*", func(f *os.File) error {
-		return toml.NewEncoder(f).Encode(state{LastRun: at.UTC()})
+		return toml.NewEncoder(f).Encode(st)
 	})
 	if err != nil {
 		logx.Warnf("schedule state: %v", err)

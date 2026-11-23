@@ -88,7 +88,11 @@ type Pool struct {
 
 // NewPool keeps each worker's descriptions in dir; "" keeps them in memory.
 func NewPool(dir string) *Pool {
-	p := &Pool{dir: dir, httpClient: &http.Client{Timeout: 10 * time.Minute}, changed: make(chan struct{}, 1), far: farAddress}
+	p := &Pool{dir: dir, httpClient: &http.Client{
+		Timeout: 10 * time.Minute,
+		// A redirect would carry the frames, and the token behind a gateway, to another host.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, changed: make(chan struct{}, 1), far: farAddress}
 	p.free = sync.NewCond(&p.mu)
 	return p
 }
@@ -242,17 +246,16 @@ func (p *Pool) Peek(ctx context.Context) {
 
 func (p *Pool) refresh(ctx context.Context, glance bool) {
 	p.mu.Lock()
-	ws := slices.Clone(p.workers)
-	up, busy := map[*poolWorker]bool{}, map[*poolWorker]bool{}
-	for _, w := range ws {
-		up[w], busy[w] = w.up, w.inUse > 0
+	var ws []*poolWorker
+	for _, w := range p.workers {
+		if w.def.Paused || w.def.OnDemand || w.def.URL == "" || glance && (!w.up || w.inUse > 0) {
+			continue
+		}
+		ws = append(ws, w)
 	}
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, w := range ws {
-		if w.def.Paused || w.def.OnDemand || w.def.URL == "" || glance && (!up[w] || busy[w]) {
-			continue
-		}
 		wg.Go(func() { _ = p.refreshOne(ctx, w, glance, 30*time.Second) })
 	}
 	wg.Wait()
@@ -309,21 +312,23 @@ var (
 func (p *Pool) Wake(ctx context.Context, names []string, tick func(name string, waited time.Duration)) error {
 	p.mu.Lock()
 	var ws []*poolWorker
+	var found []string
 	for _, w := range p.workers {
 		if w.def.OnDemand && !w.def.Paused && slices.Contains(names, w.def.Name) {
 			ws = append(ws, w)
+			found = append(found, w.def.Name)
 		}
 	}
 	p.mu.Unlock()
-	for _, w := range ws {
-		if err := p.wake(ctx, w, tick); err != nil {
-			return fmt.Errorf("worker %s did not start: %w", w.def.Name, err)
+	for i, w := range ws {
+		if err := p.wake(ctx, w, found[i], tick); err != nil {
+			return fmt.Errorf("worker %s did not start: %w", found[i], err)
 		}
 	}
 	return nil
 }
 
-func (p *Pool) wake(ctx context.Context, w *poolWorker, tick func(string, time.Duration)) error {
+func (p *Pool) wake(ctx context.Context, w *poolWorker, name string, tick func(string, time.Duration)) error {
 	set := func(on bool) {
 		p.mu.Lock()
 		w.waking = on
@@ -358,7 +363,7 @@ func (p *Pool) wake(ctx context.Context, w *poolWorker, tick func(string, time.D
 			return err
 		case <-t.C:
 			if tick != nil {
-				tick(w.def.Name, time.Since(started))
+				tick(name, time.Since(started))
 			}
 		}
 	}
@@ -441,14 +446,17 @@ func (p *Pool) Workers() []WorkerView {
 
 // heldModel is a model as the pool sees it: the worker whose copy counts
 // (the first that lists it), whether a worker that holds that copy can run
-// it now, and whether another worker's copy differs.
+// it now, whether one of those is not on demand and so takes the calls of a
+// job that names no worker (standing), and whether another worker's copy
+// differs.
 type heldModel struct {
-	model   worker.Model
-	labels  worker.Labels
-	owner   string
-	usable  bool
-	differs bool
-	catalog *worker.CatalogEntry
+	model    worker.Model
+	labels   worker.Labels
+	owner    string
+	usable   bool
+	standing bool
+	differs  bool
+	catalog  *worker.CatalogEntry
 }
 
 // held lists every model a worker holds, in worker order. Caller holds
@@ -469,6 +477,7 @@ func (p *Pool) held() ([]string, map[string]*heldModel) {
 			}
 			if m.Ready && runnable(w) {
 				h.usable = true
+				h.standing = h.standing || !w.def.OnDemand
 			}
 		}
 	}
@@ -682,17 +691,18 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 			return worker.TagResponse{}, "", err
 		}
 		p.mu.Lock()
-		client := w.client
+		client, name := w.client, w.def.Name
 		p.mu.Unlock()
 		resp, err := client.Tag(ctx, req, frames)
 		p.release(w)
 		if err == nil {
-			return resp, w.def.Name, nil
+			return resp, name, nil
 		}
-		if !worker.IsTransport(err) {
-			return worker.TagResponse{}, "", fmt.Errorf("worker %s: %w", w.def.Name, err)
+		silent := ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+		if !worker.IsTransport(err) && !silent {
+			return worker.TagResponse{}, "", fmt.Errorf("worker %s: %w", name, err)
 		}
-		lastErr = fmt.Errorf("worker %s: %w", w.def.Name, err)
+		lastErr = fmt.Errorf("worker %s: %w", name, err)
 		p.markDown(w, err)
 		skip[w] = true
 	}
