@@ -18,7 +18,7 @@
               onclick="toggleFavFilter()" title="Show favorites (F)" aria-label="Show favorites">♥&#xFE0E;</button>
       <button type="button" id="random-sort-btn" class="{{if eq .Sort "random"}}active{{end}}"
               onclick="applyRandomSort()" title="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}} (R)" aria-label="{{if eq .Sort "random"}}Re-shuffle{{else}}Random order{{end}}">⇄</button>
-      <button type="button" id="slideshow-btn" onclick="slideshow.start(this)" title="Slideshow of the selection or search (w)" aria-label="Slideshow">▶&#xFE0E;</button>
+      <button type="button" id="viewer-btn" onclick="viewer.start(this)" title="View the selection or search (v)" aria-label="Viewer">▶&#xFE0E;</button>
     </span>
   </form>
   <div class="gallery-header-end">
@@ -294,7 +294,7 @@
   </div>
 </dialog>
 
-{{template "partials/slideshow.html"}}
+{{template "partials/viewer.html"}}
 
 
 <script>

@@ -13,9 +13,11 @@
 {{$pagesHref := printf "/images/%d/pages%s#page-%d" .Image.ID .BackQS .Page}}
 <body class="reader-body" data-gallery="{{.ActiveGallery}}">
   <main id="reader" data-image-id="{{.Image.ID}}" data-page="{{.Page}}" data-total="{{.PageCount}}" data-detail-url="{{$detailHref}}">
+    <script>try { if (localStorage.getItem('monbooru_bar_hidden') === '1') document.getElementById('reader').classList.add('bar-hidden'); } catch (e) {}</script>
     <div id="page-notice" class="degraded-banner" hidden></div>
     <div class="reader-stage">
       <img src="/images/{{.Image.ID}}/page/{{.Page}}" alt="Page {{.Page}}" class="reader-img">
+      <button type="button" class="bar-handle" onclick="toggleBar(document.getElementById('reader'))" title="Show the bar (b)">bar</button>
       {{if gt .Page 1}}
       <a class="reader-side reader-side-prev" href="/images/{{.Image.ID}}/read?page={{sub .Page 1}}{{.BackKVQS}}" title="Previous page (←)" aria-label="Previous page">‹</a>
       {{else}}
@@ -55,6 +57,7 @@
         <button type="submit" title="Extract page as image (e)">Extract</button>
       </form>
       <a class="reader-open" href="/images/{{.Image.ID}}/page/{{.Page}}" target="_blank" rel="noopener" title="Open page in new tab (o)">↗</a>
+      <button type="button" class="reader-hide" onclick="toggleBar(document.getElementById('reader'))" title="Hide the bar (b)">Hide</button>
     </nav>
   </main>
   <dialog id="reader-jump-dialog">

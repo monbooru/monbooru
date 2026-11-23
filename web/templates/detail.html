@@ -80,11 +80,6 @@
         {{else}}
         <span class="nav-arrow nav-arrow-placeholder" aria-hidden="true">Next →</span>
         {{end}}
-        {{if or .PrevID .NextID}}
-        <button type="button" id="slideshow-btn" class="nav-arrow" onclick="slideshow.start(this)"
-                data-start="{{.Image.ID}}" data-q="{{.BackQuery}}" data-sort="{{.BackSort}}" data-order="{{.BackOrder}}" data-seed="{{if .BackSeed}}{{.BackSeed}}{{end}}" data-next="{{if .NextID}}{{deref64 .NextID}}{{end}}" data-back="{{.BackQS}}"
-                title="Slideshow from this image (w)">▶&#xFE0E;</button>
-        {{end}}
       </div>
       <div class="detail-actions">
         <form id="inbox-form" hx-post="/images/{{.Image.ID}}/inbox"
@@ -103,9 +98,11 @@
             {{if .Image.IsFavorited}}♥&#xFE0E;{{else}}♡{{end}}
           </button>
         </form>
-        {{if and (not (or (eq .Image.FileType "mp4") (eq .Image.FileType "webm"))) (not .IsManga) (not .Image.IsMissing)}}
-        <button type="button" class="btn-sm btn-view" title="View image (v)"
-                onclick="lightbox.open(null, '/images/{{.Image.ID}}/view')">⛶</button>
+        {{$playable := and (not .IsManga) (not .Image.IsMissing)}}
+        {{if or .PrevID .NextID $playable}}
+        <button type="button" id="viewer-btn" class="btn-sm btn-view" onclick="viewer.start(this)"
+                data-start="{{.Image.ID}}"{{if $playable}} data-playable="1"{{end}}{{if or (eq .Image.FileType "mp4") (eq .Image.FileType "webm")}} data-video="1"{{end}}{{if or .PrevID .NextID}} data-walk="1"{{end}} data-q="{{.BackQuery}}" data-sort="{{.BackSort}}" data-order="{{.BackOrder}}" data-seed="{{if .BackSeed}}{{.BackSeed}}{{end}}" data-next="{{if .NextID}}{{deref64 .NextID}}{{end}}" data-back="{{.BackQS}}"
+                title="View, and play the search from this image (v)">▶&#xFE0E;</button>
         {{end}}
         <a href="/images/{{.Image.ID}}/file" download class="btn-sm" title="Download image">⤓</a>
       </div>
@@ -524,7 +521,7 @@
         </div>
         {{else}}
         <div class="detail-media-frame{{if .BoxW}} detail-media-sized{{end}}"{{if .BoxW}} style="--w:{{.BoxW}};--h:{{.BoxH}}"{{end}}>
-          <a href="/images/{{.Image.ID}}/view" target="_blank"{{if not .Image.IsMissing}} class="detail-img-link" onclick="return lightbox.open(event, this.href)"{{end}}>
+          <a href="/images/{{.Image.ID}}/view" target="_blank"{{if not .Image.IsMissing}} class="detail-img-link" onclick="return viewer.click(event)"{{end}}>
             <img src="/images/{{.Image.ID}}/view" alt="image {{.Image.ID}}" class="detail-img"{{if .Placeholder}}
                  style="background-image:url('/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg');color:transparent" onload="this.style.backgroundImage='none'"{{end}}
                  onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='/thumbnails/{{.ActiveGallery}}/{{.Image.ID}}.jpg';}else{this.onerror=null;}">
@@ -1144,7 +1141,7 @@
   </div>
 </div>
 
-{{template "partials/slideshow.html"}}
+{{template "partials/viewer.html"}}
 
 {{template "layout_end" .}}
 {{end}}

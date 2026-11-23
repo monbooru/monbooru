@@ -335,8 +335,7 @@ function activeSurfaces() {
   if (isSettingsPage())   s.push('settings');
   if (document.getElementById('pages-grid-page')) s.push('pages');
   if (document.getElementById('relations-session-page')) s.push('relations');
-  if (document.querySelector('.detail-img-link')) s.push('lightbox');
-  if (document.getElementById('slideshow-btn')) s.push('slideshow');
+  if (document.getElementById('viewer-btn')) s.push('viewer');
   return s;
 }
 
@@ -557,48 +556,17 @@ function zoomer(stage, opts) {
   };
 }
 
-var lightbox = (function () {
-  var dlg = null, img = null, openLink = null, zoom = null;
+function barHidden() {
+  try { return localStorage.getItem('monbooru_bar_hidden') === '1'; } catch (e) { return false; }
+}
+function toggleBar(host) {
+  var hidden = host.classList.toggle('bar-hidden');
+  try { localStorage.setItem('monbooru_bar_hidden', hidden ? '1' : '0'); } catch (e) {}
+}
 
-  function ensure() {
-    if (dlg) return true;
-    dlg = document.getElementById('image-lightbox');
-    if (!dlg) return false;
-    img = document.getElementById('lightbox-img');
-    openLink = document.getElementById('lightbox-open');
-    zoom = zoomer(document.getElementById('lightbox-stage'), {
-      label: document.getElementById('lightbox-zoom'),
-      onOutside: function () { dlg.close(); },
-    });
-    dlg.addEventListener('close', function () { zoom.attach(null); });
-    document.getElementById('lightbox-close').addEventListener('click', function () { dlg.close(); });
-    return true;
-  }
-  return {
-    open: function (e, src) {
-      // Modifier and middle clicks keep the link's own navigation: a
-      // truthy return leaves the default alone.
-      if (e && (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey)) return true;
-      if (!ensure()) return true;
-      if (e && e.preventDefault) e.preventDefault();
-      img.src = src;
-      openLink.href = src;
-      if (!dlg.open) dlg.showModal();
-      zoom.attach(img);
-      return false;
-    },
-    handleKey: function (e) {
-      if (!dlg || !dlg.open || chorded(e)) return false;
-      var t = e.target.tagName.toLowerCase();
-      if (t === 'input' || t === 'textarea' || e.target.isContentEditable) return false;
-      return zoom.handleKey(e);
-    },
-  };
-})();
-
-var slideshow = (function () {
+var viewer = (function () {
   var durations = [2, 3, 5, 10, 15, 30];
-  var dlg = null, slots = [], message = null, position = null, durationSelect = null, documentBound = false;
+  var dlg = null, slots = [], message = null, position = null, durationSelect = null, openLink = null, zoom = null, documentBound = false;
   var ids = [], videos = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
   var playing = true, muted = true, looping = false;
@@ -606,7 +574,7 @@ var slideshow = (function () {
   var displayEpoch = 0, preloadEpoch = 0;
   var autoTimer = null, skipTimer = null;
   var leavingFullscreen = false, restacks = 0;
-  var detailStart = 0, detailBack = '';
+  var detailStart = 0, detailBack = '', runEpoch = 0, afterShow = null;
   var actions = {
     first: function () { go(-ids.length); },
     previous: function () { go(-1); },
@@ -617,9 +585,10 @@ var slideshow = (function () {
     loop: toggleLoop,
     mute: toggleMuted,
     fullscreen: toggleFullscreen,
+    bar: function () { toggleBar(dlg); },
     exit: function () { dlg.close(); },
   };
-  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen' };
+  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar' };
 
   function readDuration() {
     var seconds = 5;
@@ -631,7 +600,7 @@ var slideshow = (function () {
     return { id: id, video: video, src: '/images/' + id + (video ? '/file' : '/view') };
   }
   function setMessage(text) { message.textContent = text; }
-  function button(action) { return dlg.querySelector('[data-slideshow="' + action + '"]'); }
+  function button(action) { return dlg.querySelector('[data-viewer="' + action + '"]'); }
   function currentVideo() { return current && current.video ? slots[visibleSlot].querySelector('video') : null; }
 
   function clearSlot(slot) {
@@ -712,6 +681,15 @@ var slideshow = (function () {
       schedule();
     }
     updateControls();
+    // After the controls: the bar's height sets the stage's, which the readout is measured on.
+    zoom.attach(current.video ? null : slide.media);
+    openLink.href = current.src;
+    if (afterShow) {
+      var merge = afterShow;
+      afterShow = null;
+      merge();
+      return;
+    }
     prefetch(index + 1);
   }
   function prefetch(i) {
@@ -735,8 +713,21 @@ var slideshow = (function () {
 
   function schedule() {
     clearTimeout(autoTimer);
-    if (!dlg.open || !current || current.video || !playing) return;
+    if (!dlg.open || !current || current.video || !playing || startedAt === null) return;
     autoTimer = setTimeout(advance, remainingMs - (Date.now() - startedAt));
+  }
+  // The timer waits while an image is zoomed.
+  function zoomChanged() {
+    if (!current || current.video || !playing) return;
+    if (zoom.atFit()) {
+      if (startedAt !== null) return;
+      startedAt = Date.now();
+      schedule();
+    } else if (startedAt !== null) {
+      remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
+      startedAt = null;
+      clearTimeout(autoTimer);
+    }
   }
   function advance() {
     if (!dlg.open || !playing) return;
@@ -755,7 +746,7 @@ var slideshow = (function () {
   }
   function resume() {
     playing = true;
-    if (current && !current.video) startedAt = Date.now();
+    if (current && !current.video && zoom.atFit()) startedAt = Date.now();
     var v = currentVideo();
     if (v) playOrWait(v);
     schedule();
@@ -817,9 +808,10 @@ var slideshow = (function () {
   function updateControls() {
     var isVideo = !!(current && current.video);
     position.textContent = (index + 1) + ' / ' + ids.length;
-    dlg.querySelector('.slideshow-play-label').textContent = playing ? 'Pause' : 'Play';
-    dlg.querySelectorAll('[data-slideshow="first"], [data-slideshow="previous"]').forEach(function (b) { b.disabled = index <= 0; });
-    dlg.querySelectorAll('[data-slideshow="next"], [data-slideshow="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
+    dlg.querySelector('.viewer-play-label').textContent = playing ? 'Pause' : 'Play';
+    dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
+    dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
+    button('play').disabled = ids.length < 2 && !isVideo;
     button('restart').disabled = !isVideo;
     var loop = button('loop');
     loop.setAttribute('aria-pressed', String(looping));
@@ -836,22 +828,33 @@ var slideshow = (function () {
     clearTimeout(skipTimer);
     prepared = null;
     current = null;
+    afterShow = null;
+    runEpoch++;
+    zoom.attach(null);
     slots.forEach(clearSlot);
     if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
   }
   function ensure() {
     if (dlg && dlg.isConnected) return true;
-    dlg = document.getElementById('slideshow-dialog');
+    dlg = document.getElementById('viewer-dialog');
     if (!dlg) return false;
-    slots = Array.from(dlg.querySelectorAll('.slideshow-slot'));
-    message = document.getElementById('slideshow-message');
-    position = document.getElementById('slideshow-position');
-    durationSelect = document.getElementById('slideshow-duration');
+    slots = Array.from(dlg.querySelectorAll('.viewer-slot'));
+    message = document.getElementById('viewer-message');
+    position = document.getElementById('viewer-position');
+    durationSelect = document.getElementById('viewer-duration');
     dlg.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-slideshow]');
-      if (b) actions[b.dataset.slideshow]();
+      var b = e.target.closest('[data-viewer]');
+      if (b) actions[b.dataset.viewer]();
     });
-    onSwipe(dlg.querySelector('.slideshow-stage'), actions.previous, actions.next);
+    openLink = document.getElementById('viewer-open');
+    var stage = dlg.querySelector('.viewer-stage');
+    zoom = zoomer(stage, {
+      label: document.getElementById('viewer-zoom'),
+      swipe: true,
+      onChange: zoomChanged,
+      onOutside: function () { dlg.close(); },
+    });
+    onSwipe(stage, function () { if (zoom.atFit()) actions.previous(); }, function () { if (zoom.atFit()) actions.next(); });
     dlg.addEventListener('close', function () {
       if (restacks) { restacks--; return; }
       var id = index >= 0 ? ids[index] : 0;
@@ -885,13 +888,14 @@ var slideshow = (function () {
     // On the document: a button disabled under focus drops it out of the dialog.
     document.addEventListener('keydown', function (e) {
       if (!dlg || !dlg.open || chorded(e) || e.target.tagName === 'SELECT') return;
+      if (zoom.handleKey(e)) return;
       var action = keys[e.key];
       if (!action) return;
       e.preventDefault();
       actions[action]();
     });
     // In fullscreen the browser keeps Esc to itself, so a fullscreen exit
-    // the slideshow did not ask for is that Esc.
+    // the viewer did not ask for is that Esc.
     document.addEventListener('fullscreenchange', function () {
       if (document.fullscreenElement || !dlg) return;
       if (dlg.open && !leavingFullscreen) dlg.close();
@@ -899,14 +903,49 @@ var slideshow = (function () {
     });
   }
 
+  function open(list, videoList, at) {
+    ids = list;
+    videos = new Set(videoList);
+    index = -1;
+    current = null;
+    prepared = null;
+    visibleSlot = 0;
+    playing = false;
+    muted = true;
+    looping = false;
+    durationMs = readDuration() * 1000;
+    durationSelect.value = String(durationMs / 1000);
+    updateControls();
+    document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
+    dlg.classList.toggle('bar-hidden', barHidden());
+    dlg.showModal();
+    show(at);
+  }
+
   return {
+    // The image link: modifier and middle clicks keep its own navigation.
+    click: function (e) {
+      if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) return true;
+      var btn = document.getElementById('viewer-btn');
+      if (!btn) return true;
+      e.preventDefault();
+      viewer.start(btn);
+      return false;
+    },
     start: function (btn) {
       if (!ensure() || dlg.open) return;
       var flash = document.querySelector('[data-action-flash]');
       var startID = Number(btn.dataset.start) || 0;
       var firstID = startID;
+      var run = ++runEpoch;
       var params;
+      detailStart = startID;
+      detailBack = btn.dataset.back || '';
+      // The page already holds this image, so it shows before the search answers.
+      var shown = startID && btn.dataset.playable === '1';
+      if (shown) open([startID], btn.dataset.video === '1' ? [startID] : [], 0);
       if (startID) {
+        if (!btn.dataset.walk) return;
         params = new URLSearchParams({ scope: 'search', q: btn.dataset.q, sort: btn.dataset.sort, order: btn.dataset.order, seed: btn.dataset.seed, next: btn.dataset.next });
       } else {
         var focused = document.querySelector('.thumb-card.focused');
@@ -921,25 +960,27 @@ var slideshow = (function () {
         flashId: flash.id,
         onOK: function (res) {
           res.json().then(function (data) {
-            if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
-            ids = data.ids;
-            videos = new Set(data.videos);
-            index = -1;
-            current = null;
-            prepared = null;
-            visibleSlot = 0;
-            playing = false;
-            muted = true;
-            looping = false;
-            durationMs = readDuration() * 1000;
-            durationSelect.value = String(durationMs / 1000);
-            updateControls();
-            document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
-            dlg.showModal();
-            enterFullscreen();
-            detailStart = startID;
-            detailBack = btn.dataset.back || '';
-            show(data.start);
+            if (!shown) {
+              if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
+              open(data.ids, data.videos, data.start);
+              return;
+            }
+            if (run !== runEpoch) return;
+            var merge = function () {
+              var at = data.ids.indexOf(startID);
+              if (at < 0) {
+                at = Math.min(data.start, data.ids.length);
+                data.ids.splice(at, 0, startID);
+              }
+              ids = data.ids;
+              if (videos.has(startID)) data.videos.push(startID);
+              videos = new Set(data.videos);
+              index = at;
+              updateControls();
+              prefetch(index + 1);
+            };
+            // The image still loading owns the spare slot until it shows.
+            if (current) merge(); else afterShow = merge;
           });
         }
       });
@@ -1009,6 +1050,10 @@ function handleReaderKey(e) {
         return true;
       }
       return false;
+    case 'b':
+      e.preventDefault();
+      toggleBar(reader);
+      return true;
     case 'Escape': case 'Backspace':
       e.preventDefault();
       window.location.href = detail;
@@ -1021,7 +1066,6 @@ document.addEventListener('keydown', function(e) {
   var tag = e.target.tagName.toLowerCase();
   var isInput = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
 
-  if (lightbox.handleKey(e)) return;
   if (!isInput && !chorded(e) && chordStep(e)) return;
   if (handleReaderKey(e)) return;
   if (handlePagesGridKey(e)) return;
@@ -1215,11 +1259,6 @@ document.addEventListener('keydown', function(e) {
     if (modeBtn) { e.preventDefault(); revealSidebarFor(modeBtn); modeBtn.click(); return; }
   }
 
-  if (e.key === 'v' && isDetailPage()) {
-    var lbTrigger = document.querySelector('.detail-img-link');
-    if (lbTrigger) { e.preventDefault(); lightbox.open(null, lbTrigger.href); return; }
-  }
-
   if (e.key === 't') {
     if (batchBarVisible()) {
       if (!document.querySelector('#batch-bar.visible .btn-autotag:not([disabled])')) return;
@@ -1271,8 +1310,8 @@ document.addEventListener('keydown', function(e) {
     if (clickFirstSelector(['.add-tag-form .btn-hash-lookup:not([disabled])'])) { e.preventDefault(); return; }
   }
 
-  if (e.key === 'w') {
-    if (clickFirstSelector(['#slideshow-btn'])) { e.preventDefault(); return; }
+  if (e.key === 'v') {
+    if (clickFirstSelector(['#viewer-btn'])) { e.preventDefault(); return; }
   }
 
   if (isGalleryPage()) {
