@@ -179,6 +179,8 @@ function navDetailArrow(direction, noun) {
 }
 
 // A pinch-zoomed page is left alone, since there the finger pans.
+var readerZoom = null;
+
 function onSwipe(el, prev, next) {
   var x0 = null, y0 = 0, t0 = 0;
   el.addEventListener('pointerdown', function (e) {
@@ -201,8 +203,10 @@ document.addEventListener('DOMContentLoaded', function () {
   if (media) onSwipe(media, function () { navDetailArrow('prev', 'image'); }, function () { navDetailArrow('next', 'image'); });
   var stage = document.querySelector('.reader-stage');
   if (stage) {
+    readerZoom = zoomer(stage, { label: document.getElementById('reader-zoom'), swipe: true });
+    readerZoom.attach(stage.querySelector('.reader-img'));
     var follow = function (sel) {
-      return function () { var a = stage.querySelector(sel); if (a) window.location.href = a.href; };
+      return function () { var a = stage.querySelector(sel); if (a && readerZoom.atFit()) window.location.href = a.href; };
     };
     onSwipe(stage, follow('a.reader-side-prev'), follow('a.reader-side-next'));
   }
@@ -367,18 +371,31 @@ function handlePagesGridKey(e) {
   return false;
 }
 
-var lightbox = (function () {
-  var dlg = null, img = null, stage = null, zoomLbl = null, openLink = null;
+function zoomer(stage, opts) {
+  var img = null;
   var scale = 1, tx = 0, ty = 0;
-  var panning = false, px0 = 0, py0 = 0, tx0 = 0, ty0 = 0;
-  // Past 4px (16 squared) a press is a pan, and its release must not
-  // close the viewer.
+  var pressed = false, panning = false, px0 = 0, py0 = 0, tx0 = 0, ty0 = 0;
+  // Past 4px (16 squared) a press is a pan, and its release is not a click.
   var pressMoved = false;
   // Fingers on the stage by pointer id, and the last spread of a pinch.
   var points = {}, pinch = null;
-  var bound = false;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // object-fit: contain letterboxes the image inside the element, so the
+  // painted rect is computed; the letterbox is not "on the image".
+  function contentRect() {
+    var r = img.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    var iw = img.naturalWidth, ih = img.naturalHeight;
+    if (!iw || !ih) return r;
+    var ia = iw / ih, ba = r.width / r.height;
+    var w, h;
+    if (ia > ba) { w = r.width; h = r.width / ia; }
+    else { h = r.height; w = r.height * ia; }
+    var left = r.left + (r.width - w) / 2;
+    var top = r.top + (r.height - h) / 2;
+    return { left: left, top: top, right: left + w, bottom: top + h, width: w, height: h };
+  }
   // scale multiplies the CSS fit, so 1:1 is read back off the painted box
   // rather than assumed to be 1.
   function oneToOneScale() {
@@ -393,39 +410,26 @@ var lightbox = (function () {
     var one = oneToOneScale();
     return one > 0 ? Math.min(0.5, one) : 0.5;
   }
+  function atFit() { return Math.abs(scale - 1) < 0.01; }
   function apply() {
-    if (!img) return;
-    img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
-    if (!zoomLbl) return;
-    // Against the image's own pixels, not the fit: on a small image the
-    // fit is already an upscale.
-    var one = oneToOneScale();
-    zoomLbl.textContent = Math.round((one > 0 ? scale / one : scale) * 100) + '%';
+    if (img) img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+    if (opts.label) {
+      // Against the image's own pixels, not the fit: on a small image the
+      // fit is already an upscale.
+      var one = oneToOneScale();
+      opts.label.textContent = img ? Math.round((one > 0 ? scale / one : scale) * 100) + '%' : '';
+    }
+    if (opts.onChange) opts.onChange();
   }
   function reset() { scale = 1; tx = 0; ty = 0; apply(); }
   function zoomAt(cx, cy, factor) {
+    if (!img) return;
     var ns = clamp(scale * factor, minScale(), 4);
     var k = ns / scale;
     tx = cx - k * (cx - tx);
     ty = cy - k * (cy - ty);
     scale = ns;
     apply();
-  }
-  // object-fit: contain letterboxes the image inside the element, so the
-  // painted rect is computed; the letterbox is not "on the image".
-  function contentRect() {
-    if (!img) return null;
-    var r = img.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    var iw = img.naturalWidth, ih = img.naturalHeight;
-    if (!iw || !ih) return r;
-    var ia = iw / ih, ba = r.width / r.height;
-    var w, h;
-    if (ia > ba) { w = r.width; h = r.width / ia; }
-    else { h = r.height; w = r.height * ia; }
-    var left = r.left + (r.width - w) / 2;
-    var top = r.top + (r.height - h) / 2;
-    return { left: left, top: top, right: left + w, bottom: top + h, width: w, height: h };
   }
   function oneToOne() {
     var one = oneToOneScale();
@@ -436,20 +440,15 @@ var lightbox = (function () {
     scale = ns;
     apply();
   }
-  function onWheel(e) {
-    e.preventDefault();
-    if (!e.deltaY) return;
+  function fromCenter(x, y) {
     var sr = stage.getBoundingClientRect();
-    var cx = e.clientX - (sr.left + sr.width / 2);
-    var cy = e.clientY - (sr.top + sr.height / 2);
-    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
-    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-    zoomAt(cx, cy, Math.exp(-dy * 0.0018));
+    return { x: x - (sr.left + sr.width / 2), y: y - (sr.top + sr.height / 2) };
   }
   function startPan(x, y) {
     panning = true;
     px0 = x; py0 = y;
     tx0 = tx; ty0 = ty;
+    stage.classList.add('grabbing');
   }
   function pinchOf() {
     var p = Object.values(points);
@@ -458,43 +457,8 @@ var lightbox = (function () {
       dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
     };
   }
-  function onPointerDown(e) {
-    if (e.button !== 0) return;
-    stage.setPointerCapture(e.pointerId);
-    points[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (Object.keys(points).length === 2) {
-      // A pinch is never a tap, so its release must not close the viewer.
-      pinch = pinchOf();
-      panning = false;
-      pressMoved = true;
-      return;
-    }
-    pressMoved = false;
-    startPan(e.clientX, e.clientY);
-    stage.classList.add('grabbing');
-  }
-  function onPointerMove(e) {
-    if (points[e.pointerId]) points[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (pinch) {
-      // Zooms around the point between the fingers, which also pans.
-      var now = pinchOf();
-      var sr = stage.getBoundingClientRect();
-      tx += now.x - pinch.x;
-      ty += now.y - pinch.y;
-      zoomAt(now.x - (sr.left + sr.width / 2), now.y - (sr.top + sr.height / 2), now.dist / pinch.dist);
-      pinch = now;
-      return;
-    }
-    if (!panning) return;
-    if (!pressMoved) {
-      var dx = e.clientX - px0, dy = e.clientY - py0;
-      if (dx * dx + dy * dy > 16) pressMoved = true;
-    }
-    tx = tx0 + (e.clientX - px0);
-    ty = ty0 + (e.clientY - py0);
-    apply();
-  }
   function onPointerEnd(e) {
+    if (!points[e.pointerId]) return;
     delete points[e.pointerId];
     if (pinch) {
       // The finger still down goes on panning.
@@ -504,45 +468,110 @@ var lightbox = (function () {
       else stage.classList.remove('grabbing');
       return;
     }
-    if (!panning) return;
+    if (!pressed) return;
+    pressed = false;
     panning = false;
-    stage.releasePointerCapture(e.pointerId);
     stage.classList.remove('grabbing');
-    // Only a release off the image closes: the first click of a dblclick
-    // on it must not.
-    if (pressMoved || !img) return;
+    // Only a release off the image counts as outside: the first click of
+    // a dblclick on it must not.
+    if (pressMoved || !opts.onOutside || e.type === 'pointercancel') return;
     var r = contentRect();
-    if (!r || !r.width || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
-      dlg.close();
+    if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) opts.onOutside();
+  }
+  stage.addEventListener('wheel', function (e) {
+    if (!img) return;
+    e.preventDefault();
+    if (!e.deltaY) return;
+    var c = fromCenter(e.clientX, e.clientY);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomAt(c.x, c.y, Math.exp(-dy * 0.0018));
+  }, { passive: false });
+  stage.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 || !img || e.target.closest('a, button')) return;
+    stage.setPointerCapture(e.pointerId);
+    points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (Object.keys(points).length === 2) {
+      pinch = pinchOf();
+      pressed = false;
+      panning = false;
+      return;
     }
-  }
-  function onDblClick() {
-    if (Math.abs(scale - 1) < 0.01) oneToOne();
-    else reset();
-  }
+    pressed = true;
+    pressMoved = false;
+    px0 = e.clientX; py0 = e.clientY;
+    // Where a swipe turns the page, a finger at fit is left to it.
+    if (!opts.swipe || e.pointerType !== 'touch' || !atFit()) startPan(e.clientX, e.clientY);
+  });
+  stage.addEventListener('pointermove', function (e) {
+    if (!points[e.pointerId]) return;
+    points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (pinch) {
+      // Zooms around the point between the fingers, which also pans.
+      var now = pinchOf();
+      var c = fromCenter(now.x, now.y);
+      tx += now.x - pinch.x;
+      ty += now.y - pinch.y;
+      zoomAt(c.x, c.y, now.dist / pinch.dist);
+      pinch = now;
+      return;
+    }
+    if (!pressed) return;
+    var dx = e.clientX - px0, dy = e.clientY - py0;
+    if (dx * dx + dy * dy > 16) pressMoved = true;
+    if (!panning) return;
+    tx = tx0 + dx;
+    ty = ty0 + dy;
+    apply();
+  });
+  stage.addEventListener('pointerup', onPointerEnd);
+  stage.addEventListener('pointercancel', onPointerEnd);
+  stage.addEventListener('dblclick', function (e) {
+    if (!img || e.target.closest('a, button')) return;
+    if (atFit()) oneToOne(); else reset();
+  });
+  return {
+    atFit: atFit,
+    attach: function (el) {
+      if (img) img.style.transform = '';
+      // The readout needs the natural size, which a src set just now has not brought yet.
+      if (el) el.addEventListener('load', apply, { once: true });
+      img = el;
+      points = {};
+      pinch = null;
+      pressed = false;
+      reset();
+    },
+    handleKey: function (e) {
+      if (!img) return false;
+      switch (e.key) {
+        case '+': case '=': zoomAt(0, 0, 1.2); break;
+        case '-': zoomAt(0, 0, 1 / 1.2); break;
+        case '0': reset(); break;
+        case '1': oneToOne(); break;
+        default: return false;
+      }
+      e.preventDefault();
+      return true;
+    },
+  };
+}
+
+var lightbox = (function () {
+  var dlg = null, img = null, openLink = null, zoom = null;
+
   function ensure() {
     if (dlg) return true;
     dlg = document.getElementById('image-lightbox');
     if (!dlg) return false;
     img = document.getElementById('lightbox-img');
-    stage = document.getElementById('lightbox-stage');
-    zoomLbl = document.getElementById('lightbox-zoom');
     openLink = document.getElementById('lightbox-open');
-    if (!bound && stage) {
-      stage.addEventListener('wheel', onWheel, { passive: false });
-      stage.addEventListener('pointerdown', onPointerDown);
-      stage.addEventListener('pointermove', onPointerMove);
-      stage.addEventListener('pointerup', onPointerEnd);
-      stage.addEventListener('pointercancel', onPointerEnd);
-      stage.addEventListener('dblclick', onDblClick);
-      // The readout needs the natural size, which only arrives after
-      // open() sets the src.
-      img.addEventListener('load', apply);
-      dlg.addEventListener('close', reset);
-      var closeBtn = document.getElementById('lightbox-close');
-      if (closeBtn) closeBtn.addEventListener('click', function () { dlg.close(); });
-      bound = true;
-    }
+    zoom = zoomer(document.getElementById('lightbox-stage'), {
+      label: document.getElementById('lightbox-zoom'),
+      onOutside: function () { dlg.close(); },
+    });
+    dlg.addEventListener('close', function () { zoom.attach(null); });
+    document.getElementById('lightbox-close').addEventListener('click', function () { dlg.close(); });
     return true;
   }
   return {
@@ -553,28 +582,16 @@ var lightbox = (function () {
       if (!ensure()) return true;
       if (e && e.preventDefault) e.preventDefault();
       img.src = src;
-      if (openLink) openLink.href = src;
-      points = {};
-      pinch = null;
-      reset();
+      openLink.href = src;
       if (!dlg.open) dlg.showModal();
+      zoom.attach(img);
       return false;
     },
     handleKey: function (e) {
       if (!dlg || !dlg.open || chorded(e)) return false;
       var t = e.target.tagName.toLowerCase();
       if (t === 'input' || t === 'textarea' || e.target.isContentEditable) return false;
-      switch (e.key) {
-        case '+': case '=':
-          e.preventDefault(); zoomAt(0, 0, 1.2); return true;
-        case '-':
-          e.preventDefault(); zoomAt(0, 0, 1 / 1.2); return true;
-        case '0':
-          e.preventDefault(); reset(); return true;
-        case '1':
-          e.preventDefault(); oneToOne(); return true;
-      }
-      return false;
+      return zoom.handleKey(e);
     },
   };
 })();
@@ -958,6 +975,7 @@ function handleReaderKey(e) {
     url.hash = '';
     window.location.href = url.pathname + url.search;
   }
+  if (readerZoom && readerZoom.handleKey(e)) return true;
   switch (e.key) {
     case 'ArrowRight': case 'l': case ' ':
       e.preventDefault(); go(page + 1); return true;
@@ -988,14 +1006,6 @@ function handleReaderKey(e) {
       if (extractForm) {
         e.preventDefault();
         extractForm.requestSubmit();
-        return true;
-      }
-      return false;
-    case 'v':
-      var pageLink = document.querySelector('.reader-page-link');
-      if (pageLink) {
-        e.preventDefault();
-        lightbox.open(null, pageLink.href);
         return true;
       }
       return false;

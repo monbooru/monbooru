@@ -15,9 +15,7 @@
   <main id="reader" data-image-id="{{.Image.ID}}" data-page="{{.Page}}" data-total="{{.PageCount}}" data-detail-url="{{$detailHref}}">
     <div id="page-notice" class="degraded-banner" hidden></div>
     <div class="reader-stage">
-      <a href="/images/{{.Image.ID}}/page/{{.Page}}" target="_blank" rel="noopener" class="reader-page-link" title="Zoom page (v)" onclick="return lightbox.open(event, this.href)">
-        <img src="/images/{{.Image.ID}}/page/{{.Page}}" alt="Page {{.Page}}" class="reader-img">
-      </a>
+      <img src="/images/{{.Image.ID}}/page/{{.Page}}" alt="Page {{.Page}}" class="reader-img">
       {{if gt .Page 1}}
       <a class="reader-side reader-side-prev" href="/images/{{.Image.ID}}/read?page={{sub .Page 1}}{{.BackKVQS}}" title="Previous page (←)" aria-label="Previous page">‹</a>
       {{else}}
@@ -49,6 +47,7 @@
       <span class="reader-nav reader-disabled" aria-hidden="true">&gt;</span>
       <span class="reader-nav reader-last reader-disabled" aria-hidden="true">&gt;|</span>
       {{end}}
+      <span id="reader-zoom" class="reader-counter reader-zoom" title="Zoom (wheel, + -, 0 fit, 1 for 1:1)"></span>
       <form class="reader-extract" method="POST" action="/images/{{.Image.ID}}/page/{{.Page}}/extract"
             onsubmit="event.preventDefault(); extractReaderPage(this)">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
@@ -58,7 +57,6 @@
       <a class="reader-open" href="/images/{{.Image.ID}}/page/{{.Page}}" target="_blank" rel="noopener" title="Open page in new tab (o)">↗</a>
     </nav>
   </main>
-  {{template "partials/image_lightbox.html" .}}
   <dialog id="reader-jump-dialog">
     <form onsubmit="event.preventDefault(); submitPageJump('reader-jump-input');">
       <p class="dlg-title">Jump to page (1 - {{.PageCount}}){{template "webui/dialog_x"}}</p>
