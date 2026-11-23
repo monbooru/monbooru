@@ -167,6 +167,9 @@ func TestBrowseListsASymlinkedFolder(t *testing.T) {
 }
 
 func TestBrowseSurvivesAnUnreadableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a folder with no permissions")
+	}
 	srv := newDesktopServer(t)
 	locked := filepath.Join(t.TempDir(), "locked")
 	mustMkdirAll(t, locked, 0o755)
