@@ -81,7 +81,8 @@ type Pool struct {
 	httpClient *http.Client
 	// far reports a worker address a slow link may sit before: its frames
 	// go compressed.
-	far func(ctx context.Context, rawURL string) bool
+	far       func(ctx context.Context, rawURL string) bool
+	retryWait time.Duration
 	// changed wakes Run when Set brings a worker it has not looked at.
 	changed chan struct{}
 }
@@ -92,10 +93,12 @@ func NewPool(dir string) *Pool {
 		Timeout: 10 * time.Minute,
 		// A redirect would carry the frames, and the token behind a gateway, to another host.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}, changed: make(chan struct{}, 1), far: farAddress}
+	}, changed: make(chan struct{}, 1), far: farAddress, retryWait: 250 * time.Millisecond}
 	p.free = sync.NewCond(&p.mu)
 	return p
 }
+
+const sameWorkerRetries = 3
 
 var (
 	poolMu     sync.RWMutex
@@ -672,17 +675,19 @@ func (p *Pool) JobSlots(groups [][]string, only []string) (n int, remote bool) {
 
 // Tag runs frames through models on a worker that holds them all, waiting
 // for a free slot, and names the worker that answered; a non-nil only keeps
-// the workers it names. A call that fails in transport goes to another
-// worker, three tries at most, and that worker is down until its next
-// refresh; a worker's refusal is final.
+// the workers it names. A call that fails in transport is tried again on
+// that worker after 250 ms, 500 ms and 1 s, then goes to another worker,
+// three at most, and that worker is down until its next refresh; one that
+// timed out goes to another at once, and a worker's refusal is final.
 func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, string, error) {
 	if parts := p.split(req.Models, only); len(parts) > 1 {
 		return p.tagParts(ctx, req, frames, only, parts)
 	}
 	interactive := req.Priority == worker.PriorityInteractive
 	skip := map[*poolWorker]bool{}
+	fails := map[*poolWorker]int{}
 	var lastErr error
-	for range 3 {
+	for len(skip) < 3 {
 		w, err := p.acquire(ctx, req.Models, interactive, skip, only)
 		if err != nil {
 			if lastErr != nil && errors.Is(err, errNoWorker) {
@@ -703,6 +708,15 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 			return worker.TagResponse{}, "", fmt.Errorf("worker %s: %w", name, err)
 		}
 		lastErr = fmt.Errorf("worker %s: %w", name, err)
+		if fails[w]++; !silent && fails[w] <= sameWorkerRetries {
+			logx.Infof("tagger: worker %s: %v; trying it again", name, err)
+			select {
+			case <-ctx.Done():
+				return worker.TagResponse{}, "", ctx.Err()
+			case <-time.After(p.retryWait << (fails[w] - 1)):
+			}
+			continue
+		}
 		p.markDown(w, err)
 		skip[w] = true
 	}

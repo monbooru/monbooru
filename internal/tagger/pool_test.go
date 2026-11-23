@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -59,6 +60,7 @@ func TestATransportFailureGoesToAnotherWorker(t *testing.T) {
 	dead := serve(t, gone)
 	good := &counting{f: newFake(t, wd())}
 	p := usePool(t, "", WorkerDef{Name: "a", URL: dead, Token: "tok"}, WorkerDef{Name: "b", URL: serve(t, good), Token: "tok"})
+	p.retryWait = time.Millisecond
 
 	p.mu.Lock()
 	p.workers[0].client.BaseURL = "http://127.0.0.1:1"
@@ -73,6 +75,57 @@ func TestATransportFailureGoesToAnotherWorker(t *testing.T) {
 		if w.Name == "a" && w.Up {
 			t.Error("a is still up after its call failed")
 		}
+	}
+}
+
+type resetting struct {
+	f     *worker.Fake
+	fail  int
+	calls atomic.Int32
+}
+
+func (r *resetting) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.URL.Path == worker.PathTag && int(r.calls.Add(1)) <= r.fail {
+		_, _ = io.Copy(io.Discard, req.Body)
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		_ = conn.(*net.TCPConn).SetLinger(0)
+		_ = conn.Close()
+		return
+	}
+	r.f.ServeHTTP(w, req)
+}
+
+func TestAResetCallIsTriedAgainOnTheSameWorker(t *testing.T) {
+	a := &resetting{f: newFake(t, wd()), fail: 1}
+	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, a), Token: "tok"})
+	p.retryWait = time.Millisecond
+	if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+		t.Fatalf("tag: %v", err)
+	}
+	if n := a.calls.Load(); n != 2 {
+		t.Errorf("a served %d calls, want 2", n)
+	}
+	if !p.Workers()[0].Up {
+		t.Error("a is down after a call it answered on the retry")
+	}
+}
+
+func TestAWorkerThatKeepsResettingIsDownAfterItsRetries(t *testing.T) {
+	a := &resetting{f: newFake(t, wd()), fail: 1 << 30}
+	good := &counting{f: newFake(t, wd())}
+	p := usePool(t, "", WorkerDef{Name: "a", URL: serve(t, a), Token: "tok"}, WorkerDef{Name: "b", URL: serve(t, good), Token: "tok"})
+	p.retryWait = time.Millisecond
+	if _, err := tagOne(t, p, worker.PriorityBatch); err != nil {
+		t.Fatalf("tag: %v", err)
+	}
+	if n := a.calls.Load(); n != 1+sameWorkerRetries {
+		t.Errorf("a served %d calls, want %d", n, 1+sameWorkerRetries)
+	}
+	if good.n() != 1 {
+		t.Errorf("b served %d calls, want 1", good.n())
+	}
+	if p.Workers()[0].Up {
+		t.Error("a is still up after its retries failed")
 	}
 }
 
