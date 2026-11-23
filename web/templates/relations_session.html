@@ -403,8 +403,9 @@
       return;
     }
     var pan = zoom > 1 && !e.target.closest('.compare-divider-handle');
-    drag = {pan: pan, x: p.x - panX, y: p.y - panY, moved: false};
-    if (!pan) trackSplit(e);
+    var touch = e.pointerType === 'touch';
+    drag = {pan: pan, x: p.x - panX, y: p.y - panY, x0: p.x, y0: p.y, touch: touch, moved: false};
+    if (!pan && !touch) trackSplit(e);
   }
   function moveDrag(e) {
     if (!drag || !points[e.pointerId]) return;
@@ -420,11 +421,13 @@
       panX = p.x - drag.x;
       panY = p.y - drag.y;
       applyZoom();
-    } else {
+    } else if (!drag.touch || drag.split || Math.hypot(p.x - drag.x0, p.y - drag.y0) >= 10) {
+      drag.split = true;
       trackSplit(e);
     }
   }
   function endDrag(e) {
+    if (e.type === 'pointerup' && drag && drag.touch && !drag.pan && !drag.pinch && !drag.split) trackSplit(e);
     delete points[e.pointerId];
     // A double-click never fires for a finger, so a double tap resets here.
     if (e.type === 'pointerup' && e.pointerType === 'touch' && drag && !drag.moved && !drag.pinch) {
