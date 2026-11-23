@@ -16,10 +16,7 @@ var makeGlobalDone = null;
 function openMakeGlobal(params, label, onOK) {
   makeGlobalParams = params;
   makeGlobalDone = onOK;
-  clearSlots('make-global-flash', 'make-global-check');
   document.getElementById('make-global-scope').textContent = 'Make ' + label + ' global';
-  document.getElementById('make-global-confirm').disabled = true;
-  document.getElementById('make-global-check').textContent = 'Checking every gallery…';
   document.getElementById('make-global-dialog').showModal();
   checkMakeGlobal(false);
 }
@@ -27,8 +24,20 @@ function openMakeGlobal(params, label, onOK) {
 function checkMakeGlobal(merge) {
   var values = Object.fromEntries(makeGlobalParams);
   if (merge) values.merge = '1';
+  clearSlots('make-global-flash');
+  document.getElementById('make-global-confirm').disabled = true;
+  document.getElementById('make-global-check').textContent = 'Checking every gallery…';
   htmx.ajax('POST', '/tags/global/check', {target: '#make-global-check', swap: 'innerHTML', values: values});
 }
+
+['htmx:responseError', 'htmx:sendError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var slot = document.getElementById('make-global-check');
+    if (e.detail.target !== slot) return;
+    slot.textContent = '';
+    setFlashText(document.getElementById('make-global-flash'), 'err', 'The check failed.');
+  });
+});
 
 function confirmMakeGlobal() {
   var params = new URLSearchParams(makeGlobalParams);
