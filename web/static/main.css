@@ -66,7 +66,7 @@ button.footer-rating-link { color: var(--fg-dim); }
 #nav a.nav-relations   { --nav-hue: var(--nav-relations); }
 #nav a.nav-settings    { --nav-hue: var(--nav-settings); }
 
-#topbar-right { flex: 1 1 0; justify-content: flex-end; }
+#topbar-right { flex: 1 1 0; justify-content: flex-end; position: relative; }
 #job-status {
   font-size: 12px;
   color: var(--fg-dim);
@@ -89,6 +89,19 @@ button.footer-rating-link { color: var(--fg-dim); }
   white-space: nowrap;
 }
 .job-type, .job-progress { flex: none; }
+#job-status :is(.job-done, .job-error) { cursor: pointer; }
+#job-status.job-whole :is(.job-done, .job-error) {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: min(600px, calc(100vw - 16px));
+  z-index: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border);
+}
 .job-dismiss {
   background: none;
   border: none;

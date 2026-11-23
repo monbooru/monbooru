@@ -1753,6 +1753,11 @@ function tidyQueryTerms(terms) {
   return terms;
 }
 
+function queryTermKey(t) {
+  const m = /^([^\s":]+:)?"(.*)"$/.exec(t);
+  return (m ? (m[1] || '') + m[2].replace(/\\"/g, '"') : t).toLowerCase();
+}
+
 // The button's term is category:name, but the query may hold the bare
 // name, so both forms are removed.
 document.addEventListener('click', function(e) {
@@ -1767,7 +1772,8 @@ document.addEventListener('click', function(e) {
   const bare = colon >= 0 ? tagName.slice(colon + 1) : tagName;
   const terms = si.value.trim().split(/\s+/).filter(Boolean);
   if (btn.classList.contains('active')) {
-    si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
+    const keys = [tagName, bare].map(queryTermKey);
+    si.value = tidyQueryTerms(terms.filter(t => !keys.includes(queryTermKey(t)))).join(' ');
   } else {
     // A query that ends on an operator is waiting for this term.
     const last = terms[terms.length - 1] || '';
@@ -2108,6 +2114,8 @@ function updateBatchBar() {
     pluginBar.classList.toggle('visible', active && !selectAllMatching);
   }
   if (grid) grid.classList.toggle('batch-active', armed);
+  const invert = document.getElementById('batch-invert');
+  if (invert) invert.disabled = selectAllMatching;
   const modeBtn = document.getElementById('select-mode-btn');
   if (modeBtn) modeBtn.setAttribute('aria-pressed', String(armed));
   const matching = matchingTotal();
@@ -2340,6 +2348,8 @@ function openSaveSearchDialog() {
   if (ss) ss.value = savedSort;
   if (so) so.value = url.searchParams.get('order') || '';
   if (se) se.value = savedSort === 'random' ? (url.searchParams.get('seed') || '') : '';
+  document.getElementById('save-search-name').value = '';
+  clearSlots('save-search-result');
   dlg.showModal();
   return true;
 }
@@ -2749,6 +2759,7 @@ function showMoreNamePreview(btn) {
 }
 
 function applySearchSuggest(tagName) {
+  if (/^(not|or|and)$/i.test(tagName)) tagName = '"' + tagName + '"';
   var si = document.getElementById('search-input');
   if (!si) return;
   var words = si.value.split(/(\s+)/);
@@ -2824,12 +2835,19 @@ var _lastChanges = -1;
 // page: the grid swap after a job intermittently fails to settle.
 var _pendingGalleryReload = false;
 var _pendingReloadShownAt = '';
+var _jobWhole = '';
 
 function armGalleryReload() {
   _pendingGalleryReload = true;
   _pendingReloadShownAt = (document.getElementById('job-status') || {dataset: {}}).dataset.finishedAt || '';
   refreshJobStatus();
 }
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#job-status .job-done, #job-status .job-error')) return;
+  var js = document.getElementById('job-status');
+  _jobWhole = js.classList.toggle('job-whole') ? js.dataset.finishedAt || '-' : '';
+});
 
 document.body.addEventListener('htmx:afterSettle', function(e) {
   var el = e.detail.elt;
@@ -2847,6 +2865,7 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
   }
 
   if (!el || el.id !== 'job-status') return;
+  el.classList.toggle('job-whole', _jobWhole !== '' && (el.dataset.finishedAt || '-') === _jobWhole);
 
   var firstSettle = _firstJobStatusSettle;
   _firstJobStatusSettle = false;
