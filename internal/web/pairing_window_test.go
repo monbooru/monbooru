@@ -1,10 +1,13 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,6 +124,16 @@ func TestPairWindowWaitsForAClickWhenThePeerIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestAnUnreachableWorkerIsLoggedUnderItsName(t *testing.T) {
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","label":"gpu-box","url":"http://127.0.0.1:1","peer_token":"sek"}`)
+	wantIn(t, buf.String(), "pairing: monworker:gpu-box is unreachable at")
+}
+
 func TestPairWindowButtonOpensAndClosesIt(t *testing.T) {
 	srv := newTestServer(t)
 	wantIn(t, do(srv, "GET", "/settings").Body.String(), "Accept pairings for 10 minutes")
@@ -204,6 +217,18 @@ func TestNavSaysAppsPairedAutomaticallyUntilSettingsIsOpened(t *testing.T) {
 	page := do(srv, "GET", "/settings").Body.String()
 	wantIn(t, page, `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
 	wantIn(t, page, "Paired automatically")
+	wantIn(t, do(srv, "GET", "/").Body.String(), `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
+}
+
+func TestThePanelPollMarksTheAutomaticPairingsSeen(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	id, _ := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monloader","url":"`+p.URL+`","peer_token":"sek"}`)
+	pairStatus(t, srv, id)
+	wantIn(t, do(srv, "GET", "/").Body.String(), "[! monloader paired automatically]")
+
+	wantIn(t, do(srv, "GET", "/internal/plugins/pairing?paired=").Body.String(), "<th>Paired automatically</th>")
 	wantIn(t, do(srv, "GET", "/").Body.String(), `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
 }
 

@@ -204,6 +204,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		calls[i] = g.models
 	}
 	slots, remote := pool.JobSlots(calls, only)
+	defer pool.Running(calls, only)()
 	parallel := min(prepareCount(cfg.Tagger, max(1, slots), remote), len(ids))
 	prep := make(semaphore, parallel)
 

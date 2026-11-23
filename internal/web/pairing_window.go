@@ -170,7 +170,7 @@ func (s *Server) reaches(ctx context.Context, req peer.Req) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if base == "" || !peer.Reachable(ctx, base) {
-		logx.Infof("pairing: %s is unreachable at %q; its request waits for a click", req.App, base)
+		logx.Infof("pairing: %s is unreachable at %q; its request waits for a click", req.Paired(), base)
 		return false
 	}
 	return true

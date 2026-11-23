@@ -421,6 +421,19 @@ func TestAJobWhoseWorkersHoldNoneOfItsModelsFails(t *testing.T) {
 	}
 }
 
+func TestAJobWhoseOnlyWorkerStopsAnsweringSaysSo(t *testing.T) {
+	p := usePool(t, "",
+		WorkerDef{Name: "a", URL: serve(t, newFake(t, wd())), Token: "tok"},
+		WorkerDef{Name: "beta", URL: serve(t, newFake(t, wd())), Token: "tok"})
+	p.mu.Lock()
+	p.workers[1].client.BaseURL = "http://127.0.0.1:1"
+	p.mu.Unlock()
+	_, _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, []string{"beta"})
+	if err == nil || err.Error() != "worker beta stopped answering" {
+		t.Errorf("tag on beta only: %v, want worker beta stopped answering", err)
+	}
+}
+
 func TestJobWorkersAreTheOnesUpWithWhatTheyCanRun(t *testing.T) {
 	gone := serve(t, newFake(t, wd()))
 	p := usePool(t, "",
@@ -524,6 +537,34 @@ func TestLoadCountsTheCallsWaitingAndTheSlotsFree(t *testing.T) {
 	wg.Wait()
 	if l := p.Load(); l.Busy || l.Waiting != 0 || l.Free != 2 {
 		t.Errorf("load after the calls = %+v", l)
+	}
+}
+
+func TestLoadCountsTheFreeSlotsOfTheRunningJobsWorkersOnly(t *testing.T) {
+	joytag := fakeModel{name: "joytag", labels: labelsOf("a")}
+	local := &counting{f: newFake(t, wd()), gate: make(chan struct{})}
+	big := newFake(t, joytag)
+	big.Info.Slots = 5
+	p := usePool(t, "",
+		WorkerDef{Name: LocalWorker, Local: true, URL: serve(t, local), Token: "tok"},
+		WorkerDef{Name: "gpu-box", URL: serve(t, big), Token: "tok"})
+	only := []string{LocalWorker}
+	done := p.Running([][]string{{"wd"}}, only)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if _, _, err := p.Tag(context.Background(), worker.TagRequest{Models: []string{"wd"}, Priority: worker.PriorityBatch, Frames: worker.FrameSpec{Size: 8}}, [][]byte{make([]byte, 8*8*3)}, only); err != nil {
+			t.Error(err)
+		}
+	})
+	waitFor(t, func() bool { return local.n() == 1 })
+	if l := p.Load(); l.Free != 1 {
+		t.Errorf("load = %+v, want the local worker's one free slot and none of gpu-box's", l)
+	}
+	close(local.gate)
+	wg.Wait()
+	done()
+	if l := p.Load(); l.Free != 5 {
+		t.Errorf("load with no job = %+v, want gpu-box's five free slots", l)
 	}
 }
 

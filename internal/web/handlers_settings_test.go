@@ -135,6 +135,18 @@ func TestGeneralSaveKeepsAnEnvPinnedKey(t *testing.T) {
 	}
 }
 
+func TestLocalWorkerToggleKeepsAnEnvPinnedKey(t *testing.T) {
+	srv, _ := newEnvPinnedServer(t, "MONBOORU_TAGGER_LOCAL_WORKER", "true", func(file *config.Config) {
+		file.Tagger.LocalWorker = false
+	})
+	w := postHTMXForm(t, srv, "/settings/workers/local/disable", url.Values{})
+	mustCode(t, w, http.StatusOK)
+	wantIn(t, w.Body.String(), "Set by MONBOORU_TAGGER_LOCAL_WORKER.")
+	if !srv.cfgSnapshot().Tagger.LocalWorker || w.Header().Get("HX-Refresh") != "" {
+		t.Errorf("local_worker = %v, refresh = %q, want the environment's true kept", srv.cfgSnapshot().Tagger.LocalWorker, w.Header().Get("HX-Refresh"))
+	}
+}
+
 func TestPluginsRepoURL_SitsBesideTheRepository(t *testing.T) {
 	for repo, want := range map[string]string{
 		"https://github.com/monbooru/monbooru":  "https://github.com/monbooru/monbooru-plugins",

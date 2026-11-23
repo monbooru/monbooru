@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -246,6 +247,33 @@ func TestRemovingAWorkerTellsItOnlyOnceTheSaveWorked(t *testing.T) {
 	postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{})
 	if !told.Load() || len(srv.cfgSnapshot().Workers) != 0 {
 		t.Errorf("once saved: told = %v, workers = %+v", told.Load(), srv.cfgSnapshot().Workers)
+	}
+}
+
+func TestRemovingANameNotListedTouchesNoFile(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	data := srv.cfgSnapshot().Paths.DataPath
+	victim := filepath.Join(data, "victim.json")
+	mustWriteFile(t, victim, []byte("{}"), 0o644)
+	mustCode(t, postHTMXForm(t, srv, "/settings/workers/..%2fvictim/remove", url.Values{}), http.StatusOK)
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("victim.json: %v, want it kept", err)
+	}
+
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	pairStatus(t, srv, id)
+	saved := filepath.Join(data, "workers", "gpu-box.json")
+	mustMkdirAll(t, filepath.Dir(saved), 0o755)
+	mustWriteFile(t, saved, []byte("{}"), 0o644)
+	mustCode(t, postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{}), http.StatusOK)
+	cfg := srv.cfgSnapshot()
+	if len(cfg.Workers) != 0 || cfg.Auth.Tokens.Paired(peer.WorkerKey("gpu-box")) != nil {
+		t.Errorf("workers = %+v, want gpu-box and its token gone", cfg.Workers)
+	}
+	if _, err := os.Stat(saved); !os.IsNotExist(err) {
+		t.Errorf("workers/gpu-box.json: %v, want it gone", err)
 	}
 }
 

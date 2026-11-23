@@ -569,8 +569,32 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	if len(opts.Taggers) > 0 {
 		enabled = slices.DeleteFunc(enabled, func(t tagger.TaggerStatus) bool { return !slices.Contains(opts.Taggers, t.Name) })
 	}
-	if len(opts.Workers) == 0 {
-		enabled = tagger.WithoutOnDemand(enabled)
+	var only []string
+	held := map[string]bool{}
+	if len(opts.Workers) > 0 {
+		up := tagger.CurrentPool().JobWorkers()
+		only = workersUp(opts.Workers, up)
+		for _, w := range up {
+			if slices.Contains(only, w.Name) {
+				for _, m := range w.Holds {
+					held[m] = true
+				}
+			}
+		}
+	}
+	var left []string
+	enabled = slices.DeleteFunc(enabled, func(t tagger.TaggerStatus) bool {
+		switch {
+		case len(opts.Workers) == 0:
+			return t.OnDemand
+		case len(only) == 0 || held[t.Name]:
+			return false
+		}
+		left = append(left, t.Name)
+		return true
+	})
+	if len(left) > 0 {
+		s.recordAutotag(fmt.Sprintf("[%s] Auto-tag: %s left out, no ticked worker holds %s.", cx.Name, strings.Join(left, ", "), models.Plural(len(left), "it", "them")))
 	}
 	if len(enabled) == 0 {
 		return nil
@@ -588,12 +612,9 @@ func (s *Scheduler) autotag(r *jobs.Reservation, cx *library.Gallery) error {
 	if len(groups) == 0 {
 		return nil
 	}
-	var only []string
-	if len(opts.Workers) > 0 {
-		if only = workersUp(opts.Workers, tagger.CurrentPool().JobWorkers()); len(only) == 0 {
-			s.recordAutotag(fmt.Sprintf("[%s] Auto-tag skipped: %s.", cx.Name, offline(opts.Workers)))
-			return nil
-		}
+	if len(opts.Workers) > 0 && len(only) == 0 {
+		s.recordAutotag(fmt.Sprintf("[%s] Auto-tag skipped: %s.", cx.Name, offline(opts.Workers)))
+		return nil
 	}
 	started := time.Now()
 	total := tagger.Result{Tagged: map[string]int{}}

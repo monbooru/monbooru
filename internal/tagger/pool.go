@@ -85,6 +85,28 @@ type Pool struct {
 	retryWait time.Duration
 	// changed wakes Run when Set brings a worker it has not looked at.
 	changed chan struct{}
+	job     *jobCalls
+}
+
+type jobCalls struct {
+	groups [][]string
+	only   []string
+}
+
+// Running has Load count the workers that may take the job's calls, until
+// the func it returns is called.
+func (p *Pool) Running(groups [][]string, only []string) func() {
+	j := &jobCalls{groups, only}
+	p.mu.Lock()
+	p.job = j
+	p.mu.Unlock()
+	return func() {
+		p.mu.Lock()
+		if p.job == j {
+			p.job = nil
+		}
+		p.mu.Unlock()
+	}
 }
 
 // NewPool keeps each worker's descriptions in dir; "" keeps them in memory.
@@ -654,7 +676,17 @@ func (p *Pool) Slots(groups [][]string, only []string) int {
 func (p *Pool) JobSlots(groups [][]string, only []string) (n int, remote bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	seen := map[*poolWorker]bool{}
+	for _, w := range p.takers(groups, only) {
+		n += w.slots()
+		remote = remote || !w.def.Local
+	}
+	return n, remote
+}
+
+// takers is each worker that may take one of groups' calls, or a part of
+// one, once. Caller holds p.mu.
+func (p *Pool) takers(groups [][]string, only []string) []*poolWorker {
+	var out []*poolWorker
 	for _, models := range groups {
 		ws := p.eligible(models, nil, only)
 		if len(ws) == 0 {
@@ -663,14 +695,12 @@ func (p *Pool) JobSlots(groups [][]string, only []string) (n int, remote bool) {
 			}
 		}
 		for _, w := range ws {
-			if !seen[w] {
-				seen[w] = true
-				n += w.slots()
-				remote = remote || !w.def.Local
+			if !slices.Contains(out, w) {
+				out = append(out, w)
 			}
 		}
 	}
-	return n, remote
+	return out
 }
 
 // Tag runs frames through models on a worker that holds them all, waiting
@@ -707,7 +737,7 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 		if !worker.IsTransport(err) && !silent {
 			return worker.TagResponse{}, "", fmt.Errorf("worker %s: %w", name, err)
 		}
-		lastErr = fmt.Errorf("worker %s: %w", name, err)
+		lastErr = fmt.Errorf("worker %s stopped answering", name)
 		if fails[w]++; !silent && fails[w] <= sameWorkerRetries {
 			logx.Infof("tagger: worker %s: %v; trying it again", name, err)
 			select {
@@ -840,8 +870,9 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 }
 
 // Load is where the calls stand now: those ready and waiting for a slot,
-// and the slots free on the workers that take calls by themselves, the
-// local one only when no paired worker is up.
+// and the slots free on the workers the running job's calls may go to; with
+// no job running, on the workers that take calls by themselves, the local
+// one only when no paired worker is up.
 type Load struct {
 	Busy    bool
 	Waiting int
@@ -855,7 +886,12 @@ func (p *Pool) Load() Load {
 	remoteUp := slices.ContainsFunc(p.workers, func(w *poolWorker) bool { return !w.def.Local && !w.def.OnDemand && runnable(w) && w.up })
 	for _, w := range p.workers {
 		l.Busy = l.Busy || w.inUse > 0
-		if runnable(w) && w.up && (!w.def.OnDemand || w.inUse > 0) && (!w.def.Local || !remoteUp) {
+		if p.job == nil && runnable(w) && w.up && (!w.def.OnDemand || w.inUse > 0) && (!w.def.Local || !remoteUp) {
+			l.Free += max(0, w.slots()-w.inUse)
+		}
+	}
+	if p.job != nil {
+		for _, w := range p.takers(p.job.groups, p.job.only) {
 			l.Free += max(0, w.slots()-w.inUse)
 		}
 	}

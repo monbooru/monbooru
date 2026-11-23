@@ -184,6 +184,10 @@ func (s *Server) taggerLocalWorkerPost(on bool) http.HandlerFunc {
 		if !parseFormOK(w, r) {
 			return
 		}
+		if pin := s.envPinned("tagger.local_worker"); pin != "" {
+			writeFlashOOB(w, "flash-tagger", "err", "Set by "+pin+".")
+			return
+		}
 		if err := s.withConfig(func(c *config.Config) error {
 			c.Tagger.LocalWorker = on
 			return nil
@@ -223,11 +227,16 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	name := r.PathValue("name")
 	var url, token string
 	s.cfgMu.RLock()
+	wc := peer.FindWorker(s.cfg, name)
 	// A worker added by address holds no pairing to be told the end of.
-	if wc := peer.FindWorker(s.cfg, name); wc != nil && !wc.Manual {
+	if wc != nil && !wc.Manual {
 		url, token = wc.URL, wc.Token
 	}
 	s.cfgMu.RUnlock()
+	if wc == nil {
+		s.renderWorkers(w, false)
+		return
+	}
 	var notifyErr error
 	saveErr := s.removePairing(peer.WorkerKey(name))
 	if saveErr == nil {

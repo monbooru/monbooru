@@ -594,6 +594,61 @@ func TestAScheduleNamingNoWorkerLeavesOutATaggerOnlyAnOnDemandWorkerHolds(t *tes
 	}
 }
 
+func TestAScheduleNamingWorkersLeavesOutATaggerNoneOfThemHolds(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if err := db.Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "pic.png")
+	var pic bytes.Buffer
+	if err := png.Encode(&pic, image.NewRGBA(image.Rect(0, 0, 16, 12))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, pic.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`INSERT INTO images (canonical_path, file_type, file_size, sha256, is_missing, ingested_at)
+		VALUES (?, 'png', 1, 'sha', 0, datetime('now'))`, path); err != nil {
+		t.Fatal(err)
+	}
+
+	defs := []tagger.WorkerDef{{Name: "nas"}, {Name: "gamma"}}
+	taggertest.UsePool(t, map[string][]string{"wd": {"landscape"}}, defs[:1]...)
+	taggertest.UsePool(t, map[string][]string{"px": {"sky"}}, defs[1:]...)
+	p := tagger.NewPool("")
+	p.Set(defs)
+	p.Refresh(context.Background())
+	tagger.SetPool(p)
+
+	mgr := jobs.NewManager()
+	s, host := newTestScheduler(t, config.ScheduleConfig{Autotag: &config.ScheduleAutotag{Workers: []string{"gamma"}}})
+	s.jobs = mgr
+	host.tagger.Taggers = []config.TaggerInstance{{Name: "wd", Enabled: true, ConfidenceThreshold: 0.35}, {Name: "px", Enabled: true, ConfidenceThreshold: 0.35}}
+	cx := &library.Gallery{Handle: gallery.Handle{Name: "default", DB: d, TagSvc: tags.New(d, nil)}}
+	r, err := mgr.Reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Release()
+	if err := s.autotag(r, cx); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := d.Read.QueryRow(`SELECT COALESCE(group_concat(tagger_name), '') FROM image_tagger_runs`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "px" {
+		t.Errorf("read by %q, want px only", got)
+	}
+	if lines := s.Status().AutotagInfo; !slices.Contains(lines, "[default] Auto-tag: wd left out, no ticked worker holds it.") {
+		t.Errorf("status = %q, want wd said left out", lines)
+	}
+}
+
 func TestWorkersUpKeepsTheNamedWorkersThatCanTakeAJob(t *testing.T) {
 	t.Parallel()
 	up := []tagger.JobWorker{{Name: "local"}, {Name: "beta"}}
