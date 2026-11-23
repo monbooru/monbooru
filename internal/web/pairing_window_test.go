@@ -380,3 +380,10 @@ func TestOpeningTheWindowApprovesWhatAlreadyWaits(t *testing.T) {
 		t.Errorf("trace = %+v, want monloader and nas listed as paired automatically", made)
 	}
 }
+
+func TestTheAutoPairNoticeCutsALongWorkerName(t *testing.T) {
+	n := autoPairNotice{Items: []autoPairing{{App: "monworker:workstation-with-a-very-long-nam"}}}
+	if got, want := n.Text(), "workstation-w... paired automatically"; got != want {
+		t.Fatalf("Text() = %q, want %q", got, want)
+	}
+}

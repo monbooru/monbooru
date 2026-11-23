@@ -483,7 +483,9 @@ function showActiveNav() {
   const nav = document.getElementById('nav');
   const active = nav && nav.querySelector('a.active');
   if (!active) return;
-  const over = active.getBoundingClientRect().right - nav.getBoundingClientRect().right;
+  const notice = nav.querySelector('.pair-notice:not([hidden])');
+  const edge = notice && getComputedStyle(notice).position === 'sticky' ? notice.getBoundingClientRect().left : nav.getBoundingClientRect().right;
+  const over = active.getBoundingClientRect().right - edge;
   if (over > 0) nav.scrollLeft += over + 24;
 }
 showActiveNav();
@@ -498,6 +500,7 @@ document.body.addEventListener('htmx:oobAfterSwap', function(e) {
     syncPairTitle();
     fitPairNotice();
   }
+  if (e.detail && e.detail.target && e.detail.target.classList.contains('pair-notice')) showActiveNav();
 });
 
 // History restore swaps with neither target nor xhr.

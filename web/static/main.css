@@ -42,6 +42,8 @@
   .footer-gallery { margin-right: 5px; }
 }
 
+@media (max-width: 1339px) { #peer-light .peer-light-long { display: none; } }
+
 .footer-gallery { color: var(--link); }
 button.footer-gallery, button.footer-rating-link {
   background: none;
@@ -328,6 +330,10 @@ button.footer-rating-link { color: var(--fg-dim); }
 .tag-add-btn.active { color: var(--link); }
 .tag-wiki { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; }
 .tag-wiki:hover { color: var(--link); text-decoration: none; }
+@media (pointer: coarse) {
+  .tag-add-btn { width: 24px; padding: 7px 0; margin: -7px -5px; }
+  .tag-wiki { padding: 4px 8px; margin: -4px -8px; position: relative; z-index: 1; }
+}
 
 #gallery-header {
   display: flex;
@@ -788,6 +794,7 @@ body.marquee-active { user-select: none; }
 .tag-name-line > a { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tag-table .tag-name-builtin { white-space: nowrap; }
 .tag-select-col { width: 26px; text-align: center; }
+@media (pointer: coarse) { .tag-select { width: 20px; height: 20px; } }
 .tag-table th:nth-child(4), .tag-table td:nth-child(4) { width: 110px; }
 .tag-table th:nth-child(5), .tag-table td:nth-child(5) { width: 60px; }
 .tag-table th:nth-child(6), .tag-table td:nth-child(6) { width: 180px; max-width: 180px; }

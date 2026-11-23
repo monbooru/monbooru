@@ -17,6 +17,7 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 )
 
 const pairWindowLength = 10 * time.Minute
@@ -250,7 +251,7 @@ func (n autoPairNotice) Text() string {
 	case 0:
 		return ""
 	case 1:
-		return cmp.Or(n.Items[0].Worker(), n.Items[0].App) + " paired automatically"
+		return webui.NoticeName(cmp.Or(n.Items[0].Worker(), n.Items[0].App)) + " paired automatically"
 	}
 	return fmt.Sprintf("%d apps paired automatically", len(n.Items))
 }
