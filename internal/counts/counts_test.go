@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,5 +208,42 @@ func TestTallies_StaleStampedCountIsIgnored(t *testing.T) {
 
 	if n, ok := c.VisibleCount(); !ok || n != 1 {
 		t.Fatalf("VisibleCount = (%d, %v), want (1, true)", n, ok)
+	}
+}
+
+func TestCountedTagTotals_WalksImageTagsWithoutASort(t *testing.T) {
+	database := openCountsTestDB(t)
+
+	mustExec(t, database, `ANALYZE; DELETE FROM sqlite_stat1; DELETE FROM sqlite_stat4;
+		INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES
+			('tag_categories', 'sqlite_autoindex_tag_categories_1', '10 1'),
+			('image_tags', 'idx_image_tags_tag_image', '69903564 401 1'),
+			('image_tags', 'idx_image_tags_image', '69903564 51'),
+			('image_tags', 'sqlite_autoindex_image_tags_1', '69903564 51 1'),
+			('tags', 'idx_tags_category', '168351 2001'),
+			('tags', 'idx_tags_usage', '168351 2'),
+			('tags', 'sqlite_autoindex_tags_1', '168351 2 1');
+		ANALYZE sqlite_schema`)
+	rows, err := database.Write.Query(`EXPLAIN QUERY PLAN `+countedTagTotalsSQL, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if len(plan) == 0 || !strings.HasPrefix(plan[0], "SCAN it ") {
+		t.Errorf("image_tags does not lead:\n%s", strings.Join(plan, "\n"))
+	}
+	for _, step := range plan {
+		if strings.Contains(step, "TEMP B-TREE") {
+			t.Errorf("the walk sorts:\n%s", strings.Join(plan, "\n"))
+		}
 	}
 }

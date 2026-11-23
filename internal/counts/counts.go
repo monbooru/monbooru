@@ -113,19 +113,23 @@ func (c *CountedTags) Total(id int64) int32 {
 	return 0
 }
 
+// CROSS JOIN keeps image_tags leading in key order: started from the
+// categories, a large library sorts every row in a temp b-tree.
+const countedTagTotalsSQL = `SELECT it.image_id, count(*)
+	   FROM image_tags it
+	   CROSS JOIN tags t ON t.id = it.tag_id
+	   CROSS JOIN tag_categories tc ON tc.id = t.category_id
+	  WHERE tc.name != 'meta' AND t.usage_count <= ?
+	  GROUP BY it.image_id
+	  ORDER BY it.image_id`
+
 func (c *Tallies) CountedTagTotals(ctx context.Context, maxUsage int64) (*CountedTags, error) {
 	gen := c.gen.Load()
 	if t := c.countedTags.Load(); t != nil && t.gen == gen && t.maxUsage == maxUsage {
 		t.used.Store(time.Now().UnixNano())
 		return t, nil
 	}
-	rows, err := c.db.Read.QueryContext(ctx,
-		`SELECT it.image_id, count(*)
-		   FROM image_tags it
-		   JOIN tags t ON t.id = it.tag_id
-		   JOIN tag_categories tc ON tc.id = t.category_id
-		  WHERE tc.name != 'meta' AND t.usage_count <= ?
-		  GROUP BY it.image_id`, maxUsage)
+	rows, err := c.db.Read.QueryContext(ctx, countedTagTotalsSQL, maxUsage)
 	if err != nil {
 		return nil, fmt.Errorf("counted tag totals: %w", err)
 	}
