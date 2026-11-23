@@ -6,14 +6,28 @@
     <div id="viewer-message" class="viewer-message" aria-live="polite"></div>
     <button type="button" class="reader-side reader-side-prev" data-viewer="previous" title="Previous (&larr;)" aria-label="Previous">&lsaquo;</button>
     <button type="button" class="reader-side reader-side-next" data-viewer="next" title="Next (&rarr;)" aria-label="Next">&rsaquo;</button>
-    <button type="button" class="bar-handle" data-viewer="bar" title="Show the bar (b)">bar</button>
+    <button type="button" class="bar-handle" data-viewer="bar" title="Show the bar (b)">show</button>
+    <div class="viewer-progress" aria-hidden="true"><span></span></div>
   </div>
   <nav class="reader-bar viewer-bar">
     <span class="viewer-bar-group">
-      <button type="button" class="reader-back" data-viewer="exit" title="Exit (Esc)">&larr; Exit</button>
-      <button type="button" data-viewer="play" title="Play / pause (Space)" autofocus><span class="viewer-play-label">Play</span> <span class="btn-key-hint">(Space)</span></button>
-      <button type="button" data-viewer="bar" title="Hide the bar (b)">Hide</button>
-      <span id="viewer-zoom" class="reader-counter" title="Zoom (wheel, + -, 0 fit, 1 for 1:1)"></span>
+      <span class="viewer-bar-set">
+        <button type="button" class="reader-back" data-viewer="exit" title="Exit (Esc)">&larr; Exit</button>
+        <button type="button" data-viewer="play" title="Play / pause (Space)" autofocus><span class="viewer-play-label">Play</span> <span class="btn-key-hint">(Space)</span></button>
+        <select id="viewer-duration" title="Seconds per image">
+          <option value="2">2 s</option>
+          <option value="3">3 s</option>
+          <option value="5">5 s</option>
+          <option value="10">10 s</option>
+          <option value="15">15 s</option>
+          <option value="30">30 s</option>
+        </select>
+      </span>
+      <span class="viewer-bar-set">
+        <button type="button" data-viewer="restart" title="Restart video (r)">Restart</button>
+        <button type="button" data-viewer="loop" aria-pressed="false" title="Loop videos (l)">Loop: off</button>
+        <button type="button" data-viewer="mute" aria-pressed="false" title="Sound on / off (m)">Sound: off</button>
+      </span>
     </span>
     <span class="viewer-bar-group">
       <button type="button" class="reader-nav" data-viewer="first" title="First (Home)">|&lt;</button>
@@ -23,19 +37,19 @@
       <button type="button" class="reader-nav" data-viewer="last" title="Last (End)">&gt;|</button>
     </span>
     <span class="viewer-bar-group">
-      <select id="viewer-duration" title="Seconds per image">
-        <option value="2">2 s</option>
-        <option value="3">3 s</option>
-        <option value="5">5 s</option>
-        <option value="10">10 s</option>
-        <option value="15">15 s</option>
-        <option value="30">30 s</option>
+      <span id="viewer-zoom" class="reader-counter" title="Zoom (wheel, + -, 0 fit, 1 for 1:1)"></span>
+      <select id="viewer-opacity" title="How much the viewer covers the page behind">
+        <option value="100">Opacity 100%</option>
+        <option value="95">Opacity 95%</option>
+        <option value="90">Opacity 90%</option>
+        <option value="80">Opacity 80%</option>
+        <option value="70">Opacity 70%</option>
+        <option value="60">Opacity 60%</option>
+        <option value="50">Opacity 50%</option>
       </select>
-      <button type="button" data-viewer="restart" title="Restart video (r)">Restart</button>
-      <button type="button" data-viewer="loop" aria-pressed="false" title="Loop videos (l)">Loop: off</button>
-      <button type="button" data-viewer="mute" aria-pressed="false" title="Sound on / off (m)">Sound: off</button>
       <button type="button" data-viewer="fullscreen" title="Fullscreen (f)">&#x26F6; Fullscreen</button>
       <a id="viewer-open" href="" target="_blank" rel="noopener" title="Open original in new tab">&nearr;</a>
+      <button type="button" data-viewer="bar" title="Hide the bar (b)">Hide</button>
     </span>
   </nav>
 </dialog>

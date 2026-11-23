@@ -17,7 +17,7 @@
     <div id="page-notice" class="degraded-banner" hidden></div>
     <div class="reader-stage">
       <img src="/images/{{.Image.ID}}/page/{{.Page}}" alt="Page {{.Page}}" class="reader-img">
-      <button type="button" class="bar-handle" onclick="toggleBar(document.getElementById('reader'))" title="Show the bar (b)">bar</button>
+      <button type="button" class="bar-handle" onclick="toggleBar(document.getElementById('reader'))" title="Show the bar (b)">show</button>
       {{if gt .Page 1}}
       <a class="reader-side reader-side-prev" href="/images/{{.Image.ID}}/read?page={{sub .Page 1}}{{.BackKVQS}}" title="Previous page (←)" aria-label="Previous page">‹</a>
       {{else}}

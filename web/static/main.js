@@ -565,14 +565,14 @@ function toggleBar(host) {
 }
 
 var viewer = (function () {
-  var durations = [2, 3, 5, 10, 15, 30];
-  var dlg = null, slots = [], message = null, position = null, durationSelect = null, openLink = null, zoom = null, documentBound = false;
+  var durations = [2, 3, 5, 10, 15, 30], opacities = [100, 95, 90, 80, 70, 60, 50];
+  var dlg = null, slots = [], message = null, position = null, durationSelect = null, opacitySelect = null, progress = null, openLink = null, zoom = null, documentBound = false;
   var ids = [], videos = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
   var playing = true, muted = true, looping = false;
   var durationMs = 5000, remainingMs = 0, startedAt = null;
   var displayEpoch = 0, preloadEpoch = 0;
-  var autoTimer = null, skipTimer = null;
+  var autoTimer = null, skipTimer = null, progressTimer = null;
   var leavingFullscreen = false, restacks = 0;
   var detailStart = 0, detailBack = '', runEpoch = 0, afterShow = null;
   var actions = {
@@ -594,6 +594,15 @@ var viewer = (function () {
     var seconds = 5;
     try { seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10); } catch (e) {}
     return durations.indexOf(seconds) >= 0 ? seconds : 5;
+  }
+  function readOpacity() {
+    var percent = 95;
+    try { percent = parseInt(localStorage.getItem('monbooru_viewer_opacity') || '95', 10); } catch (e) {}
+    return opacities.indexOf(percent) >= 0 ? percent : 95;
+  }
+  function setOpacity(percent) {
+    opacitySelect.value = String(percent);
+    dlg.style.setProperty('--viewer-opacity', percent + '%');
   }
   function itemAt(i) {
     var id = ids[i], video = videos.has(id);
@@ -676,6 +685,7 @@ var viewer = (function () {
       v.muted = muted;
       v.currentTime = 0;
       v.onended = function () { if (index === slide.index) advance(); };
+      drawProgress();
       if (playing) playOrWait(v);
     } else {
       schedule();
@@ -713,8 +723,20 @@ var viewer = (function () {
 
   function schedule() {
     clearTimeout(autoTimer);
+    drawProgress();
     if (!dlg.open || !current || current.video || !playing || startedAt === null) return;
     autoTimer = setTimeout(advance, remainingMs - (Date.now() - startedAt));
+  }
+  function drawProgress() {
+    clearInterval(progressTimer);
+    var done = 0;
+    if (current && playing) {
+      var v = currentVideo();
+      if (v) done = v.duration ? v.currentTime / v.duration : 0;
+      else done = 1 - (startedAt === null ? remainingMs : remainingMs - (Date.now() - startedAt)) / durationMs;
+      if (v || startedAt !== null) progressTimer = setInterval(drawProgress, 100);
+    }
+    progress.style.width = Math.max(0, Math.min(100, Math.floor(done * 20) * 5)) + '%';
   }
   // The timer waits while an image is zoomed.
   function zoomChanged() {
@@ -727,6 +749,7 @@ var viewer = (function () {
       remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
       startedAt = null;
       clearTimeout(autoTimer);
+      drawProgress();
     }
   }
   function advance() {
@@ -742,6 +765,7 @@ var viewer = (function () {
     clearTimeout(autoTimer);
     var v = currentVideo();
     if (v) v.pause();
+    drawProgress();
     updateControls();
   }
   function resume() {
@@ -826,6 +850,7 @@ var viewer = (function () {
     preloadEpoch++;
     clearTimeout(autoTimer);
     clearTimeout(skipTimer);
+    clearInterval(progressTimer);
     prepared = null;
     current = null;
     afterShow = null;
@@ -842,6 +867,7 @@ var viewer = (function () {
     message = document.getElementById('viewer-message');
     position = document.getElementById('viewer-position');
     durationSelect = document.getElementById('viewer-duration');
+    progress = dlg.querySelector('.viewer-progress span');
     dlg.addEventListener('click', function (e) {
       var b = e.target.closest('[data-viewer]');
       if (b) actions[b.dataset.viewer]();
@@ -880,6 +906,11 @@ var viewer = (function () {
       startedAt = playing ? Date.now() : null;
       schedule();
     });
+    opacitySelect = document.getElementById('viewer-opacity');
+    opacitySelect.addEventListener('change', function () {
+      try { localStorage.setItem('monbooru_viewer_opacity', opacitySelect.value); } catch (e) {}
+      setOpacity(opacitySelect.value);
+    });
     if (!documentBound) bindDocument();
     return true;
   }
@@ -915,6 +946,7 @@ var viewer = (function () {
     looping = false;
     durationMs = readDuration() * 1000;
     durationSelect.value = String(durationMs / 1000);
+    setOpacity(readOpacity());
     updateControls();
     document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
     dlg.classList.toggle('bar-hidden', barHidden());
