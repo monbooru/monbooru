@@ -2360,7 +2360,6 @@ dialog:focus-visible { outline: none; }
 
 .save-search-terms { color: var(--link); font-style: italic; }
 
-.suggest-item.kbd-focused { background: var(--bg-input); outline: 1px solid var(--link); }
 
 .row-inactive { visibility: hidden; }
 
