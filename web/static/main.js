@@ -463,8 +463,8 @@ function zoomer(stage, opts) {
       // The finger still down goes on panning.
       pinch = null;
       var rest = Object.values(points);
-      if (rest.length === 1) startPan(rest[0].x, rest[0].y);
-      else stage.classList.remove('grabbing');
+      if (rest.length === 1) { startPan(rest[0].x, rest[0].y); pressed = true; pressMoved = true; }
+      else { panning = false; stage.classList.remove('grabbing'); }
       return;
     }
     if (!pressed) return;
@@ -475,7 +475,7 @@ function zoomer(stage, opts) {
     // a dblclick on it must not.
     if (pressMoved || !opts.onOutside || e.type === 'pointercancel') return;
     var r = contentRect();
-    if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) opts.onOutside();
+    if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) opts.onOutside(e);
   }
   stage.addEventListener('wheel', function (e) {
     if (!img) return;
@@ -574,13 +574,13 @@ var viewer = (function () {
   var displayEpoch = 0, preloadEpoch = 0;
   var autoTimer = null, skipTimer = null, progressTimer = null;
   var leavingFullscreen = false, restacks = 0;
-  var detailStart = 0, detailBack = '', runEpoch = 0, afterShow = null;
+  var detailStart = 0, detailBack = '', runEpoch = 0, afterShow = null, stalled = false;
   var actions = {
     first: function () { go(-ids.length); },
     previous: function () { go(-1); },
     next: function () { go(1); },
     last: function () { go(ids.length); },
-    play: function () { if (playing) pause(); else resume(); },
+    play: function () { if (button('play').disabled) return; if (playing) pause(); else resume(); },
     restart: restart,
     loop: toggleLoop,
     mute: toggleMuted,
@@ -646,7 +646,7 @@ var viewer = (function () {
     });
   }
 
-  function show(i) {
+  function show(i, dir) {
     if (i < 0 || i >= ids.length) return;
     clearTimeout(autoTimer);
     clearTimeout(skipTimer);
@@ -665,7 +665,7 @@ var viewer = (function () {
     prepareMedia(slots[slot], item).then(function (media) {
       if (epoch === displayEpoch) activate({ index: i, item: item, slot: slot, media: media });
     }, function (err) {
-      if (epoch === displayEpoch) skip(i, err.message, epoch);
+      if (epoch === displayEpoch) skip(i, err.message, epoch, dir || 1);
     });
   }
   function activate(slide) {
@@ -711,13 +711,15 @@ var viewer = (function () {
       if (epoch === preloadEpoch) prepared = { index: i, item: item, slot: slot, media: media };
     }, function () {});
   }
-  function skip(i, text, epoch) {
+  function skip(i, text, epoch, dir) {
     setMessage(text + ' Skipping...');
     skipTimer = setTimeout(function () {
       if (epoch !== displayEpoch) return;
-      if (i + 1 < ids.length) { show(i + 1); return; }
+      if (afterShow) { var merge = afterShow; afterShow = null; merge(); i = index; }
+      if (i + dir >= 0 && i + dir < ids.length) { show(i + dir, dir); return; }
       pause();
       setMessage(text);
+      stalled = true;
     }, 700);
   }
 
@@ -788,7 +790,7 @@ var viewer = (function () {
   }
   function go(delta) {
     var target = Math.max(0, Math.min(ids.length - 1, index + delta));
-    if (index >= 0 && target !== index) show(target);
+    if (index >= 0 && target !== index) show(target, delta === -1 || delta >= ids.length ? -1 : 1);
   }
   function restart() {
     var v = currentVideo();
@@ -878,7 +880,14 @@ var viewer = (function () {
       label: document.getElementById('viewer-zoom'),
       swipe: true,
       onChange: zoomChanged,
-      onOutside: function () { dlg.close(); },
+      onOutside: function (e) {
+        // A disabled side strip lets its press through to the stage.
+        var side = Array.from(stage.querySelectorAll('.reader-side')).some(function (s) {
+          var r = s.getBoundingClientRect();
+          return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        });
+        if (!side) dlg.close();
+      },
     });
     onSwipe(stage, function () { if (zoom.atFit()) actions.previous(); }, function () { if (zoom.atFit()) actions.next(); });
     dlg.addEventListener('close', function () {
@@ -916,6 +925,12 @@ var viewer = (function () {
   }
   function bindDocument() {
     documentBound = true;
+    document.body.addEventListener('htmx:beforeHistorySave', function () {
+      if (!dlg || !dlg.open) return;
+      index = -1;
+      teardown();
+      dlg.close();
+    });
     // On the document: a button disabled under focus drops it out of the dialog.
     document.addEventListener('keydown', function (e) {
       if (!dlg || !dlg.open || chorded(e) || e.target.tagName === 'SELECT') return;
@@ -937,6 +952,7 @@ var viewer = (function () {
   function open(list, videoList, at) {
     ids = list;
     videos = new Set(videoList);
+    stalled = false;
     index = -1;
     current = null;
     prepared = null;
@@ -1012,7 +1028,9 @@ var viewer = (function () {
               prefetch(index + 1);
             };
             // The image still loading owns the spare slot until it shows.
-            if (current) merge(); else afterShow = merge;
+            if (current) merge();
+            else if (stalled) { stalled = false; merge(); if (index + 1 < ids.length) show(index + 1, 1); }
+            else afterShow = merge;
           });
         }
       });
