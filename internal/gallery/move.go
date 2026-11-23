@@ -161,6 +161,9 @@ func PlaceImage(database *db.DB, b *Boundary, id int64, folder, name *string) (*
 		}, nil
 	}
 
+	if err := RootReadable(b.Root()); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create destination folder: %w", err)
 	}

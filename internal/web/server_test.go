@@ -1048,6 +1048,27 @@ func TestDegradedModeSyncBlocked(t *testing.T) {
 	wantCode(t, w, http.StatusServiceUnavailable)
 }
 
+func TestDegradedModeDeleteRefused(t *testing.T) {
+	srv := newTestServerWith(t, true, nil)
+	id := insertBareImage(t, srv, filepath.Join(srv.active().GalleryPath, "a.jpg"), "jpg", "abc123")
+
+	w := deleteWithCSRF(t, srv, fmt.Sprintf("/images/%d", id))
+	wantCode(t, w, http.StatusServiceUnavailable)
+	wantIn(t, w.Body.String(), "Delete unavailable: gallery path is unreadable.")
+
+	for _, route := range []string{"/internal/batch-delete", "/internal/delete-search"} {
+		w = postForm(t, srv, route, url.Values{"ids": {fmt.Sprint(id)}, "q": {""}})
+		wantCode(t, w, http.StatusAccepted)
+		awaitJobsDrain(t, srv)
+		if st := srv.jobs.Get(); st == nil || !strings.Contains(st.Error, "gallery path is unreadable") {
+			t.Errorf("%s: job = %+v, want it failed on the unreadable gallery path", route, st)
+		}
+	}
+	if n := countRows(t, srv.db(), "images WHERE id = ?", id); n != 1 {
+		t.Errorf("the row went (n=%d)", n)
+	}
+}
+
 func TestMissingImageBannerShown(t *testing.T) {
 	srv := newTestServer(t)
 	id, _ := mustExec(t, srv.db().Write, `

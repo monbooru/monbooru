@@ -73,6 +73,7 @@ var galleryCallsOutsideADoor = []string{
 	"gallery.ResolveCategoryTag",
 	"gallery.ResolveTagRefs",
 	"gallery.RewrittenBy",
+	"gallery.RootReadable",
 	"gallery.SanitizeReceivedName",
 	"gallery.ScanEmptyDirs",
 	"gallery.SearchFolders",

@@ -407,6 +407,7 @@ func buildSpec(baseURL string) map[string]any {
 						"413": resp("File exceeds max size", "#/components/schemas/Error"),
 						"415": resp("The file does not decode as an image", "#/components/schemas/Error"),
 						"500": resp("Ingest failure", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/images/search": map[string]any{
@@ -467,6 +468,7 @@ func buildSpec(baseURL string) map[string]any {
 						"204": map[string]any{"description": "Deleted"},
 						"404": resp("Not found", "#/components/schemas/Error"),
 						"500": resp("Delete failed server-side", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/images/{id}/enrich": map[string]any{
@@ -648,6 +650,7 @@ func buildSpec(baseURL string) map[string]any {
 						"413": resp("File exceeds max size", "#/components/schemas/Error"),
 						"415": resp("The file does not decode as an image", "#/components/schemas/Error"),
 						"500": resp("The replacement failed server-side", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 						"409": resp("wrong_type for an archive/video row or a non-image upload; already_exists when the uploaded bytes are another image (the pair is recorded as potential duplicates); conflict when the image's file is not this gallery's to rewrite (outside its root, or in a folder it leaves out)", "#/components/schemas/Error"),
 					},
 				},
