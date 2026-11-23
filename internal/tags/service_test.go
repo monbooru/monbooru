@@ -553,9 +553,9 @@ func TestSuggestTagsInCategory(t *testing.T) {
 	}
 
 	got := tagNames(results)
-	want := []string{"parasol", "parade", "comparable"}
+	want := []string{"parasol", "parade", "honored", "comparable"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("SuggestTags = %v, want %v (prefix matches in the named category by usage, then substring ones, no alias)", got, want)
+		t.Fatalf("SuggestTags = %v, want %v (prefix matches in the named category by usage, an alias standing for its tag, then substring ones)", got, want)
 	}
 	for _, r := range results {
 		if r.CategoryName != "character" {
@@ -3915,5 +3915,60 @@ func TestDeleteTag_RefusesOnAFailedRatingRead(t *testing.T) {
 	}
 	if n != 1 {
 		t.Error("the canonical rating row was deleted")
+	}
+}
+
+func TestSuggestTagsShowsATagThroughItsAlias(t *testing.T) {
+	database, svc := setupTestDB(t)
+	general := generalCategoryID(t, svc)
+	character := categoryIDOf(t, svc, "character")
+
+	feline, _ := svc.GetOrCreateTag("feline", character)
+	kite, _ := svc.GetOrCreateTag("kite", general)
+	kitsune, _ := svc.GetOrCreateTag("kitsune", general)
+	gone, _ := svc.GetOrCreateTag("gone", general)
+	mustCreateAlias(t, svc, "kitty", general, feline.ID)
+	mustCreateAlias(t, svc, "kitten", general, feline.ID)
+	mustCreateAlias(t, svc, "big_feline", general, feline.ID)
+	mustCreateAlias(t, svc, "kit_fox", general, kitsune.ID)
+	mustCreateAlias(t, svc, "kit_gone", general, gone.ID)
+	if _, err := database.Write.Exec(`UPDATE tags SET stale = 1 WHERE name = 'kitten'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Write.Exec(`UPDATE tags SET rejected = 1 WHERE id = ?`, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i, tag := range []*models.Tag{feline, feline, feline, kite, kite, kitsune} {
+		img := insertTestImage(t, database, fmt.Sprintf("alias_suggest_%d", i))
+		mustAddTag(t, svc, img, tag.ID, false, nil)
+	}
+
+	type row struct{ Name, Category, ViaAlias string }
+	rows := func(prefix, category string) []row {
+		t.Helper()
+		got, err := svc.SuggestTags(prefix, category, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []row{}
+		for _, g := range got {
+			out = append(out, row{g.Name, g.CategoryName, g.ViaAlias})
+		}
+		return out
+	}
+
+	everyCategory := []row{{"feline", "character", "kitten"}, {"kite", "general", ""}, {"kitsune", "general", ""}}
+	for _, tc := range []struct {
+		prefix, category string
+		want             []row
+	}{
+		{"kit", "", everyCategory},
+		{"kit", "general", everyCategory},
+		{"kit", "character", []row{}},
+		{"fel", "", []row{{"feline", "character", ""}}},
+	} {
+		if got := rows(tc.prefix, tc.category); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("SuggestTags(%q, %q) = %v, want %v", tc.prefix, tc.category, got, tc.want)
+		}
 	}
 }

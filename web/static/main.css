@@ -1507,6 +1507,7 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .suggest-name { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .suggest-description { flex: 1; color: var(--fg-dim); font-size: 11px; font-style: italic; overflow: hidden; text-overflow: ellipsis; }
 .suggest-count { color: var(--fg-dim); font-size: 11px; }
+.suggest-alias { color: var(--fg-dim); }
 
 .duplicates-section { margin-bottom: 16px; }
 .duplicates-section h3 { font-size: 13px; margin-bottom: 8px; }

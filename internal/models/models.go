@@ -217,6 +217,7 @@ type Tag struct {
 	CanonicalName          string // alias rows only, from the queries that join the canonical
 	CanonicalCategoryName  string
 	CanonicalCategoryColor string
+	ViaAlias               string
 	CreatedAt              time.Time
 	Origin                 string    // creation provenance label; "" when not recorded
 	LastUsedAt             time.Time // zero when never applied to an image

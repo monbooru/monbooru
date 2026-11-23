@@ -1092,11 +1092,27 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                SELECT i.id AS image_id FROM images i WHERE %[1]s LIMIT ?
 	            ),
 	            cand AS (
-	                SELECT id, category_id, usage_count
-	                FROM tags
-	                WHERE is_alias = 0
-	                  AND name LIKE ? ESCAPE '\'
-	                  %[2]s
+	                SELECT id, category_id, usage_count,
+	                       CASE WHEN MAX(own) = 1 THEN '' ELSE MIN(via_alias) END AS via_alias
+	                FROM (SELECT * FROM (
+	                          SELECT id, category_id, usage_count, 1 AS own, '' AS via_alias
+	                          FROM tags
+	                          WHERE is_alias = 0
+	                            AND name LIKE ? ESCAPE '\'
+	                            %[2]s
+	                          ORDER BY usage_count DESC
+	                          LIMIT ?)
+	                      UNION ALL
+	                      SELECT * FROM (
+	                          SELECT c.id, c.category_id, c.usage_count, 0 AS own, a.name AS via_alias
+	                          FROM tags a INDEXED BY idx_tags_alias_canonical
+	                          JOIN tags c ON c.id = a.canonical_tag_id
+	                          WHERE a.is_alias = 1 AND c.is_alias = 0
+	                            AND a.name LIKE ? ESCAPE '\'
+	                            %[4]s
+	                          ORDER BY c.usage_count DESC
+	                          LIMIT ?))
+	                GROUP BY id
 	                ORDER BY usage_count DESC
 	                LIMIT ?
 	            ),
@@ -1108,8 +1124,8 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                  AND %[3]s
 	                GROUP BY it.tag_id
 	            )
-	            SELECT id, name, cat, color, combo FROM (
-	                SELECT c.id, t.name, tc.name AS cat, tc.color, c.usage_count,
+	            SELECT id, name, cat, color, combo, via_alias FROM (
+	                SELECT c.id, t.name, tc.name AS cat, tc.color, c.usage_count, c.via_alias,
 	                    c.usage_count > ? AND (SELECT COUNT(*) FROM ctx) > ? AS sampled, MAX(
 	                    COALESCE(own.n, 0),
 	                    (SELECT COUNT(*) FROM image_tags it
@@ -1123,31 +1139,35 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	            ORDER BY sampled DESC, combo DESC, usage_count DESC
 	            LIMIT ?`
 
-	catClause := ""
+	catClause, aliasCatClause := "", ""
 	catArgs := []any{}
 	if categoryName != "" {
 		catClause = "AND category_id = (SELECT id FROM tag_categories WHERE name = ?)"
+		aliasCatClause = "AND a.category_id = (SELECT id FROM tag_categories WHERE name = ?)"
 		catArgs = []any{categoryName}
 	}
 
 	return tags.SuggestTwoPass(db.EscapeLike(prefix), limit, func(pat, notLike string, n int) ([]models.Tag, error) {
-		extra := catClause
-		qargs := make([]any, 0, 7+len(args)+len(ownArgs)+len(catArgs))
+		extra, aliasExtra := catClause, aliasCatClause
+		qargs := make([]any, 0, 12+len(args)+len(ownArgs)+2*len(catArgs))
 		qargs = append(qargs, args...)
 		// One row past the cap tells a sample from the whole context.
 		qargs = append(qargs, suggestContextCap+1)
-		qargs = append(qargs, pat)
-		qargs = append(qargs, catArgs...)
+		leg := make([]any, 0, 3+len(catArgs))
+		leg = append(leg, pat)
+		leg = append(leg, catArgs...)
 		if notLike != "" {
 			extra = extra + ` AND name NOT LIKE ? ESCAPE '\'`
-			qargs = append(qargs, notLike)
+			aliasExtra = aliasExtra + ` AND a.name NOT LIKE ? ESCAPE '\'`
+			leg = append(leg, notLike)
 		}
+		leg = append(leg, suggestCandidateCap)
+		qargs = append(qargs, leg...)
+		qargs = append(qargs, leg...)
 		qargs = append(qargs, suggestCandidateCap, suggestContextCap, suggestContextCap)
 		qargs = append(qargs, ownArgs...)
 		qargs = append(qargs, suggestContextCap, suggestContextCap, n)
-		return db.QueryAll(database.Read, db.ScanRow(func(t *models.Tag) []any {
-			return []any{&t.ID, &t.Name, &t.CategoryName, &t.CategoryColor, &t.UsageCount}
-		}), fmt.Sprintf(baseSQL, where, extra, ownWhere), qargs...)
+		return db.QueryAll(database.Read, tags.ScanSuggestion, fmt.Sprintf(baseSQL, where, extra, ownWhere, aliasExtra), qargs...)
 	})
 }
 

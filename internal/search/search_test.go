@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -4330,6 +4331,55 @@ func TestSuggestTagsWithFilter(t *testing.T) {
 	}
 	if got[0].UsageCount != 2 {
 		t.Errorf("expected combo count 2 for alpha+beta, got %d", got[0].UsageCount)
+	}
+}
+
+func TestSuggestTagsWithFilter_CountsAnAliasAsItsTag(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	for _, name := range []string{"alias1.png", "alias2.png", "alias3.png"} {
+		ingestTestImage(t, database, cfg, name)
+	}
+	ids, err := db.QueryIDs(database.Read, `SELECT id FROM images ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catID := categoryID(t, database, "general")
+	alpha := insertTag(t, database, "alpha", catID, 0)
+	canine := insertTag(t, database, "canine", catID, 0)
+	dogma := insertTag(t, database, "dogma", catID, 0)
+	mustExec(t, database.Write,
+		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('doggo', ?, 1, ?)`, catID, canine)
+	for _, pair := range [][2]int64{{ids[0], alpha}, {ids[1], alpha}, {ids[0], canine}, {ids[2], canine}, {ids[2], dogma}} {
+		mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto) VALUES (?, ?, 0)`, pair[0], pair[1])
+		mustExec(t, database.Write, `UPDATE tags SET usage_count = usage_count + 1 WHERE id = ?`, pair[1])
+	}
+
+	type row struct {
+		Name, ViaAlias string
+		Count          int
+	}
+	for _, tc := range []struct {
+		context string
+		want    []row
+	}{
+		{"", []row{{"canine", "doggo", 2}, {"dogma", "", 1}}},
+		{"alpha", []row{{"canine", "doggo", 1}}},
+	} {
+		var expr Expr
+		if tc.context != "" {
+			expr = Parse(tc.context)
+		}
+		got, err := SuggestTagsWithFilter(testSource(database), expr, "dog", "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := []row{}
+		for _, g := range got {
+			rows = append(rows, row{g.Name, g.ViaAlias, g.UsageCount})
+		}
+		if !reflect.DeepEqual(rows, tc.want) {
+			t.Errorf("context %q: got %v, want %v", tc.context, rows, tc.want)
+		}
 	}
 }
 
