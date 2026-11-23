@@ -169,6 +169,23 @@ func TestSetSourceField_UpsertClearAndCreate(t *testing.T) {
 	}
 }
 
+func TestSetSourceOriginal_TwoSourcesShareAnOriginal(t *testing.T) {
+	database := newCollectionsTestDB(t)
+	id := insertImage(t, database, false)
+	_ = AddSourceMembership(database, id, "danbooru", "10", "https://danbooru.example/posts/10")
+	_ = AddSourceMembership(database, id, "gelbooru", "20", "https://gelbooru.example/posts/20")
+	if err := SetSourceOriginal(database, id, "danbooru", "10", "https://social.example/a/status/1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetSourceOriginal(database, id, "gelbooru", "20", "https://Social.example/a/status/1"); err != nil {
+		t.Fatalf("the second source's original: %v", err)
+	}
+	if srcs, _ := SourcesForImage(database, id); len(srcs) != 2 || srcs[1].Original != "https://Social.example/a/status/1" {
+		t.Fatalf("sources = %+v, want the gelbooru original stored", srcs)
+	}
+}
+
 func TestSeedImageSourcesFromScalar(t *testing.T) {
 	database := newCollectionsTestDB(t)
 

@@ -821,6 +821,15 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 		t.Errorf("keys = %q, want only the http(s) original", got)
 	}
 
+	const sameOriginal = `INSERT INTO image_sources (image_id, site, post_id, original) VALUES (1, 'social', '1', 'https://social.example/user_a/status/1')
+		ON CONFLICT(image_id, site, post_id) DO UPDATE SET original = excluded.original`
+	if _, err := db.Write.Exec(sameOriginal); err != nil {
+		t.Fatalf("an upsert giving a second source the same original: %v", err)
+	}
+	if got := sourceURLKeysOf(t, db, 1); !slices.Equal(got, want) {
+		t.Errorf("after the upsert: keys = %q, want %q", got, want)
+	}
+
 	mustExec(t, db.Write, `UPDATE image_sources SET original = '' WHERE image_id = 1 AND site = 'booru'`)
 	if got, want := sourceURLKeysOf(t, db, 1), []string{"booru.example/posts/7", "social.example/user_a/status/1"}; !slices.Equal(got, want) {
 		t.Errorf("after clearing the original: keys = %q, want %q (the social row still carries its url)", got, want)
@@ -842,6 +851,24 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 	}
 	if got := sourceURLKeysOf(t, db, 2); !slices.Equal(got, []string{`quote.example/"q"\`}) {
 		t.Errorf("another image's keys = %q after the delete", got)
+	}
+
+	triggers, err := QueryStrings(db.Read, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_image_sources_urls_%'`)
+	if err != nil || len(triggers) != 3 {
+		t.Fatalf("source url triggers: %d, %v", len(triggers), err)
+	}
+	mustExec(t, db.Write, `DROP TRIGGER trg_image_sources_urls_ai; DROP TRIGGER trg_image_sources_urls_au; DROP TRIGGER trg_image_sources_urls_ad`)
+	for _, sql := range triggers {
+		mustExec(t, db.Write, strings.ReplaceAll(sql, "GROUP BY image_id, key COLLATE NOCASE", ""))
+	}
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (2, 'other', '', 'https://other.example/1')`)
+	if _, err := db.Write.Exec(`INSERT INTO image_sources (image_id, site, post_id, original) VALUES (2, 'other', '', 'https://quote.example/"q"\')
+		ON CONFLICT(image_id, site, post_id) DO UPDATE SET original = excluded.original`); err != nil {
+		t.Fatalf("a library that had the triggers without their GROUP BY: %v", err)
+	}
+	if got, want := sourceURLKeysOf(t, db, 2), []string{"other.example/1", `quote.example/"q"\`}; !slices.Equal(got, want) {
+		t.Errorf("keys = %q, want %q", got, want)
 	}
 }
 

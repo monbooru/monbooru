@@ -817,6 +817,7 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 	}
 	markers := make([]*inboxCluster, len(images))
 	gap := time.Duration(batchGapMinutes) * time.Minute
+	flagged := len(search.Unreadable(queryStr)) > 0
 	start := 0
 	for i := 1; i <= len(images); i++ {
 		closeCluster := i == len(images)
@@ -833,6 +834,9 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 		if closeCluster {
 			spills := (start == 0 && moreAbove) || (i == len(images) && moreBelow)
 			markers[start] = buildInboxCluster(images[start:i], queryStr, !spills)
+			if flagged {
+				markers[start].RangeLink, markers[start].RangeQuery = "", ""
+			}
 			start = i
 		}
 	}

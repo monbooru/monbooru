@@ -95,13 +95,14 @@ func SuggestUsageRanked(database *db.DB, prefix, categoryName string, requireUsa
 	                            LIMIT ?)
 	                        UNION ALL
 	                        SELECT * FROM (
-	                            SELECT c.id, c.name, c.category_id, c.usage_count, 0 AS own, a.name AS via_alias
+	                            SELECT c.id, c.name, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
 	                            FROM tags a INDEXED BY idx_tags_alias_canonical
 	                            JOIN tags c ON c.id = a.canonical_tag_id
 	                            WHERE a.is_alias = 1 AND c.is_alias = 0 AND c.rejected = 0
 	                              %[3]s
 	                              AND a.name LIKE ? ESCAPE '\'
 	                              %[4]s
+	                            GROUP BY c.id
 	                            ORDER BY c.usage_count DESC, c.name ASC
 	                            LIMIT ?))
 	                  GROUP BY id

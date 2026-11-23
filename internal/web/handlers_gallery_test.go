@@ -66,6 +66,25 @@ func TestComputeInboxClusters_ExactBoundary(t *testing.T) {
 	})
 }
 
+func TestInboxClusterHeader_UnreadableQueryOffersNoWholeBatch(t *testing.T) {
+	srv := newTestServer(t)
+	seedImage(t, srv, "one.png", 8, 8)
+	b := do(srv, "GET", "/?q="+url.QueryEscape("inbox:true")).Body.String()
+	wantIn(t, b, `class="thumb-cluster-range"`)
+	wantIn(t, b, "data-cluster-all=")
+	wantIn(t, b, "data-cluster-select")
+
+	b = do(srv, "GET", "/?q="+url.QueryEscape("inbox:true (")).Body.String()
+	wantIn(t, b, "Could not read: unclosed (")
+	wantIn(t, b, `class="thumb-cluster-header"`)
+	wantIn(t, b, "data-cluster-select")
+	for _, gone := range []string{`class="thumb-cluster-range"`, "data-cluster-all"} {
+		if strings.Contains(b, gone) {
+			t.Errorf("a flagged query still renders %s", gone)
+		}
+	}
+}
+
 func TestComputeInboxClusters_MixedSizes(t *testing.T) {
 	at := func(day, hour, minute int) time.Time {
 		return time.Date(2026, 5, day, hour, minute, 0, 0, time.Local)
@@ -149,6 +168,27 @@ func TestComputeInboxClusters_UploadBatch(t *testing.T) {
 		got := computeInboxClusters(imgs, "inbox:true", false, false)
 		if got[0].RangeQuery != "inbox:true batch:200" || got[1].RangeQuery != "inbox:true batch:100" {
 			t.Fatalf("queries = %q / %q", got[0].RangeQuery, got[1].RangeQuery)
+		}
+	})
+
+	t.Run("a query flagged unreadable names no batch", func(t *testing.T) {
+		imgs := []models.Image{
+			{ID: 2, IngestedAt: base.Add(time.Second), UploadBatch: batch(200)},
+			{ID: 1, IngestedAt: base},
+		}
+		for _, q := range []string{"inbox:true ( a OR b", "inbox:true a OR", "inbox:true width:>abc"} {
+			got := computeInboxClusters(imgs, q, false, false)
+			if got[0] == nil || got[1] == nil {
+				t.Fatalf("%q: expected two clusters, got %+v / %+v", q, got[0], got[1])
+			}
+			for _, c := range got {
+				if c.RangeQuery != "" || c.RangeLink != "" {
+					t.Errorf("%q: query %q, link %q, want none", q, c.RangeQuery, c.RangeLink)
+				}
+				if c.RangeLabel == "" || c.Count != 1 || !c.Whole {
+					t.Errorf("%q: cluster %+v, want its label, count and whole mark kept", q, c)
+				}
+			}
 		}
 	})
 

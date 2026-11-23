@@ -1104,12 +1104,13 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                          LIMIT ?)
 	                      UNION ALL
 	                      SELECT * FROM (
-	                          SELECT c.id, c.category_id, c.usage_count, 0 AS own, a.name AS via_alias
+	                          SELECT c.id, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
 	                          FROM tags a INDEXED BY idx_tags_alias_canonical
 	                          JOIN tags c ON c.id = a.canonical_tag_id
 	                          WHERE a.is_alias = 1 AND c.is_alias = 0
 	                            AND a.name LIKE ? ESCAPE '\'
 	                            %[4]s
+	                          GROUP BY c.id
 	                          ORDER BY c.usage_count DESC
 	                          LIMIT ?))
 	                GROUP BY id

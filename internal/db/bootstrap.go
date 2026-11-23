@@ -113,6 +113,11 @@ func Bootstrap(db *DB) error {
 	addRow := `INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT NEW.image_id AS image_id, NEW.url AS url, NEW.original AS original)")
 	rebuildImage := `DELETE FROM image_source_urls WHERE image_id = OLD.image_id;
 		INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT image_id, url, original FROM image_sources WHERE image_id = OLD.image_id)")
+	if b.queryInt("probe the source url triggers", `SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'trigger' AND name LIKE 'trg_image_sources_urls_a_' AND sql NOT LIKE '%GROUP BY%'`) > 0 {
+		b.exec("drop the source url triggers", `DROP TRIGGER IF EXISTS trg_image_sources_urls_ai;
+			DROP TRIGGER IF EXISTS trg_image_sources_urls_au; DROP TRIGGER IF EXISTS trg_image_sources_urls_ad`)
+	}
 	for _, t := range []struct{ name, event, body string }{
 		{"trg_image_sources_urls_ai", "AFTER INSERT ON image_sources", addRow},
 		{"trg_image_sources_urls_au", "AFTER UPDATE OF url, original ON image_sources WHEN NEW.url IS NOT OLD.url OR NEW.original IS NOT OLD.original", rebuildImage},
@@ -606,7 +611,8 @@ func sourceURLKeys(rows string) string {
 			ELSE substr(u, 8) END AS key
 		FROM (SELECT s.image_id, trim(j.value, ' ' || char(9, 13)) AS u FROM ` + rows + ` s,
 			json_each('[' || replace(json_quote(replace(s.url || char(10) || s.original, char(10), char(57344))), char(57344), '","') || ']') j)
-		WHERE (u LIKE 'http://%' OR u LIKE 'https://%') AND key != ''`
+		WHERE (u LIKE 'http://%' OR u LIKE 'https://%') AND key != ''
+		GROUP BY image_id, key COLLATE NOCASE`
 }
 
 func pairsResweepBody(predA, predB string) string {

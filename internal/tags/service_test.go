@@ -3972,3 +3972,23 @@ func TestSuggestTagsShowsATagThroughItsAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestSuggestTagsKeepsRoomForEachTagAnAliasNames(t *testing.T) {
+	database, svc := setupTestDB(t)
+	general := generalCategoryID(t, svc)
+	crowded, _ := svc.GetOrCreateTag("crowded", general)
+	other, _ := svc.GetOrCreateTag("other", general)
+	for i := 0; i < 12; i++ {
+		mustCreateAlias(t, svc, fmt.Sprintf("zz_%02d", i), general, crowded.ID)
+	}
+	mustCreateAlias(t, svc, "zz_second", general, other.ID)
+	mustAddTag(t, svc, insertTestImage(t, database, "alias_room"), crowded.ID, false, nil)
+
+	got, err := svc.SuggestTags("zz", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "crowded" || got[0].ViaAlias != "zz_00" || got[1].Name != "other" || got[1].ViaAlias != "zz_second" {
+		t.Errorf("SuggestTags(zz) = %+v, want crowded through zz_00, then other through zz_second", got)
+	}
+}

@@ -159,6 +159,29 @@ func TestUnreadable_Grouping(t *testing.T) {
 	}
 }
 
+func TestParse_AQueryOfTooManyTermsMatchesNothing(t *testing.T) {
+	database, _ := setupSearchDB(t)
+	seedWalkFixture(t, database)
+	if got := Unreadable(strings.Repeat("walk_a ", 500)); got != nil {
+		t.Errorf("500 terms: Unreadable = %q, want nil", got)
+	}
+	for name, q := range map[string]string{
+		"501 terms":    strings.Repeat("walk_a ", 501),
+		"chained NOTs": strings.Repeat("-", 300000) + "walk_a",
+		"plain terms":  strings.Repeat("walk_a ", 300000),
+	} {
+		if got := Unreadable(q); !slices.Equal(got, []string{"query too long"}) {
+			t.Errorf("%s: Unreadable = %q, want query too long", name, got)
+		}
+		res, err := Execute(context.Background(), testSource(database), Query{Expr: Parse(q), Page: 1, Limit: 4})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+		} else if len(res.Results) != 0 || res.Total != 0 {
+			t.Errorf("%s: %d rows of %d, want none", name, len(res.Results), res.Total)
+		}
+	}
+}
+
 func TestParse_QuoteAfterEqualsKeepsTheValueWhole(t *testing.T) {
 	ipa := FilterExpr{Key: "comfyui", Val: "title=My IPA"}
 	for _, tc := range []struct {
@@ -4380,6 +4403,36 @@ func TestSuggestTagsWithFilter_CountsAnAliasAsItsTag(t *testing.T) {
 		if !reflect.DeepEqual(rows, tc.want) {
 			t.Errorf("context %q: got %v, want %v", tc.context, rows, tc.want)
 		}
+	}
+}
+
+func TestSuggestTagsWithFilter_KeepsRoomForEachTagAnAliasNames(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "room.png")
+	ids, err := db.QueryIDs(database.Read, `SELECT id FROM images ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catID := categoryID(t, database, "general")
+	alpha := insertTag(t, database, "alpha", catID, 1)
+	crowded := insertTag(t, database, "crowded", catID, 2)
+	other := insertTag(t, database, "other", catID, 1)
+	for _, tagID := range []int64{alpha, crowded, other} {
+		mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto) VALUES (?, ?, 0)`, ids[0], tagID)
+	}
+	for i := 0; i < suggestCandidateCap+5; i++ {
+		mustExec(t, database.Write,
+			`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES (?, ?, 1, ?)`, fmt.Sprintf("zz_%02d", i), catID, crowded)
+	}
+	mustExec(t, database.Write,
+		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('zz_second', ?, 1, ?)`, catID, other)
+
+	got, err := SuggestTagsWithFilter(testSource(database), Parse("alpha"), "zz", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "crowded" || got[0].ViaAlias != "zz_00" || got[1].Name != "other" || got[1].ViaAlias != "zz_second" {
+		t.Errorf("got %+v, want crowded through zz_00, then other through zz_second", got)
 	}
 }
 

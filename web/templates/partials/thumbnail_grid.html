@@ -37,10 +37,10 @@
   {{if $.InboxClusterAtIdx}}{{with index $.InboxClusterAtIdx $i}}
   <div class="thumb-cluster-header" data-cluster-start="{{$i}}"{{if .Whole}} data-cluster-whole{{end}}>
     <span class="thumb-cluster-rule" aria-hidden="true"></span>
-    <span class="thumb-cluster-label mono-small">{{.DateLabel}} · <a class="thumb-cluster-range" href="{{.RangeLink}}">{{.RangeLabel}}</a> · {{.Count}} on this page</span>
+    <span class="thumb-cluster-label mono-small">{{.DateLabel}} · {{if .RangeLink}}<a class="thumb-cluster-range" href="{{.RangeLink}}">{{.RangeLabel}}</a>{{else}}{{.RangeLabel}}{{end}} · {{.Count}} on this page</span>
     <span class="thumb-cluster-rule" aria-hidden="true"></span>
     <button type="button" class="btn-sm thumb-cluster-select" data-cluster-unselect hidden>[Unselect]</button>
-    <button type="button" class="btn-sm thumb-cluster-select" data-cluster-all="{{.RangeQuery}}" title="The whole batch, including the part on other pages.">[Select whole batch]</button>
+    {{if .RangeQuery}}<button type="button" class="btn-sm thumb-cluster-select" data-cluster-all="{{.RangeQuery}}" title="The whole batch, including the part on other pages.">[Select whole batch]</button>{{end}}
     <button type="button" class="btn-sm thumb-cluster-select" data-cluster-select>[Select these]</button>
   </div>
   {{end}}{{end}}
