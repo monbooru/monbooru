@@ -132,6 +132,18 @@ func Sync(ctx context.Context, h Handle, maxFileSizeMB int, naming Naming, progr
 	// reorganise a tree the operator arranged before monbooru saw it.
 	adopting := len(bySHA) == 0
 
+	// A canonical file goes before its copies: rewritten alike, the copy
+	// met first would take the new bytes as an image of its own.
+	slices.SortStableFunc(found, func(a, b syncFileInfo) int {
+		switch ca, cb := known[a.path].canonical, known[b.path].canonical; {
+		case ca && !cb:
+			return -1
+		case cb && !ca:
+			return 1
+		}
+		return 0
+	})
+
 	var ingested []int64
 	changed := 0
 	for i, fi := range found {

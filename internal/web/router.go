@@ -1224,6 +1224,7 @@ func (s *Server) planMangaPage(
 	}
 	page, err := ensure(s.thumbnailsPath(), canonPath, id, n)
 	if err != nil {
+		logx.Warnf("page %d of image %s: %v", n, idStr, err)
 		http.NotFound(w, r)
 		return "", false
 	}

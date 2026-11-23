@@ -1356,7 +1356,7 @@ func TestExtract_JPEG_OversizedTagCount(t *testing.T) {
 	}
 }
 
-func TestJPEGEXIF_FindsBlockAndRejectsBadCount(t *testing.T) {
+func TestJPEGEXIF_FindsBlockAndSkipsBadCount(t *testing.T) {
 	t.Parallel()
 	path := makeJPEGWithRawIFD0(t, 0x9286, 4, 0x40000001, 26)
 	f, err := os.Open(path)
@@ -1369,8 +1369,12 @@ func TestJPEGEXIF_FindsBlockAndRejectsBadCount(t *testing.T) {
 	if len(block) == 0 {
 		t.Fatal("APP1 walk found no EXIF block")
 	}
-	if _, err := decodeEXIF(block); err == nil {
-		t.Error("a count wrapping uint32 must fail the decode")
+	x, err := decodeEXIF(block)
+	if err != nil {
+		t.Fatalf("a count wrapping uint32 failed the decode: %v", err)
+	}
+	if _, ok := x.tags[userCommentField]; ok {
+		t.Error("a count wrapping uint32 was kept")
 	}
 }
 

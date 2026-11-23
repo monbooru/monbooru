@@ -597,6 +597,45 @@ func TestSync_ARewrittenCopyBecomesAnImageOfItsOwn(t *testing.T) {
 	}
 }
 
+func TestSync_ACanonicalAndItsCopyRewrittenAlikeStayOneImage(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	canonical := createTestPNGFileSize(t, galleryDir, "z.png", 10, 10)
+	env.sync(t, database)
+
+	copyPath := filepath.Join(galleryDir, "a.png")
+	mustWriteFile(t, copyPath, mustReadFile(t, canonical), 0o644)
+	env.sync(t, database)
+	id := imageIDByPath(t, database, canonical)
+	tagID := insertTag(t, database, "kept", "general", 0)
+	mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id) VALUES (?, ?)`, id, tagID)
+	createTestPNGFileSize(t, galleryDir, "z.png", 12, 12)
+	mustWriteFile(t, copyPath, mustReadFile(t, canonical), 0o644)
+	sha, err := HashFile(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if r := env.sync(t, database); r.Conflicts != 0 || r.Edited != 1 {
+		t.Errorf("sync = %+v, want one file re-read and no conflict", r)
+	}
+
+	if n := countRows(t, database, "images"); n != 1 {
+		t.Errorf("images = %d, want the one row re-derived in place", n)
+	}
+	if n := countRows(t, database, "images WHERE id = ? AND sha256 = ? AND canonical_path = ?", id, sha, canonical); n != 1 {
+		t.Error("the tagged row does not describe the new bytes of its own file")
+	}
+	if n := countRows(t, database, "image_tags WHERE image_id = ? AND tag_id = ?", id, tagID); n != 1 {
+		t.Errorf("seeded tag on the row = %d, want the edit to keep it", n)
+	}
+	if n := countRows(t, database, "image_paths WHERE path = ? AND image_id = ? AND is_canonical = 0", copyPath, id); n != 1 {
+		t.Error("a.png is not recorded as the copy of the rewritten image")
+	}
+	if again := env.sync(t, database); again != (SyncResult{}) {
+		t.Errorf("the next sync = %+v, want nothing to do", again)
+	}
+}
+
 func TestSync_AFileRenamedOverAnotherIsAConflict(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	a := createTestPNGFileSize(t, galleryDir, "a.png", 10, 10)
