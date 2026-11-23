@@ -523,6 +523,29 @@ func TestGallery_ACursorPage1WithRowsAboveOffersPrev(t *testing.T) {
 	}
 }
 
+func TestGallery_AnInboxBatchCutByACursorPageEdgeIsNotWhole(t *testing.T) {
+	srv := newTestServer(t)
+	srv.cfg.UI.PageSize = 5
+	ids := insertRankRows(t, srv, "cut", 12)
+	insertRankRows(t, srv, "landed", 3)
+
+	mustExec(t, srv.db().Write, `UPDATE images SET is_inbox = 1, upload_batch = 3`)
+	mustExec(t, srv.db().Write, `UPDATE images SET upload_batch = 2 WHERE id BETWEEN ? AND ?`, ids[6], ids[9])
+	mustExec(t, srv.db().Write, `UPDATE images SET upload_batch = 1 WHERE id >= ?`, ids[10])
+	srv.active().InvalidateCaches()
+
+	for name, url := range map[string]string{
+		"rows above a page 1":    fmt.Sprintf("/?q=inbox:true&page=1&before=%d", ids[6]),
+		"rows below a last page": fmt.Sprintf("/?q=inbox:true&page=3&after=%d", ids[9]),
+	} {
+		body := mustGetBody(t, srv, url)
+		wantIn(t, body, `data-cluster-start="0"`)
+		if strings.Contains(body, "data-cluster-whole") {
+			t.Errorf("%s: a batch the page's edge cuts reads as whole: %s", name, sliceAround(body, "data-cluster-whole", 200))
+		}
+	}
+}
+
 func TestGallery_ACursorPageKeepsItsRowsWhenMatchesLeaveAbove(t *testing.T) {
 	srv := newTestServer(t)
 	srv.cfg.UI.PageSize = 5
