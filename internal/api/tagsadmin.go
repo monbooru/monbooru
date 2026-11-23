@@ -92,6 +92,7 @@ func writeTagError(w http.ResponseWriter, err error) {
 		{tags.ErrImplicationNotFound, http.StatusNotFound, "not_found"},
 		{tags.ErrCategoryNotFound, http.StatusBadRequest, "invalid_request"},
 		{tags.ErrTagNameTaken, http.StatusConflict, "conflict"},
+		{tags.ErrTagGlobal, http.StatusConflict, "conflict"},
 		{tags.ErrTagRejected, http.StatusConflict, "rejected"},
 		{tags.ErrAliasToRejected, http.StatusConflict, "rejected"},
 		{tags.ErrAliasNameInUse, http.StatusConflict, "conflict"},

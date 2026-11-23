@@ -28,6 +28,9 @@ func (s *Service) RejectTag(id int64) error {
 		case err != nil:
 			return err
 		}
+		if err := refuseGlobalTx(tx, id); err != nil {
+			return err
+		}
 		return s.rejectTx(tx, id, isAlias == 1, catID)
 	})
 }

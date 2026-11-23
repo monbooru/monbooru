@@ -1002,3 +1002,76 @@ func TestBootstrapBackfillsTaggerRunsFromTheAutoTagsOfStampedImages(t *testing.T
 		t.Errorf("runs after a loaded document = %d, want 2", n)
 	}
 }
+
+func globalChanges(t *testing.T, db *DB) []string {
+	t.Helper()
+	rows, err := db.Read.Query(`SELECT tag_id || ' ' || category || ':' || name FROM global_tag_changes ORDER BY tag_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestGlobalTagChangesAreRecorded(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	general := `(SELECT id FROM tag_categories WHERE name = 'general')`
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id) VALUES (101, 'animation', `+general+`), (102, 'video', `+general+`), (103, 'local', `+general+`)`)
+
+	step := func(label, stmt string, want ...string) {
+		t.Helper()
+		mustExec(t, db.Write, stmt)
+		if got := globalChanges(t, db); !slices.Equal(got, want) {
+			t.Errorf("%s: recorded %v, want %v", label, got, want)
+		}
+		mustExec(t, db.Write, `DELETE FROM global_tag_changes`)
+	}
+
+	step("a rule on a local tag", `INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('loc', `+general+`, 1, 103)`)
+	step("marking", `UPDATE tags SET is_global = 1 WHERE id IN (101, 102)`, "101 general:animation", "102 general:video")
+	step("a usage count", `UPDATE tags SET usage_count = usage_count + 1 WHERE id = 101`)
+	step("an alias", `INSERT INTO tags (id, name, category_id, is_alias, canonical_tag_id) VALUES (110, 'anime', `+general+`, 1, 101)`, "101 general:animation")
+	step("an alias repointed", `UPDATE tags SET canonical_tag_id = 102 WHERE id = 110`, "101 general:animation", "102 general:video")
+	step("an alias deleted", `DELETE FROM tags WHERE id = 110`, "102 general:video")
+	step("an implication", `INSERT INTO tag_implications (parent_tag_id, implied_tag_id) VALUES (101, 102)`, "101 general:animation")
+	step("an implication removed", `DELETE FROM tag_implications WHERE parent_tag_id = 101`, "101 general:animation")
+	step("a note", `INSERT INTO tag_notes (tag_id, body) VALUES (101, 'moving pictures')`, "101 general:animation")
+	step("a rename, under the old name", `UPDATE tags SET name = 'animated' WHERE id = 101`, "101 general:animation")
+
+	removed := func(want ...string) {
+		t.Helper()
+		var got []string
+		rows, err := db.Read.Query(`SELECT tag_id || ' ' || kind || ' ' || category || ':' || name FROM global_tag_removals ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, s)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("removals = %v, want %v", got, want)
+		}
+	}
+	removed("101 alias general:anime", "101 implies general:video", "102 alias general:anime")
+
+	mustExec(t, db.Write, `INSERT INTO global_tag_applying (id) VALUES (1)`)
+	step("while another gallery's changes land", `UPDATE tags SET name = 'animation' WHERE id = 101`)
+	mustExec(t, db.Write, `DELETE FROM global_tag_applying`)
+
+	step("made local", `UPDATE tags SET is_global = 0 WHERE id = 102`, "102 general:video")
+	step("deleted", `DELETE FROM tags WHERE id = 101`, "101 general:animation")
+}

@@ -47,6 +47,7 @@ func (s *Server) addGallery(name, galleryPath string) error {
 		return err
 	}
 	logx.Infof("gallery: added %q (path=%q)", name, galleryPath)
+	s.queueGlobalPull(name)
 	return nil
 }
 

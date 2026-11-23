@@ -186,6 +186,7 @@ type tagRow struct {
 	Stale          int            `json:"stale,omitempty"`
 	Rejected       int            `json:"rejected,omitempty"`
 	RejectedDrops  int            `json:"rejected_drops,omitempty"`
+	IsGlobal       int            `json:"is_global,omitempty"`
 }
 
 type imageRow struct {
@@ -561,9 +562,9 @@ var exportTables = []tableIO{
 			}
 			return []any{r.ID, r.Name, safeColor, r.IsBuiltin, r.Position}
 		}},
-	table[tagRow]{name: "tags", label: "tag", cols: `id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at, origin, last_used_at, stale, rejected, rejected_drops`, order: `id`,
+	table[tagRow]{name: "tags", label: "tag", cols: `id, name, category_id, usage_count, is_alias, canonical_tag_id, created_at, origin, last_used_at, stale, rejected, rejected_drops, is_global`, order: `id`,
 		fields: func(r *tagRow) []any {
-			return []any{&r.ID, &r.Name, &r.CategoryID, &r.UsageCount, &r.IsAlias, &r.CanonicalTagID, &r.CreatedAt, &r.Origin, &r.LastUsedAt, &r.Stale, &r.Rejected, &r.RejectedDrops}
+			return []any{&r.ID, &r.Name, &r.CategoryID, &r.UsageCount, &r.IsAlias, &r.CanonicalTagID, &r.CreatedAt, &r.Origin, &r.LastUsedAt, &r.Stale, &r.Rejected, &r.RejectedDrops, &r.IsGlobal}
 		}},
 	table[tagImplicationRow]{name: "tag_implications", label: "tag_implication", cols: `parent_tag_id, implied_tag_id, created_at, origin, stale`, order: `parent_tag_id, implied_tag_id`,
 		fields: func(r *tagImplicationRow) []any {

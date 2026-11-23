@@ -271,6 +271,14 @@ func Bootstrap(db *DB) error {
 		ResetCategoryPositions, "backfill tag_categories.position")
 	b.ensureColumn("tags", "rejected", `ALTER TABLE tags ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`)
 	b.ensureColumn("tags", "rejected_drops", `ALTER TABLE tags ADD COLUMN rejected_drops INTEGER NOT NULL DEFAULT 0`)
+	b.ensureColumn("tags", "is_global", `ALTER TABLE tags ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0`)
+	b.exec("create idx_tags_global", `CREATE INDEX IF NOT EXISTS idx_tags_global ON tags(id) WHERE is_global = 1`)
+	for _, t := range globalTagTriggers() {
+		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
+		BEGIN
+			`+t.body+`;
+		END`)
+	}
 	// The ComfyTermsVersion its terms were derived under; 0 = never indexed.
 	b.ensureColumn("comfyui_metadata", "terms_version",
 		`ALTER TABLE comfyui_metadata ADD COLUMN terms_version INTEGER NOT NULL DEFAULT 0`)
@@ -430,6 +438,51 @@ const backfillTaggerRunsSQL = `INSERT OR IGNORE INTO image_tagger_runs (image_id
 
 // BackfillTaggerRuns records, for rows loaded from a document that does
 // not carry the runs, each tagger that left a tag on a stamped image.
+type trigger struct{ name, event, body string }
+
+func globalTagTriggers() []trigger {
+	const quiet = `NOT EXISTS (SELECT 1 FROM global_tag_applying)`
+	record := func(id string) string {
+		return `INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
+			 WHERE t.id = ` + id + ` AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet
+	}
+	asKnown := `INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			SELECT OLD.id, OLD.name, c.name FROM tag_categories c WHERE c.id = OLD.category_id AND ` + quiet
+	dropAlias := `INSERT OR IGNORE INTO global_tag_removals (tag_id, kind, name, category)
+			SELECT t.id, 'alias', OLD.name, c.name FROM tags t, tag_categories c
+			 WHERE t.id = OLD.canonical_tag_id AND t.is_global = 1 AND c.id = OLD.category_id AND ` + quiet
+	dropEdge := `INSERT OR IGNORE INTO global_tag_removals (tag_id, kind, name, category)
+			SELECT p.id, 'implies', v.name, c.name FROM tags p, tags v JOIN tag_categories c ON c.id = v.category_id
+			 WHERE p.id = OLD.parent_tag_id AND p.is_global = 1 AND v.id = OLD.implied_tag_id AND ` + quiet
+	return []trigger{
+		{"trg_tags_global_au", "AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id, is_global ON tags WHEN OLD.is_alias = 0 AND (OLD.is_global = 1 OR NEW.is_global = 1)", asKnown},
+		{"trg_tags_global_bd", "BEFORE DELETE ON tags WHEN OLD.is_global = 1 AND OLD.is_alias = 0", asKnown},
+		{"trg_tags_global_alias_ai", "AFTER INSERT ON tags WHEN NEW.is_alias = 1", record("NEW.canonical_tag_id")},
+		{"trg_tags_global_alias_au", "AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id ON tags WHEN OLD.is_alias = 1 OR NEW.is_alias = 1",
+			record("OLD.canonical_tag_id") + `;
+			` + record("NEW.canonical_tag_id")},
+		{"trg_tags_global_alias_gone_au", `AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id ON tags WHEN OLD.is_alias = 1
+			AND (NEW.is_alias = 0 OR NEW.canonical_tag_id IS NOT OLD.canonical_tag_id OR NEW.name != OLD.name OR NEW.category_id != OLD.category_id)`, dropAlias},
+		{"trg_tags_global_alias_ad", "AFTER DELETE ON tags WHEN OLD.is_alias = 1", record("OLD.canonical_tag_id") + `;
+			` + dropAlias},
+		{"trg_tag_implications_global_ai", "AFTER INSERT ON tag_implications", record("NEW.parent_tag_id")},
+		{"trg_tag_implications_global_au", "AFTER UPDATE OF parent_tag_id, implied_tag_id ON tag_implications",
+			record("OLD.parent_tag_id") + `;
+			` + record("NEW.parent_tag_id") + `;
+			` + dropEdge},
+		{"trg_tag_implications_global_ad", "AFTER DELETE ON tag_implications", record("OLD.parent_tag_id") + `;
+			` + dropEdge},
+		{"trg_tag_notes_global_ai", "AFTER INSERT ON tag_notes", record("NEW.tag_id")},
+		{"trg_tag_notes_global_au", "AFTER UPDATE OF body, links ON tag_notes", record("NEW.tag_id")},
+		{"trg_tag_notes_global_ad", "AFTER DELETE ON tag_notes", record("OLD.tag_id")},
+		{"trg_tag_categories_global_au", "AFTER UPDATE OF name ON tag_categories WHEN NEW.name != OLD.name",
+			`INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, OLD.name FROM tags t
+			 WHERE t.category_id = NEW.id AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet},
+	}
+}
+
 func BackfillTaggerRuns(x Execer) error {
 	_, err := x.Exec(backfillTaggerRunsSQL)
 	return err

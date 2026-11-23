@@ -791,7 +791,7 @@ body.marquee-active { user-select: none; }
   align-items: center;
 }
 #tag-detail-header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.tag-detail-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.tag-detail-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .tag-detail-meta { color: var(--fg-dim); font-size: 12px; }
 .tag-detail-top { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 32px; align-items: start; }
 .tag-detail-top .tag-recent-strip { flex-wrap: nowrap; overflow: hidden; }
@@ -2738,3 +2738,4 @@ label.ptr-row:hover { background: var(--bg-input); }
   .stack-table.auto-paired thead th { padding: 0; }
   .stack-table.auto-paired thead th:not(:first-child) { display: none; }
 }
+.make-global-local { margin: 4px 0 0 18px; padding: 0; max-height: 40vh; overflow-y: auto; }

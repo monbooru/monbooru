@@ -51,6 +51,8 @@ type tagsPageData struct {
 	OriginKinds     map[string]string
 	ShowZero        bool
 	ZeroOnly        bool
+	Scope           string
+	OtherGalleries  []string
 	BackQS          string
 	RowsOnly        bool
 	DistinctOf      map[int64][]tags.DistinctPartner
@@ -242,6 +244,8 @@ func (s *Server) tagsHandler(w http.ResponseWriter, r *http.Request) {
 		OriginKinds:     s.originKinds(pageLabels),
 		ShowZero:        p.ShowZero,
 		ZeroOnly:        p.ZeroOnly,
+		Scope:           p.Scope,
+		OtherGalleries:  sideNames(s.globalSides(), s.activeGallery()),
 		BackQS:          p.backQS(),
 		RowsOnly:        rowsOnly,
 	}
@@ -256,6 +260,7 @@ func (s *Server) tagsHandler(w http.ResponseWriter, r *http.Request) {
 
 type tagListingParams struct {
 	CatID, Prefix, Sort, Order, Origin, Type, CreatedAfter, ZeroParam, Stale, UsedBy, Conflicts string
+	Scope                                                                                       string
 	HasType, ShowZero, ZeroOnly, Folded                                                         bool
 	Page                                                                                        int
 }
@@ -279,6 +284,9 @@ func tagListingParamsFrom(q url.Values) tagListingParams {
 	}
 	if c := q.Get("conflicts"); c == "1" || c == "distinct" {
 		p.Conflicts = c
+	}
+	if sc := q.Get("scope"); sc == "global" || sc == "local" {
+		p.Scope = sc
 	}
 	p.Folded = q.Get("folded") == "1"
 	p.Sort = cmp.Or(p.Sort, "usage")
@@ -322,6 +330,7 @@ func (s *Server) tagListingFilter(p tagListingParams) tags.TagFilter {
 		Stale:         p.Stale,
 		FoldedOnly:    p.Folded,
 		UsedBy:        p.UsedBy,
+		Scope:         p.Scope,
 	}
 	if p.CatID != "" {
 		if id, err := strconv.ParseInt(p.CatID, 10, 64); err == nil {
@@ -335,7 +344,7 @@ func (s *Server) tagListingFilter(p tagListingParams) tags.TagFilter {
 
 func (p tagListingParams) backQS() string {
 	v := setNonEmpty(url.Values{}, "q", p.Prefix, "cat", p.CatID, "origin", p.Origin, "used_by", p.UsedBy,
-		"created_after", p.CreatedAfter, "stale", p.Stale, "show_zero", p.ZeroParam, "conflicts", p.Conflicts)
+		"created_after", p.CreatedAfter, "stale", p.Stale, "show_zero", p.ZeroParam, "conflicts", p.Conflicts, "scope", p.Scope)
 	v.Set("sort", p.Sort)
 	v.Set("order", p.Order)
 	if p.HasType || p.Type != "" {

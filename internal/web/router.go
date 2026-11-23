@@ -30,6 +30,7 @@ import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/globaltags"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/metadata"
@@ -82,6 +83,7 @@ type Server struct {
 	configPath string
 	cfgMu      sync.RWMutex // guards cfg reads/writes and config.Save calls
 	jobs       *jobs.Manager
+	global     globalTagState
 	pairs      *peer.Store
 	pool       *tagger.Pool
 	local      *localWorker
@@ -170,6 +172,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	}
 	s.peers = plugins.NewPeers(s.pluginCallbackURL, s.done)
 	s.ml = monloader.NewLink(s.monloaderLink, jobManager)
+	jobManager.OnEnd(func() { s.applyGlobalChanges(true) })
 
 	applyRelationsConfig(cfg.Relations)
 	gallery.MetaTagsEnabled.Store(cfg.Gallery.AutoMetaTags)
@@ -337,6 +340,8 @@ func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, mod
 func (s *Server) StartWatchers() {
 	s.set.StartBackground()
 	s.turnUpgradedThumbs()
+	globaltags.Reset(s.globalSides())
+	s.applyGlobalChanges(false)
 }
 
 func (s *Server) background(name string) library.Background {
@@ -348,7 +353,7 @@ func (s *Server) Handler() http.Handler {
 	rt := s.newRoutes()
 	s.registerRoutes(rt)
 
-	var h http.Handler = rt.mux
+	h := s.globalTagsMiddleware(rt.mux)
 	h = s.sessions.Guard(pluginMountOrigin(h), isPluginMount)
 	h = s.setupMiddleware(h)
 	h = s.sessions.Gate(h, sessionCookie, s.authEnabled, isOpenPath)
@@ -465,6 +470,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("DELETE /tags/{id}", s.deleteTagHandler)
 	rt.read("POST /tags/{id}/reject", s.rejectTagPost)
 	rt.read("POST /tags/{id}/unreject", s.unrejectTagPost)
+	rt.read("POST /tags/global", s.makeTagsGlobalPost)
+	rt.read("POST /tags/global/check", s.makeTagsGlobalCheck)
+	rt.read("POST /tags/{id}/local", s.makeTagLocalPost)
 	rt.read("PATCH /tags/{id}/category", s.changeTagCategory)
 	rt.read("GET /tags/{id}/implications", s.implicationsDialogHandler)
 	rt.read("POST /tags/{id}/implications", s.addImplicationPost)
