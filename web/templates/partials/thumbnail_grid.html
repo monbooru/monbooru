@@ -20,9 +20,9 @@
       <input type="file" name="files" id="inbox-upload-file-input" multiple accept="{{.AcceptFileTypes}}" hidden>
       <ul id="inbox-upload-file-list" class="upload-file-list"></ul>
     </div>
-    {{template "webui/folder_picker" .UploadFolder}}
     <div class="thumb-cluster-header inbox-upload-footer">
       <span class="thumb-cluster-rule" aria-hidden="true"></span>
+      {{template "webui/folder_picker" .UploadFolder}}
       <button type="button" id="inbox-upload-reset-btn" class="btn-sm thumb-cluster-select" title="Clears files you picked but did not upload yet. Already-uploaded files stay in the inbox.">[Clear staged]</button>
       <button type="submit" id="inbox-upload-submit-btn" class="btn-sm thumb-cluster-select">[Upload]</button>
     </div>
