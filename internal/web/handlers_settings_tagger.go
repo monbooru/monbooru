@@ -133,18 +133,7 @@ func (s *Server) settingsTaggerPost(w http.ResponseWriter, r *http.Request) {
 		writeInlineFlash(w, "err", "Invalid execution provider: "+newProvider)
 		return
 	}
-	// The worker restarts on another provider, which would fail a job's
-	// calls in flight; the lane stays held until it is back.
-	if newProvider != s.executionProvider() {
-		res, err := s.jobs.Reserve()
-		if err != nil {
-			writeInlineFlash(w, "err", "A job is running; try again when it finishes.")
-			return
-		}
-		defer res.Release()
-	}
-
-	if err := s.withConfig(func(c *config.Config) error {
+	set := func(c *config.Config) error {
 		c.Tagger.ExecutionProvider = newProvider
 		if n, err := strconv.Atoi(r.FormValue("parallel")); err == nil && n >= 1 {
 			c.Tagger.Parallel = n
@@ -156,7 +145,21 @@ func (s *Server) settingsTaggerPost(w http.ResponseWriter, r *http.Request) {
 			c.Tagger.CPUThreads = n
 		}
 		return nil
-	}); err != nil {
+	}
+	// The worker restarts on another provider or environment, which would
+	// fail a job's calls in flight; the lane stays held until it is back.
+	next := s.cfgSnapshot()
+	_ = set(next)
+	if newProvider != s.executionProvider() || s.local != nil && s.local.restartsOn(next) {
+		res, err := s.jobs.Reserve()
+		if err != nil {
+			writeInlineFlash(w, "err", "A job is running; try again when it finishes.")
+			return
+		}
+		defer res.Release()
+	}
+
+	if err := s.withConfig(set); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
 		return
 	}

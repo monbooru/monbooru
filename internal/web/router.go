@@ -87,6 +87,7 @@ type Server struct {
 	pairs      *peer.Store
 	pool       *tagger.Pool
 	local      *localWorker
+	syncMu     sync.Mutex // held by syncWorkers, so the last config written is the last applied
 	sessions   *session.Store
 	loginRL    *session.Backoff
 	tmpl       *template.Template
@@ -209,7 +210,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	tagger.MoveDispatchOverlays(cfg.Paths.ModelPath, cfg.Paths.DataPath)
 	s.pool = tagger.NewPool(filepath.Join(cfg.Paths.DataPath, "workers"))
 	s.local = newLocalWorker()
-	s.syncWorkers(cloneConfig(cfg))
+	s.syncWorkers()
 	tagger.SetPool(s.pool)
 	poolCtx, stopPool := context.WithCancel(context.Background())
 	go func() {
@@ -1364,17 +1365,19 @@ func (s *Server) withConfig(fn func(*config.Config) error) error {
 		logx.Errorf("config save: %v", err)
 		return err
 	}
-	after := cloneConfig(s.cfg)
 	s.cfgMu.Unlock()
 	// Outside the lock: stopping the local worker waits for it to exit.
-	s.syncWorkers(after)
+	s.syncWorkers()
 	return nil
 }
 
-func (s *Server) syncWorkers(cfg *config.Config) {
+func (s *Server) syncWorkers() {
 	if s.pool == nil {
 		return
 	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	cfg := s.cfgSnapshot()
 	defs := make([]tagger.WorkerDef, 0, len(cfg.Workers)+1)
 	if s.local != nil && s.local.apply(s.peers.Supervisor, cfg) {
 		defs = append(defs, s.local.def())

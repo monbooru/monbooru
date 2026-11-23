@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -271,6 +272,39 @@ func TestSettingsTaggerDeletePost_WaitsForARunningJob(t *testing.T) {
 	if got := srv.executionProvider(); got != "cpu" {
 		t.Errorf("provider = %q under a running job, want cpu kept", got)
 	}
+}
+
+func TestSettingsTaggerPost_RestartsNoLocalWorkerUnderAJob(t *testing.T) {
+	path, envFile := standIn(t)
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	waitEnv(t, envFile, "MONWORKER_TOKEN=")
+	before := srv.peers.PID(localWorkerName)
+	held, err := srv.jobs.Reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+
+	cfg := srv.cfgSnapshot()
+	form := url.Values{
+		"execution_provider":         {cfg.Tagger.ExecutionProvider},
+		"parallel":                   {strconv.Itoa(cfg.Tagger.Parallel)},
+		"cpu_threads":                {strconv.Itoa(cfg.Tagger.CPUThreads)},
+		"idle_release_after_minutes": {strconv.Itoa(cfg.Tagger.IdleReleaseAfterMinutes + 1)},
+	}
+	w := postForm(t, srv, "/settings/tagger", form)
+	wantIn(t, w.Body.String(), "A job is running")
+	if got := srv.cfgSnapshot().Tagger.IdleReleaseAfterMinutes; got != cfg.Tagger.IdleReleaseAfterMinutes {
+		t.Errorf("idle minutes = %d under a running job, want %d kept", got, cfg.Tagger.IdleReleaseAfterMinutes)
+	}
+	if after := srv.peers.PID(localWorkerName); after != before {
+		t.Errorf("the worker's pid is %d after, %d before: it restarted under a job", after, before)
+	}
+
+	form.Set("idle_release_after_minutes", strconv.Itoa(cfg.Tagger.IdleReleaseAfterMinutes))
+	w = postForm(t, srv, "/settings/tagger", form)
+	wantIn(t, w.Body.String(), "Saved.")
 }
 
 func taggerNames(srv *Server) []string {

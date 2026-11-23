@@ -4,9 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/worker"
@@ -155,5 +158,106 @@ func TestAWorkerThatMovedIsCalledWhereItSaysAtItsCheck(t *testing.T) {
 	}
 	if tok := cfg.Auth.Tokens.Paired(peer.WorkerKey("gpu-box")); tok == nil || tok.PeerURL != "http://127.0.0.1:61234" {
 		t.Errorf("token = %+v, want it pointing at the new port", tok)
+	}
+}
+
+func TestAnOfferUnderTheNameOfAWorkerAddedByAddressIsRefused(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	rented := config.WorkerConfig{Name: "rented", URL: "https://pod.example", Token: "operator-secret", GatewayToken: "gw-key", Manual: true, OnDemand: true}
+	if err := srv.withConfig(func(c *config.Config) error {
+		c.Workers = append(c.Workers, rented)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(p.URL)
+	req := httptest.NewRequest("POST", "/api/v1/pair/request", strings.NewReader(`{"app":"monworker","label":"rented","url":"http://localhost:`+u.Port()+`","requested_scopes":[],"peer_token":"tok-rented","version":"v1.0.0"}`))
+	req.RemoteAddr = "127.0.0.1:50000"
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	mustCode(t, rr, http.StatusConflict)
+	wantIn(t, rr.Body.String(), `"code":"name_taken"`)
+	wantIn(t, rr.Body.String(), "a worker named rented is already listed, added by address; set MONWORKER_NAME to another name")
+	if n := len(srv.pairs.ListPending()); n != 0 {
+		t.Errorf("pending = %d, want the offer refused", n)
+	}
+	if ws := srv.cfgSnapshot().Workers; len(ws) != 1 || ws[0] != rented {
+		t.Errorf("workers = %+v, want the one added by address kept", ws)
+	}
+}
+
+func TestARePairKeepsOnDemandAndTheGatewayToken(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	pairStatus(t, srv, id)
+	if err := srv.withConfig(func(c *config.Config) error {
+		w := peer.FindWorker(c, "gpu-box")
+		w.OnDemand, w.GatewayToken, w.Paused = true, "gw-key", true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	id = workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	if _, out := pairStatus(t, srv, id); len(out["token"]) != 32 {
+		t.Fatalf("re-pair claim = %v", out)
+	}
+	ws := srv.cfgSnapshot().Workers
+	if len(ws) != 1 || !ws[0].OnDemand || ws[0].GatewayToken != "gw-key" || ws[0].Paused {
+		t.Errorf("workers = %+v, want gpu-box on demand behind its gateway, no longer paused", ws)
+	}
+}
+
+func TestRemovingAWorkerTellsItOnlyOnceTheSaveWorked(t *testing.T) {
+	var told atomic.Bool
+	p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+		case "/api/v1/pair/remove":
+			told.Store(true)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(p.Close)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	pairStatus(t, srv, id)
+
+	configPath := srv.configPath
+	notADir := filepath.Join(t.TempDir(), "file")
+	mustWriteFile(t, notADir, nil, 0o644)
+	srv.configPath = filepath.Join(notADir, "monbooru.toml")
+	rm := postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{})
+	wantIn(t, rm.Body.String(), "Could not save: ")
+	if told.Load() {
+		t.Error("the worker was told to unpair although the save failed")
+	}
+	if len(srv.cfgSnapshot().Workers) != 1 {
+		t.Errorf("workers = %+v, want gpu-box kept", srv.cfgSnapshot().Workers)
+	}
+
+	srv.configPath = configPath
+	postHTMXForm(t, srv, "/settings/workers/gpu-box/remove", url.Values{})
+	if !told.Load() || len(srv.cfgSnapshot().Workers) != 0 {
+		t.Errorf("once saved: told = %v, workers = %+v", told.Load(), srv.cfgSnapshot().Workers)
+	}
+}
+
+func TestACheckWithAnAddressWithNoHostKeepsTheWorkersAddress(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	id := workerOffer(t, srv, p, "gpu-box")
+	mustCode(t, pairApprove(srv, id), http.StatusOK)
+	_, out := pairStatus(t, srv, id)
+	was := srv.cfgSnapshot().Workers[0].URL
+	mustCode(t, checkPairing(srv, out["token"], `{"url":"8457"}`), http.StatusOK)
+	if got := srv.cfgSnapshot().Workers[0].URL; got != was {
+		t.Errorf("url = %q, want %q kept", got, was)
 	}
 }

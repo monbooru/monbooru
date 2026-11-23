@@ -214,8 +214,8 @@ func (s *Server) taggerWorkerPausePost(paused bool) http.HandlerFunc {
 	}
 }
 
-// Remove tells the worker first, so it stops offering itself, then drops
-// the pairing here even when the worker could not be reached.
+// Remove drops the pairing here, then tells the worker, so it stops
+// offering itself; one that cannot be reached is removed all the same.
 func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) {
 	if !parseFormOK(w, r) {
 		return
@@ -228,10 +228,11 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 		url, token = wc.URL, wc.Token
 	}
 	s.cfgMu.RUnlock()
-	notifyErr := peer.NotifyTeardown(name, url, token)
+	var notifyErr error
 	saveErr := s.removePairing(peer.WorkerKey(name))
 	if saveErr == nil {
 		logx.Infof("pairing: removed worker %s from %s", name, session.ClientIP(r))
+		notifyErr = peer.NotifyTeardown(name, url, token)
 	}
 	s.renderWorkers(w, false)
 	s.renderAuthTokensOOB(w, r)

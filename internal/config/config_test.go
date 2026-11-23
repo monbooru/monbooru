@@ -1103,6 +1103,51 @@ func TestAnUpgradeThatTagsKeepsItsLocalWorker(t *testing.T) {
 	}
 }
 
+func TestAnUpgradeWithAModelAndNoTaggerEntryKeepsItsLocalWorker(t *testing.T) {
+	models := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(models, "wd-swinv2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(models, "wd-swinv2", "model.onnx"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("in the config", func(t *testing.T) {
+		path := writeConfig(t, baseTOML+"model_path = \""+models+"\"\n")
+		if !mustLoad(t, path).Tagger.LocalWorker {
+			t.Error("local_worker is off")
+		}
+	})
+	t.Run("in the environment", func(t *testing.T) {
+		t.Setenv("MONBOORU_PATHS_MODEL_PATH", models)
+		path := writeConfig(t, baseTOML+"model_path = \""+t.TempDir()+"\"\n")
+		if !mustLoad(t, path).Tagger.LocalWorker {
+			t.Error("local_worker is off")
+		}
+	})
+}
+
+func TestAnUpgradeStartsWhenItsConfigCannotBeWritten(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root, chmod has no effect")
+	}
+	path := writeConfig(t, baseTOML+"[tagger]\n\n[[tagger.taggers]]\nname = \"wd-swinv2\"\nenabled = true\n")
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if !mustLoad(t, path).Tagger.LocalWorker {
+		t.Error("local_worker is off in memory")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "local_worker") {
+		t.Errorf("the read-only config was written:\n%s", data)
+	}
+}
+
 func TestANewInstallStartsWithTheLocalWorkerOff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "monbooru.toml")
 	cfg, err := LoadWithDefaults(path, nil)

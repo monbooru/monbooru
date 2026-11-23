@@ -33,8 +33,9 @@ type localWorker struct {
 
 	mu sync.Mutex
 	// env is what the running worker started with; a change restarts it.
-	env []string
-	dir string
+	env         []string
+	dir         string
+	saidMissing bool
 }
 
 func findLocalWorker() string {
@@ -106,7 +107,8 @@ func (w *localWorker) apply(sup *plugins.Supervisor, cfg *config.Config) bool {
 			w.env = nil
 			logx.Infof("local worker: stopped")
 		}
-		if cfg.Tagger.LocalWorker && w.path == "" {
+		if cfg.Tagger.LocalWorker && w.path == "" && !w.saidMissing {
+			w.saidMissing = true
 			logx.Infof("local worker: no monworker beside monbooru or on PATH")
 		}
 		return false
@@ -152,6 +154,13 @@ func listening(addr string, within time.Duration) bool {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return false
+}
+
+// restartsOn is whether applying cfg would restart the running worker.
+func (w *localWorker) restartsOn(cfg *config.Config) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.env != nil && !slices.Equal(w.envFor(cfg), w.env)
 }
 
 func (w *localWorker) running() bool {

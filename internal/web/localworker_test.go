@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -80,8 +82,16 @@ func TestNoLocalWorkerWithoutTheBinary(t *testing.T) {
 	w := &localWorker{addr: "127.0.0.1:47001"}
 	cfg := &config.Config{}
 	cfg.Tagger.LocalWorker = true
-	if w.apply(sup, cfg) {
-		t.Error("a worker runs with no monworker found")
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	for range 3 {
+		if w.apply(sup, cfg) {
+			t.Error("a worker runs with no monworker found")
+		}
+	}
+	if n := strings.Count(buf.String(), "no monworker beside monbooru or on PATH"); n != 1 {
+		t.Errorf("three config writes logged the missing monworker %d times, want once:\n%s", n, buf.String())
 	}
 }
 

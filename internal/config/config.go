@@ -636,9 +636,10 @@ func load(path, base string, seed func(*Config)) (*Config, error) {
 	migrateTaggerProvider(cfg)
 	if !fresh && migrateLocalWorker(cfg, path) {
 		if err := Save(cfg, path); err != nil {
-			return nil, fmt.Errorf("writing local_worker: %w", err)
+			logx.Warnf("config: local_worker = true not written, kept for this run: %v", err)
+		} else {
+			logx.Infof("config: local_worker = true written: the taggers now run on the local worker")
 		}
-		logx.Infof("config: local_worker = true written: the taggers now run on the local worker")
 	}
 	applyEnvOverrides(cfg)
 	if err := validate(cfg); err != nil {
@@ -683,11 +684,11 @@ func resolveIn(cfg *Config, base string) {
 	}
 }
 
-// A config from before the worker, with an enabled tagger and no
-// local_worker key, gets local_worker = true, so an upgrade that tags
-// keeps tagging; one without stays off like a new install.
+// A config from before the worker with no local_worker key and an enabled
+// tagger or a model in the models folder, which ran with no entry, gets
+// local_worker = true; one without stays off like a new install.
 func migrateLocalWorker(cfg *Config, path string) bool {
-	if cfg.Tagger.LocalWorker || !slices.ContainsFunc(cfg.Tagger.Taggers, func(t TaggerInstance) bool { return t.Enabled }) {
+	if cfg.Tagger.LocalWorker || !slices.ContainsFunc(cfg.Tagger.Taggers, func(t TaggerInstance) bool { return t.Enabled }) && !holdsModel(cfg) {
 		return false
 	}
 	var keys struct {
@@ -701,6 +702,19 @@ func migrateLocalWorker(cfg *Config, path string) bool {
 	}
 	cfg.Tagger.LocalWorker = true
 	return true
+}
+
+// Read before the environment is applied, so it takes the variable itself.
+func holdsModel(cfg *Config) bool {
+	dir := cfg.Paths.ModelPath
+	if v := os.Getenv("MONBOORU_PATHS_MODEL_PATH"); v != "" {
+		dir = v
+	}
+	if dir == "" {
+		return false
+	}
+	found, _ := filepath.Glob(filepath.Join(dir, "*", "*.onnx"))
+	return len(found) > 0
 }
 
 // A use_cuda = true config with no execution_provider migrates to "cuda".
