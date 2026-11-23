@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -249,6 +250,20 @@ func TestTheCheckSaysWhatEachGalleryGetsAndTheListingShowsTheMark(t *testing.T) 
 		if !strings.Contains(detail, want) {
 			t.Errorf("the tag page lacks %q", want)
 		}
+	}
+}
+
+func TestTheTagsPagerKeepsTheScope(t *testing.T) {
+	srv, first, _ := twoGalleries(t)
+	for i := range tagListingPageSize + 1 {
+		tagNamed(t, first, "tag"+strconv.Itoa(i))
+	}
+	next := regexp.MustCompile(`href="([^"]*page=2)"`).FindStringSubmatch(getPage(t, srv, "/tags?scope=local"))
+	if next == nil {
+		t.Fatal("no link to page 2")
+	}
+	if !strings.Contains(next[1], "scope=local&amp;") {
+		t.Errorf("the pager drops the scope: %s", next[1])
 	}
 }
 

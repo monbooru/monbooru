@@ -314,7 +314,7 @@
   </div>
 
   {{$page := .Page}}
-  {{$tagsBase := printf "/tags?q=%s&sort=%s&order=%s&cat=%s&origin=%s&used_by=%s&type=%s&created_after=%s&conflicts=%s&stale=%s&folded=%s&scope={{$scope}}&show_zero=%s&page=" (urlQ .Prefix) (urlQ .Sort) (urlQ .Order) (urlQ .CategoryID) (urlQ .Origin) (urlQ .UsedBy) (urlQ .Type) (urlQ .CreatedAfter) $conflicts $stale $folded $zero}}
+  {{$tagsBase := printf "/tags?q=%s&sort=%s&order=%s&cat=%s&origin=%s&used_by=%s&type=%s&created_after=%s&conflicts=%s&stale=%s&folded=%s&scope=%s&show_zero=%s&page=" (urlQ .Prefix) (urlQ .Sort) (urlQ .Order) (urlQ .CategoryID) (urlQ .Origin) (urlQ .UsedBy) (urlQ .Type) (urlQ .CreatedAfter) $conflicts $stale $folded $scope $zero}}
   <div hx-boost="true" hx-target="#tags-page" hx-select="#tags-page" hx-swap="outerHTML" hx-select-oob="#sidebar-inner" hx-push-url="true">
   {{template "partials/pagination.html" (dict "Base" $tagsBase "Page" $page "Total" .TotalPages)}}
   </div>
