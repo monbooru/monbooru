@@ -28,7 +28,7 @@ func phase(k opKind) int {
 		return 0
 	case opMerge, opAlias, opUnalias:
 		return 1
-	case opImply, opUnimply:
+	case opImply, opUnimply, opFanOut:
 		return 2
 	}
 	return 3
@@ -99,7 +99,17 @@ func (a applier) ensure(k Key, origin, color string) (int64, error) {
 	return t.ID, a.dst.Tags.SetGlobal([]int64{t.ID}, true)
 }
 
-func (a applier) run(ctx context.Context, o op, propagate map[int64]bool) error {
+type sweep struct {
+	parent  int64
+	closure []int64
+}
+
+type walks struct {
+	propagate map[int64]bool
+	sweeps    []sweep
+}
+
+func (a applier) run(o op, w *walks) error {
 	svc := a.dst.Tags
 	switch o.kind {
 	case opCreate:
@@ -136,7 +146,11 @@ func (a applier) run(ctx context.Context, o op, propagate map[int64]bool) error 
 		if err != nil {
 			return err
 		}
-		_, err = svc.CreateAliasFrom(o.other.Name, catID, canon, o.origin)
+		alias, err := svc.CreateAliasFrom(o.other.Name, catID, canon, o.origin)
+		if err != nil {
+			return err
+		}
+		_, err = a.dst.DB.Write.Exec(`UPDATE tags SET is_global = 0 WHERE id = ?`, alias.ID)
 		return err
 	case opMerge:
 		canon, err := a.id(o.tag)
@@ -170,8 +184,22 @@ func (a applier) run(ctx context.Context, o op, propagate map[int64]bool) error 
 		if _, err := svc.AddImplicationFrom(parent, implied, o.origin); err != nil {
 			return err
 		}
-		propagate[parent] = true
+		w.propagate[parent] = true
 		return nil
+	case opFanOut:
+		parent, err := a.id(o.tag)
+		if err != nil {
+			return nil
+		}
+		implied, err := a.id(o.other)
+		if err != nil {
+			return nil
+		}
+		unapplied, err := svc.ImplicationUnapplied(parent, implied)
+		if unapplied {
+			w.propagate[parent] = true
+		}
+		return err
 	case opUnimply:
 		parent, err := a.id(o.tag)
 		if err != nil {
@@ -191,8 +219,8 @@ func (a applier) run(ctx context.Context, o op, propagate map[int64]bool) error 
 			}
 			return err
 		}
-		_, err = svc.SweepImplicationRemoval(ctx, parent, closure, nil)
-		return err
+		w.sweeps = append(w.sweeps, sweep{parent, closure})
+		return nil
 	case opNote:
 		id, err := a.id(o.tag)
 		if err != nil {
@@ -227,28 +255,37 @@ func apply(ctx context.Context, dst Side, ops []op) (Counts, []Skip, error) {
 	ops = slices.Clone(ops)
 	slices.SortStableFunc(ops, func(x, y op) int { return phase(x.kind) - phase(y.kind) })
 	a := applier{dst: dst}
-	propagate := map[int64]bool{}
+	w := &walks{propagate: map[int64]bool{}}
 	var skipped []Skip
 	var applied []op
 	for _, o := range ops {
 		if err := ctx.Err(); err != nil {
 			return count(applied), skipped, err
 		}
-		if err := a.run(ctx, o, propagate); err != nil {
+		if err := a.run(o, w); err != nil {
 			skipped = append(skipped, Skip{Gallery: dst.Name, Tag: o.tag, Reason: err.Error()})
 			continue
 		}
 		applied = append(applied, o)
 	}
 	release()
-	parents := make([]int64, 0, len(propagate))
-	for id := range propagate {
+	for _, sw := range w.sweeps {
+		if p, err := dst.Tags.SweepImplicationRemoval(ctx, sw.parent, sw.closure, nil); err != nil {
+			return count(applied), skipped, err
+		} else if p.Cancelled {
+			return count(applied), skipped, context.Canceled
+		}
+	}
+	parents := make([]int64, 0, len(w.propagate))
+	for id := range w.propagate {
 		parents = append(parents, id)
 	}
 	slices.Sort(parents)
 	for _, id := range parents {
-		if _, err := dst.Tags.PropagateImplication(ctx, id, nil); err != nil {
+		if p, err := dst.Tags.PropagateImplication(ctx, id, nil); err != nil {
 			return count(applied), skipped, err
+		} else if p.Cancelled {
+			return count(applied), skipped, context.Canceled
 		}
 	}
 	return count(applied), skipped, nil

@@ -132,6 +132,32 @@ func TestRejectTagName_RejectsANameTheGalleryNeverSaw(t *testing.T) {
 	}
 }
 
+func TestRejectTagName_RefusesAGlobalTag(t *testing.T) {
+	database, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	video := mustTag(t, svc, "video", catID)
+	animation := mustTag(t, svc, "animation", catID)
+	mustAddImply(t, svc, animation.ID, video.ID)
+	if err := svc.SetGlobal([]int64{animation.ID, video.ID}, true); err != nil {
+		t.Fatal(err)
+	}
+	img := insertTestImage(t, database, "g1")
+	mustAddTag(t, svc, img, animation.ID, false, nil)
+
+	if _, err := svc.RejectTagName("video", catID); !errors.Is(err, ErrTagGlobal) {
+		t.Fatalf("RejectTagName(global) err = %v, want ErrTagGlobal", err)
+	}
+	if got := mustGetTag(t, svc, video.ID); got.Rejected {
+		t.Error("the global tag was rejected")
+	}
+	if imps, _ := svc.ListImplications(animation.ID); len(imps) != 1 {
+		t.Errorf("implications after the refusal = %d, want 1", len(imps))
+	}
+	if names := tagNamesOnImage(t, svc, img); len(names) != 2 {
+		t.Errorf("image tags after the refusal = %v, want animation and video", names)
+	}
+}
+
 func TestUnrejectTag_MakesTheNameATagAgain(t *testing.T) {
 	_, svc := setupTestDB(t)
 	catID := generalCategoryID(t, svc)

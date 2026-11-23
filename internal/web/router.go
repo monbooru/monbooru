@@ -340,7 +340,15 @@ func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, mod
 func (s *Server) StartWatchers() {
 	s.set.StartBackground()
 	s.turnUpgradedThumbs()
-	globaltags.Reset(s.globalSides())
+	sides := s.globalSides()
+	globaltags.Reset(sides)
+	if globaltags.Any(sides) {
+		for _, side := range sides {
+			if !globaltags.Any([]globaltags.Side{side}) {
+				s.queueGlobalPull(side.Name)
+			}
+		}
+	}
 	s.applyGlobalChanges(false)
 }
 

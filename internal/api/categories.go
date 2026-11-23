@@ -31,6 +31,7 @@ func writeCategoryError(w http.ResponseWriter, err error) {
 	if writeSentinelError(w, err, []sentinelStatus{
 		{tags.ErrCategoryNotFound, http.StatusNotFound, "not_found"},
 		{tags.ErrCategoryExists, http.StatusConflict, "conflict"},
+		{tags.ErrTagGlobal, http.StatusConflict, "conflict"},
 		{tags.ErrBuiltinCategory, http.StatusBadRequest, "invalid_request"},
 		{tags.ErrBuiltinCategoryName, http.StatusBadRequest, "invalid_request"},
 		{tags.ErrInvalidCategoryName, http.StatusBadRequest, "invalid_request"},

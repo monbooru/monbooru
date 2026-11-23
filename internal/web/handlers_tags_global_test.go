@@ -117,13 +117,87 @@ func TestMakeGlobalThenAnEditReachesTheOtherGallery(t *testing.T) {
 func TestAnAddedGalleryStartsWithTheGlobalTags(t *testing.T) {
 	srv, first, _ := twoGalleries(t)
 	id := tagNamed(t, first, "animation")
+	export := mustExport(t, srv, first.Name, "json")
 	postForm(t, srv, "/tags/global", url.Values{"ids": {strconv.FormatInt(id, 10)}})
 	settleJobs(t, srv)
 
-	addRemovableGallery(t, srv, "third", filepath.Join(t.TempDir(), "third"))
+	third := filepath.Join(t.TempDir(), "third")
+	mustMkdirAll(t, third, 0o755)
+	wantIn(t, postAddGallery(t, srv, "third", third), "Gallery third added and now active.")
+	if got := srv.activeGallery(); got != "third" {
+		t.Errorf("active gallery = %s, want third", got)
+	}
 	settleJobs(t, srv)
 	if !isGlobal(t, srv.get("third"), "animation") {
 		t.Error("the added gallery did not take the global tag")
+	}
+
+	fourth := filepath.Join(t.TempDir(), "fourth")
+	mustMkdirAll(t, fourth, 0o755)
+	body, ct := buildMultipart(t, map[string]string{"name": "fourth", "gallery_path": fourth}, "import_file", "export.json", export.Bytes())
+	wantIn(t, postMultipart(t, srv, "/settings/galleries", body, ct).Body.String(), "Gallery fourth added and imported.")
+	settleJobs(t, srv)
+	if !isGlobal(t, srv.get("fourth"), "animation") {
+		t.Error("the gallery added with an import did not take the global tag")
+	}
+}
+
+func TestAStartPullsIntoAGalleryWithNoGlobalTag(t *testing.T) {
+	srv, first, _ := twoGalleries(t)
+	id := tagNamed(t, first, "animation")
+	postForm(t, srv, "/tags/global", url.Values{"ids": {strconv.FormatInt(id, 10)}})
+	settleJobs(t, srv)
+	third := filepath.Join(t.TempDir(), "third")
+	mustMkdirAll(t, third, 0o755)
+	if err := srv.set.Add("third", third); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.StartWatchers()
+	settleJobs(t, srv)
+	if !isGlobal(t, srv.get("third"), "animation") {
+		t.Error("the start did not pull the global tags into the gallery that had none")
+	}
+}
+
+func TestAFailedPullWaitsForTheNextChange(t *testing.T) {
+	srv, first, _ := twoGalleries(t)
+	id := tagNamed(t, first, "animation")
+	postForm(t, srv, "/tags/global", url.Values{"ids": {strconv.FormatInt(id, 10) + "," + strconv.FormatInt(tagNamed(t, first, "still"), 10)}})
+	settleJobs(t, srv)
+	if !isGlobal(t, first, "still") {
+		t.Fatal("still is not global")
+	}
+	thirdPath := filepath.Join(t.TempDir(), "third")
+	mustMkdirAll(t, thirdPath, 0o755)
+	if err := srv.set.Add("third", thirdPath); err != nil {
+		t.Fatal(err)
+	}
+	third := srv.get("third")
+	mustExec(t, third.DB.Write, `ALTER TABLE global_tag_applying RENAME TO applying_away`)
+	srv.queueGlobalPull("third")
+	settleJobs(t, srv)
+	if st := srv.jobs.Get(); st == nil || st.Error == "" {
+		t.Fatalf("the pull did not fail: %+v", st)
+	}
+
+	base := srv.jobs.Finished()
+	for range 2 {
+		postForm(t, srv, "/internal/job/dismiss", url.Values{})
+		settleJobs(t, srv)
+	}
+	if n := srv.jobs.Finished() - base; n != 0 {
+		t.Errorf("%d jobs ran on writes that changed no global tag", n)
+	}
+
+	mustExec(t, third.DB.Write, `ALTER TABLE applying_away RENAME TO global_tag_applying`)
+	if _, err := first.TagSvc.CreateAlias("anime", first.GeneralCategoryID, id); err != nil {
+		t.Fatal(err)
+	}
+	postForm(t, srv, "/internal/job/dismiss", url.Values{})
+	settleJobs(t, srv)
+	if !isGlobal(t, third, "still") {
+		t.Error("the next change did not retry the pull")
 	}
 }
 
@@ -199,4 +273,27 @@ func getPage(t *testing.T, srv *Server, path string) string {
 		t.Fatalf("GET %s = %d", path, w.Code)
 	}
 	return w.Body.String()
+}
+
+func TestARefusedTagIsNamedWithoutStartingAJobByItself(t *testing.T) {
+	srv, first, second := twoGalleries(t)
+	id := tagNamed(t, first, "kitty")
+	postForm(t, srv, "/tags/global", url.Values{"ids": {strconv.FormatInt(id, 10)}})
+	settleJobs(t, srv)
+	tagNamed(t, second, "cat")
+	if err := first.TagSvc.RenameTag(id, "cat"); err != nil {
+		t.Fatal(err)
+	}
+	postForm(t, srv, "/internal/job/dismiss", url.Values{})
+	settleJobs(t, srv)
+	if st := srv.jobs.Get(); st == nil || !strings.Contains(st.Summary, "1 left out: cat in second") {
+		t.Fatalf("job = %+v, want the rename named as left out", st)
+	}
+
+	base := srv.jobs.Finished()
+	postForm(t, srv, "/internal/job/dismiss", url.Values{})
+	settleJobs(t, srv)
+	if n := srv.jobs.Finished() - base; n != 0 {
+		t.Errorf("%d jobs ran with only the refused record waiting", n)
+	}
 }

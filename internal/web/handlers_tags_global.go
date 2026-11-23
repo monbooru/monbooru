@@ -49,15 +49,26 @@ func (s *Server) queueGlobalPull(name string) {
 		s.global.pulls = append(s.global.pulls, name)
 	}
 	s.global.mu.Unlock()
+	s.global.stalled.Store(false)
 	s.applyGlobalChanges(false)
 }
 
-func (s *Server) takeGlobalPulls() []string {
+func (s *Server) globalPulls() []string {
 	s.global.mu.Lock()
 	defer s.global.mu.Unlock()
-	pulls := s.global.pulls
+	return slices.Clone(s.global.pulls)
+}
+
+func (s *Server) pulled(name string) {
+	s.global.mu.Lock()
+	defer s.global.mu.Unlock()
+	s.global.pulls = slices.DeleteFunc(s.global.pulls, func(n string) bool { return n == name })
+}
+
+func (s *Server) takeGlobalPulls() {
+	s.global.mu.Lock()
+	defer s.global.mu.Unlock()
 	s.global.pulls = nil
-	return pulls
 }
 
 func (s *Server) hasGlobalPulls() bool {
@@ -78,7 +89,7 @@ func (s *Server) applyGlobalChanges(afterJob bool) {
 	if s.hasGlobalPulls() && !globaltags.Any(sides) {
 		s.takeGlobalPulls()
 	}
-	if !s.hasGlobalPulls() && !globaltags.Pending(sides) {
+	if (!s.hasGlobalPulls() || s.global.stalled.Load()) && !globaltags.Pending(sides) {
 		return
 	}
 	if err := s.jobs.Start(models.JobTypeTag, sideNames(sides, "")...); err != nil {
@@ -88,11 +99,12 @@ func (s *Server) applyGlobalChanges(afterJob bool) {
 		s.jobs.Update(0, 0, "applying global tags…")
 		var skipped []globaltags.Skip
 		var err error
-		for _, name := range s.takeGlobalPulls() {
+		for _, name := range s.globalPulls() {
 			var skips []globaltags.Skip
 			if skips, err = globaltags.Pull(ctx, sides, name); err != nil {
 				break
 			}
+			s.pulled(name)
 			skipped = append(skipped, skips...)
 		}
 		if err == nil {

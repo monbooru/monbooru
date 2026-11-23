@@ -484,3 +484,320 @@ func TestAnImplicationThatWouldLoopIsRefused(t *testing.T) {
 	}
 	want(t, "a global", a.global())
 }
+
+type hookCtx struct {
+	context.Context
+	calls  int
+	cancel int
+	hook   func(call int)
+}
+
+func (c *hookCtx) Err() error {
+	c.calls++
+	if c.hook != nil {
+		c.hook(c.calls)
+	}
+	if c.cancel > 0 && c.calls >= c.cancel {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestAnEditDuringAPushIsAppliedByTheNext(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "animation")
+	pic := b.image("animation")
+	id := a.tag("animation")
+	if err := a.Tags.RenameTag(id, "anim1"); err != nil {
+		t.Fatal(err)
+	}
+	a.alias("x1", "anim1")
+	ctx := &hookCtx{Context: context.Background(), hook: func(call int) {
+		if call == 1 {
+			if err := a.Tags.RenameTag(id, "anim2"); err != nil {
+				t.Error(err)
+			}
+		}
+	}}
+	if _, err := Push(ctx, all); err != nil {
+		t.Fatal(err)
+	}
+	want(t, "b after the first push", b.global(), "anim1")
+	if !Pending(all) {
+		t.Fatal("the edit made during the push left nothing to apply")
+	}
+	push(t, all)
+	want(t, "b global", b.global(), "anim2")
+	want(t, "b image", b.tagsOn(pic), "anim2")
+	want(t, "a pending", a.pending())
+}
+
+func TestAStoppedPushKeepsTheOlderName(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "animation")
+	pic := b.image("animation")
+	id := a.tag("animation")
+	if err := a.Tags.RenameTag(id, "anim1"); err != nil {
+		t.Fatal(err)
+	}
+	a.implies("anim1", "video")
+	ctx := &hookCtx{Context: context.Background(), cancel: 1, hook: func(call int) {
+		if call == 1 {
+			if err := a.Tags.RenameTag(id, "anim2"); err != nil {
+				t.Error(err)
+			}
+		}
+	}}
+	if _, err := Push(ctx, all); err == nil {
+		t.Fatal("the stopped push reported no error")
+	}
+	push(t, all)
+	want(t, "b global", b.global(), "anim2", "video")
+	want(t, "b image", b.tagsOn(pic), "anim2", "video")
+	want(t, "a pending", a.pending())
+}
+
+func TestAStoppedPushWaitsForTheNextChangeOrStart(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "animation")
+	a.alias("anime", "animation")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Push(ctx, all); err == nil {
+		t.Fatal("a cancelled push reported no error")
+	}
+	if Pending(all) {
+		t.Error("a record the stopped push took starts a run by itself")
+	}
+	Reset(all)
+	if !Pending(all) {
+		t.Error("a start does not pick the taken record up")
+	}
+	push(t, all)
+	want(t, "b aliases", b.aliases("animation"), "anime")
+	want(t, "a pending", a.pending())
+}
+
+func TestARepointedAliasFollows(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	a.alias("x", "t1")
+	makeGlobal(t, a, all, false, "t1", "t2")
+	if err := a.Tags.MergeTags(a.row("x"), a.tag("t2")); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Errorf("skipped %v", skipped)
+	}
+	want(t, "b aliases of t1", b.aliases("t1"))
+	want(t, "b aliases of t2", b.aliases("t2"), "x")
+}
+
+func TestARenameOntoAFreedNameFollows(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "old", "mid")
+	pic := b.image("old")
+	if err := a.Tags.RenameTag(a.row("mid"), "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Tags.RenameTag(a.row("old"), "mid"); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Errorf("skipped %v", skipped)
+	}
+	want(t, "b global", b.global(), "mid", "new")
+	want(t, "b image", b.tagsOn(pic), "mid")
+}
+
+func TestAMergeOfAGlobalTagWithAliasesLeavesNothingOut(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	a.alias("x1", "t1")
+	makeGlobal(t, a, all, false, "t1", "t2")
+	pic := b.image("t1")
+	if err := a.Tags.MergeTags(a.tag("t1"), a.tag("t2")); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Errorf("skipped %v", skipped)
+	}
+	want(t, "b aliases", b.aliases("t2"), "t1", "x1")
+	want(t, "b image", b.tagsOn(pic), "t2")
+}
+
+func TestARefusedRenameIsKeptUntilItIsSorted(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "kitty")
+	pic := b.image("kitty")
+	b.tag("cat")
+	if err := a.Tags.RenameTag(a.row("kitty"), "cat"); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 1 {
+		t.Fatalf("skipped %v, want the rename refused in b", skipped)
+	}
+	if Pending(all) {
+		t.Error("a kept record starts a run by itself")
+	}
+	a.alias("neko", "cat")
+	if skipped := push(t, all); len(skipped) != 1 {
+		t.Errorf("the next run skipped %v, want the rename named again", skipped)
+	}
+	want(t, "b global while refused", b.global(), "kitty")
+
+	if err := b.Tags.RenameTag(b.row("cat"), "cat_(b)"); err != nil {
+		t.Fatal(err)
+	}
+	a.alias("kitten", "cat")
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Errorf("skipped %v once b's own tag moved", skipped)
+	}
+	want(t, "b global", b.global(), "cat")
+	want(t, "b aliases", b.aliases("cat"), "kitten", "neko")
+	want(t, "b image", b.tagsOn(pic), "cat")
+	want(t, "a pending", a.pending())
+}
+
+func TestAnOlderNameMatchesOnlyAGlobalTag(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	makeGlobal(t, a, sides(a, b), false, "cat")
+	bpic := b.image("cat")
+	if err := a.Tags.RenameTag(a.tag("cat"), "feline"); err != nil {
+		t.Fatal(err)
+	}
+
+	c := open(t, "c")
+	cpic := c.image("cat")
+	if _, err := Pull(context.Background(), sides(a, c), "c"); err != nil {
+		t.Fatal(err)
+	}
+	want(t, "c global", c.global(), "feline")
+	want(t, "c keeps its own tag", c.tagsOn(cpic), "cat")
+
+	if _, err := Pull(context.Background(), sides(a, b), "b"); err != nil {
+		t.Fatal(err)
+	}
+	want(t, "b global", b.global(), "feline")
+	want(t, "b image", b.tagsOn(bpic), "feline")
+}
+
+func TestAPushStoppedDuringTheFanOutIsFinishedByTheNext(t *testing.T) {
+	for cancel := 1; cancel <= 6; cancel++ {
+		a, b := open(t, "a"), open(t, "b")
+		all := sides(a, b)
+		makeGlobal(t, a, all, false, "p1", "p2")
+		pic := b.image("p1", "p2")
+		a.implies("p1", "c1")
+		a.implies("p2", "c2")
+		ctx := &hookCtx{Context: context.Background(), cancel: cancel}
+		if _, err := Push(ctx, all); err == nil {
+			t.Errorf("stopped at call %d: no error", cancel)
+		}
+		if err := a.Tags.SetTagNote(a.tag("p1"), "next change", nil); err != nil {
+			t.Fatal(err)
+		}
+		push(t, all)
+		want(t, fmt.Sprintf("stopped at call %d, then pushed: b image", cancel), b.tagsOn(pic), "c1", "c2", "p1", "p2")
+	}
+}
+
+func TestMakeGlobalStoppedAnywhereIsFinishedByRunningItAgain(t *testing.T) {
+	for cancel := 1; cancel <= 14; cancel++ {
+		a, b := open(t, "a"), open(t, "b")
+		all := sides(a, b)
+		a.implies("p1", "c1")
+		a.implies("p2", "c2")
+		pic := b.image("p1")
+		ids := []int64{a.tag("p1"), a.tag("p2")}
+		_, _, _ = MakeGlobal(&hookCtx{Context: context.Background(), cancel: cancel}, all, "a", ids, false)
+		if _, _, err := MakeGlobal(context.Background(), all, "a", ids, false); err != nil {
+			t.Fatal(err)
+		}
+		want(t, fmt.Sprintf("stopped at call %d, then run again: b image", cancel), b.tagsOn(pic), "c1", "p1")
+	}
+}
+
+func TestARemovalSweepsTheImagesOutsideTheGuard(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	a.implies("animation", "video")
+	makeGlobal(t, a, all, false, "animation")
+	pic := b.image("animation")
+	if err := a.Tags.RemoveImplication(a.tag("animation"), a.tag("video")); err != nil {
+		t.Fatal(err)
+	}
+	guarded := false
+	ctx := &hookCtx{Context: context.Background(), hook: func(int) {
+		if len(b.implied("animation")) == 0 && len(b.strings(`SELECT 'x' FROM global_tag_applying`)) > 0 {
+			guarded = true
+		}
+	}}
+	if _, err := Push(ctx, all); err != nil {
+		t.Fatal(err)
+	}
+	if guarded {
+		t.Error("the sweep ran while the gallery was guarded")
+	}
+	want(t, "b image", b.tagsOn(pic), "animation")
+}
+
+func TestAGlobalTagAliasedElsewhereLosesTheMark(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	makeGlobal(t, a, all, false, "kitty", "cat")
+	if err := a.Tags.MergeTags(a.tag("kitty"), a.tag("cat")); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Errorf("skipped %v", skipped)
+	}
+	want(t, "b aliases", b.aliases("cat"), "kitty")
+	want(t, "b marked aliases", b.strings(`SELECT name FROM tags WHERE is_alias = 1 AND is_global = 1`))
+}
+
+func TestAnAliasWithRulesOfItsOwnIsAMergeableConflict(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	a.alias("anime", "animation")
+	b.implies("anime", "japan")
+	b.alias("animu", "anime")
+	if err := b.Tags.SetTagNote(b.tag("anime"), "b's note", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, _ := makeGlobal(t, a, all, false, "animation")
+	if len(rep.Local) != 1 || !rep.Local[0].Mergeable ||
+		rep.Local[0].Reason != "its alias anime is a tag with aliases, implications or a note of its own in b" {
+		t.Fatalf("local = %+v, want the alias refused as a mergeable conflict", rep.Local)
+	}
+	want(t, "b global", b.global())
+	want(t, "b keeps its tag", b.implied("anime"), "japan")
+
+	makeGlobal(t, a, all, true, "animation")
+	for _, g := range []*gallery{a, b} {
+		want(t, g.Name+" aliases", g.aliases("animation"), "anime", "animu")
+		want(t, g.Name+" implied", g.implied("animation"), "japan")
+		want(t, g.Name+" global", g.global(), "animation", "japan")
+	}
+}
+
+func TestAMergeBringsTheOtherSideBackToTheSource(t *testing.T) {
+	a, b := open(t, "a"), open(t, "b")
+	all := sides(a, b)
+	a.alias("anime", "animation")
+	b.image("anime")
+	b.alias("animu", "anime")
+	b.implies("anime", "japan")
+	makeGlobal(t, a, all, true, "animation")
+	for _, g := range []*gallery{a, b} {
+		want(t, g.Name+" aliases", g.aliases("animation"), "anime", "animu")
+		want(t, g.Name+" implied", g.implied("animation"), "japan")
+		want(t, g.Name+" pending", g.pending())
+	}
+}

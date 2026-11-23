@@ -1075,3 +1075,49 @@ func TestGlobalTagChangesAreRecorded(t *testing.T) {
 	step("made local", `UPDATE tags SET is_global = 0 WHERE id = 102`, "102 general:video")
 	step("deleted", `DELETE FROM tags WHERE id = 101`, "101 general:animation")
 }
+
+const noteUpsert = `INSERT INTO tag_notes (tag_id, body, links) VALUES (101, ?, '')
+	ON CONFLICT(tag_id) DO UPDATE SET body = excluded.body, links = excluded.links`
+
+func TestANoteUpsertOnAGlobalTagWithARecordWaiting(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id, is_global) VALUES (101, 'animation', (SELECT id FROM tag_categories WHERE name = 'general'), 1)`)
+	mustExec(t, db.Write, `DELETE FROM global_tag_changes`)
+
+	for _, body := range []string{"first", "second", "third"} {
+		if _, err := db.Write.Exec(noteUpsert, body); err != nil {
+			t.Fatalf("note %q: %v", body, err)
+		}
+	}
+	if got := globalChanges(t, db); !slices.Equal(got, []string{"101 general:animation"}) {
+		t.Errorf("recorded %v, want the one record", got)
+	}
+	mustExec(t, db.Write, `UPDATE global_tag_changes SET tag_id = -tag_id`)
+	if _, err := db.Write.Exec(noteUpsert, "fourth"); err != nil {
+		t.Fatal(err)
+	}
+	if got := globalChanges(t, db); !slices.Equal(got, []string{"-101 general:animation", "101 general:animation"}) {
+		t.Errorf("with a taken record, recorded %v, want a fresh one beside it", got)
+	}
+}
+
+func TestBootstrap_ReplacesTheGlobalTagTriggersOfAnEarlierBuild(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `DROP TRIGGER trg_tag_notes_global_au;
+		CREATE TRIGGER trg_tag_notes_global_au AFTER UPDATE OF body, links ON tag_notes
+		BEGIN
+			INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
+			 WHERE t.id = NEW.tag_id AND t.is_global = 1 AND t.is_alias = 0 AND NOT EXISTS (SELECT 1 FROM global_tag_applying);
+		END`)
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id, is_global) VALUES (101, 'animation', (SELECT id FROM tag_categories WHERE name = 'general'), 1)`)
+
+	mustBootstrap(t, db)
+	for _, body := range []string{"first", "second"} {
+		if _, err := db.Write.Exec(noteUpsert, body); err != nil {
+			t.Fatalf("note %q after a bootstrap: %v", body, err)
+		}
+	}
+}

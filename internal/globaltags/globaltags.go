@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/monbooru/monbooru/internal/db"
 )
 
 type GalleryPlan struct {
@@ -255,9 +257,27 @@ func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, mer
 	if err != nil {
 		return nil, skipped, err
 	}
+	merged := false
 	for i, c := range cats {
 		done, skips, err := apply(ctx, c.side, plans[c.side.Name])
 		rep.Galleries[i].Counts = done
+		skipped = append(skipped, skips...)
+		if err != nil {
+			return rep, skipped, err
+		}
+		merged = merged || done.Merged > 0
+	}
+	if !merged {
+		return rep, skipped, nil
+	}
+	if cats, err = loadAll(sides); err != nil {
+		return rep, skipped, err
+	}
+	if _, plans, err = check(cats, from, ids, merge); err != nil {
+		return rep, skipped, err
+	}
+	for _, c := range cats {
+		_, skips, err := apply(ctx, c.side, plans[c.side.Name])
 		skipped = append(skipped, skips...)
 		if err != nil {
 			return rep, skipped, err
@@ -298,17 +318,83 @@ func MakeLocal(side Side, ids []int64) error {
 func Pending(sides []Side) bool {
 	for _, s := range sides {
 		var n int
-		if err := s.DB.Read.QueryRow(`SELECT EXISTS (SELECT 1 FROM global_tag_changes)`).Scan(&n); err == nil && n == 1 {
+		if err := s.DB.Read.QueryRow(`SELECT EXISTS (SELECT 1 FROM global_tag_changes WHERE tag_id > 0)`).Scan(&n); err == nil && n == 1 {
 			return true
 		}
 	}
 	return false
 }
 
+var records = []string{"global_tag_changes", "global_tag_removals"}
+
 func Reset(sides []Side) {
 	for _, s := range sides {
 		_, _ = s.DB.Write.Exec(`DELETE FROM global_tag_applying`)
+		_, _ = s.DB.Write.Exec(`DELETE FROM global_tag_changes AS fresh WHERE tag_id > 0
+			AND EXISTS (SELECT 1 FROM global_tag_changes taken WHERE taken.tag_id = -fresh.tag_id)`)
+		_, _ = s.DB.Write.Exec(`DELETE FROM global_tag_removals AS taken WHERE tag_id < 0
+			AND EXISTS (SELECT 1 FROM global_tag_removals fresh WHERE fresh.tag_id = -taken.tag_id
+			            AND fresh.kind = taken.kind AND fresh.name = taken.name AND fresh.category = taken.category)`)
+		for _, table := range records {
+			_, _ = s.DB.Write.Exec(`UPDATE ` + table + ` SET tag_id = -tag_id WHERE tag_id < 0`)
+		}
 	}
+}
+
+// claim takes the gallery's records by negating their tag id, so an edit
+// made from here on records a row of its own. A record an earlier run took
+// and left holds the older name and wins.
+func claim(s Side) ([]int64, error) {
+	tx, err := s.DB.Write.Begin()
+	if err != nil {
+		return nil, err
+	}
+	for _, table := range records {
+		if _, err := tx.Exec(`UPDATE OR IGNORE ` + table + ` SET tag_id = -tag_id WHERE tag_id > 0`); err != nil {
+			return nil, errors.Join(err, tx.Rollback())
+		}
+		if _, err := tx.Exec(`DELETE FROM ` + table + ` WHERE tag_id > 0`); err != nil {
+			return nil, errors.Join(err, tx.Rollback())
+		}
+	}
+	ids, err := db.QueryAll(tx, db.ScanRow(func(id *int64) []any { return []any{id} }),
+		`SELECT -tag_id FROM global_tag_changes WHERE tag_id < 0 ORDER BY 1`)
+	if err != nil {
+		return nil, errors.Join(err, tx.Rollback())
+	}
+	return ids, tx.Commit()
+}
+
+func plan(cx, cy *catalog, changed []int64) ([]op, []Skip) {
+	var ops []op
+	var skipped []Skip
+	for _, id := range changed {
+		t := cx.byID[id]
+		switch {
+		case t != nil && t.alias:
+		case t == nil || !t.global:
+			d := cy.byKey[cx.known[id]]
+			if d == nil || d.alias || !d.global {
+				continue
+			}
+			ops = append(ops, op{kind: opLocal, tag: d.key})
+			if t != nil {
+				continue
+			}
+			for parent, implied := range cy.implies {
+				if _, ok := implied[d.id]; ok && cy.byID[parent] != nil && cy.byID[parent].global {
+					ops = append(ops, op{kind: opUnimply, tag: cy.byID[parent].key, other: d.key})
+				}
+			}
+		default:
+			planned, conflicts := planTag(cx, cy, t, planOpts{removes: true})
+			ops = append(ops, planned...)
+			for _, c := range conflicts {
+				skipped = append(skipped, Skip{Gallery: c.Gallery, Tag: c.Tag, Reason: c.Reason})
+			}
+		}
+	}
+	return ops, skipped
 }
 
 func settle(c *catalog) (bool, error) {
@@ -348,71 +434,78 @@ func Push(ctx context.Context, sides []Side) ([]Skip, error) {
 	var skipped []Skip
 	ordered := sorted(sides)
 	for _, s := range ordered {
+		changed, err := claim(s)
+		if err != nil {
+			return skipped, err
+		}
+		if len(changed) == 0 {
+			continue
+		}
 		cx, err := load(s)
 		if err != nil {
 			return skipped, err
 		}
-		if len(cx.known) == 0 {
-			continue
-		}
-		if changed, err := settle(cx); err != nil {
+		if settled, err := settle(cx); err != nil {
 			return skipped, err
-		} else if changed {
+		} else if settled {
+			if changed, err = claim(s); err != nil {
+				return skipped, err
+			}
 			if cx, err = load(s); err != nil {
 				return skipped, err
 			}
 		}
-		changed := make([]int64, 0, len(cx.known))
-		for id := range cx.known {
-			changed = append(changed, id)
-		}
-		slices.Sort(changed)
+		left := map[Key]bool{}
 		for _, other := range ordered {
 			if other.Name == s.Name {
 				continue
 			}
-			cy, err := load(other)
+			out, err := pushTo(ctx, cx, other, changed)
+			skipped = append(skipped, out...)
 			if err != nil {
 				return skipped, err
 			}
-			var ops []op
-			for _, id := range changed {
-				t := cx.byID[id]
-				switch {
-				case t != nil && t.alias:
-				case t == nil || !t.global:
-					d := cy.byKey[cx.known[id]]
-					if d == nil || d.alias || !d.global {
-						continue
-					}
-					ops = append(ops, op{kind: opLocal, tag: d.key})
-					if t != nil {
-						continue
-					}
-					for parent, implied := range cy.implies {
-						if _, ok := implied[d.id]; ok && cy.byID[parent] != nil && cy.byID[parent].global {
-							ops = append(ops, op{kind: opUnimply, tag: cy.byID[parent].key, other: d.key})
-						}
-					}
-				default:
-					planned, conflicts := planTag(cx, cy, t, planOpts{removes: true})
-					ops = append(ops, planned...)
-					for _, c := range conflicts {
-						skipped = append(skipped, Skip{Gallery: c.Gallery, Tag: c.Tag, Reason: c.Reason})
-					}
-				}
-			}
-			_, skips, err := apply(ctx, other, ops)
-			skipped = append(skipped, skips...)
-			if err != nil {
-				return skipped, err
+			for _, sk := range out {
+				left[sk.Tag] = true
 			}
 		}
-		if err := forget(s, changed); err != nil {
+		var done []int64
+		for _, id := range changed {
+			if t := cx.byID[id]; t == nil || !left[t.key] {
+				done = append(done, id)
+			}
+		}
+		if err := forget(s, done); err != nil {
 			return skipped, err
 		}
 	}
 	return skipped, nil
+}
+
+// pushTo plans a gallery that left something out once more, against what
+// the first round wrote there, so a name the same push freed is taken.
+func pushTo(ctx context.Context, cx *catalog, dst Side, changed []int64) ([]Skip, error) {
+	var out []Skip
+	for round := range 2 {
+		cy, err := load(dst)
+		if err != nil {
+			return out, err
+		}
+		ops, refused := plan(cx, cy, changed)
+		if round > 0 && !writes(ops) {
+			return refused, nil
+		}
+		_, skips, err := apply(ctx, dst, ops)
+		out = append(refused, skips...)
+		if err != nil || len(out) == 0 {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func writes(ops []op) bool {
+	return slices.ContainsFunc(ops, func(o op) bool { return o.kind != opFanOut })
 }
 
 func forget(s Side, ids []int64) error {
@@ -421,11 +514,10 @@ func forget(s Side, ids []int64) error {
 		return err
 	}
 	for _, id := range ids {
-		if _, err := tx.Exec(`DELETE FROM global_tag_changes WHERE tag_id = ?`, id); err != nil {
-			return errors.Join(err, tx.Rollback())
-		}
-		if _, err := tx.Exec(`DELETE FROM global_tag_removals WHERE tag_id = ?`, id); err != nil {
-			return errors.Join(err, tx.Rollback())
+		for _, table := range records {
+			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE tag_id = ?`, -id); err != nil {
+				return errors.Join(err, tx.Rollback())
+			}
 		}
 	}
 	return tx.Commit()
@@ -445,7 +537,7 @@ func Pull(ctx context.Context, sides []Side, into string) ([]Skip, error) {
 	if dst == nil || src == nil {
 		return nil, nil
 	}
-	for _, table := range []string{"global_tag_changes", "global_tag_removals"} {
+	for _, table := range records {
 		if _, err := dst.DB.Write.Exec(`DELETE FROM ` + table); err != nil {
 			return nil, err
 		}

@@ -273,6 +273,12 @@ func Bootstrap(db *DB) error {
 	b.ensureColumn("tags", "rejected_drops", `ALTER TABLE tags ADD COLUMN rejected_drops INTEGER NOT NULL DEFAULT 0`)
 	b.ensureColumn("tags", "is_global", `ALTER TABLE tags ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0`)
 	b.exec("create idx_tags_global", `CREATE INDEX IF NOT EXISTS idx_tags_global ON tags(id) WHERE is_global = 1`)
+	// An earlier build's bodies inserted with OR IGNORE.
+	if b.queryInt("probe the global tag triggers", `SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND sql LIKE '%INSERT OR IGNORE INTO global_tag_%'`) > 0 {
+		for _, t := range globalTagTriggers() {
+			b.exec("drop "+t.name, `DROP TRIGGER IF EXISTS `+t.name)
+		}
+	}
 	for _, t := range globalTagTriggers() {
 		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
 		BEGIN
@@ -436,25 +442,32 @@ const backfillTaggerRunsSQL = `INSERT OR IGNORE INTO image_tagger_runs (image_id
 	WHERE it.is_auto = 1 AND it.tagger_name IS NOT NULL AND it.tagger_name != '' AND i.auto_tagged_at IS NOT NULL
 	GROUP BY it.image_id, it.tagger_name`
 
-// BackfillTaggerRuns records, for rows loaded from a document that does
-// not carry the runs, each tagger that left a tag on a stamped image.
 type trigger struct{ name, event, body string }
 
 func globalTagTriggers() []trigger {
 	const quiet = `NOT EXISTS (SELECT 1 FROM global_tag_applying)`
-	record := func(id string) string {
-		return `INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
-			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
-			 WHERE t.id = ` + id + ` AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet
+	// Not OR IGNORE: an upsert's update branch runs its triggers under its
+	// own conflict policy, so each insert skips a waiting record itself.
+	fresh := func(id string) string {
+		return ` AND NOT EXISTS (SELECT 1 FROM global_tag_changes WHERE tag_id = ` + id + `)`
 	}
-	asKnown := `INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
-			SELECT OLD.id, OLD.name, c.name FROM tag_categories c WHERE c.id = OLD.category_id AND ` + quiet
-	dropAlias := `INSERT OR IGNORE INTO global_tag_removals (tag_id, kind, name, category)
+	gone := func(id, kind, name, category string) string {
+		return ` AND NOT EXISTS (SELECT 1 FROM global_tag_removals r
+			 WHERE r.tag_id = ` + id + ` AND r.kind = '` + kind + `' AND r.name = ` + name + ` AND r.category = ` + category + `)`
+	}
+	record := func(id string) string {
+		return `INSERT INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
+			 WHERE t.id = ` + id + ` AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet + fresh("t.id")
+	}
+	asKnown := `INSERT INTO global_tag_changes (tag_id, name, category)
+			SELECT OLD.id, OLD.name, c.name FROM tag_categories c WHERE c.id = OLD.category_id AND ` + quiet + fresh("OLD.id")
+	dropAlias := `INSERT INTO global_tag_removals (tag_id, kind, name, category)
 			SELECT t.id, 'alias', OLD.name, c.name FROM tags t, tag_categories c
-			 WHERE t.id = OLD.canonical_tag_id AND t.is_global = 1 AND c.id = OLD.category_id AND ` + quiet
-	dropEdge := `INSERT OR IGNORE INTO global_tag_removals (tag_id, kind, name, category)
+			 WHERE t.id = OLD.canonical_tag_id AND t.is_global = 1 AND c.id = OLD.category_id AND ` + quiet + gone("t.id", "alias", "OLD.name", "c.name")
+	dropEdge := `INSERT INTO global_tag_removals (tag_id, kind, name, category)
 			SELECT p.id, 'implies', v.name, c.name FROM tags p, tags v JOIN tag_categories c ON c.id = v.category_id
-			 WHERE p.id = OLD.parent_tag_id AND p.is_global = 1 AND v.id = OLD.implied_tag_id AND ` + quiet
+			 WHERE p.id = OLD.parent_tag_id AND p.is_global = 1 AND v.id = OLD.implied_tag_id AND ` + quiet + gone("p.id", "implies", "v.name", "c.name")
 	return []trigger{
 		{"trg_tags_global_au", "AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id, is_global ON tags WHEN OLD.is_alias = 0 AND (OLD.is_global = 1 OR NEW.is_global = 1)", asKnown},
 		{"trg_tags_global_bd", "BEFORE DELETE ON tags WHEN OLD.is_global = 1 AND OLD.is_alias = 0", asKnown},
@@ -477,12 +490,14 @@ func globalTagTriggers() []trigger {
 		{"trg_tag_notes_global_au", "AFTER UPDATE OF body, links ON tag_notes", record("NEW.tag_id")},
 		{"trg_tag_notes_global_ad", "AFTER DELETE ON tag_notes", record("OLD.tag_id")},
 		{"trg_tag_categories_global_au", "AFTER UPDATE OF name ON tag_categories WHEN NEW.name != OLD.name",
-			`INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			`INSERT INTO global_tag_changes (tag_id, name, category)
 			SELECT t.id, t.name, OLD.name FROM tags t
-			 WHERE t.category_id = NEW.id AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet},
+			 WHERE t.category_id = NEW.id AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet + fresh("t.id")},
 	}
 }
 
+// BackfillTaggerRuns records, for rows loaded from a document that does
+// not carry the runs, each tagger that left a tag on a stamped image.
 func BackfillTaggerRuns(x Execer) error {
 	_, err := x.Exec(backfillTaggerRunsSQL)
 	return err

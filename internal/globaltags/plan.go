@@ -17,6 +17,7 @@ const (
 	opUnalias
 	opImply
 	opUnimply
+	opFanOut
 	opNote
 )
 
@@ -50,9 +51,9 @@ func planTag(src, dst *catalog, t *row, opts planOpts) ([]op, []Conflict) {
 	}
 	in := dst.side.Name
 
-	d := dst.byKey[src.knownAs(t)]
-	if d == nil {
-		d = dst.byKey[t.key]
+	d, now := dst.byKey[src.knownAs(t)], dst.byKey[t.key]
+	if d == nil || (!d.global && (now != nil || (!d.alias && !d.rejected))) {
+		d = now
 	}
 	renamed := false
 	switch {
@@ -90,10 +91,12 @@ func planTag(src, dst *catalog, t *row, opts planOpts) ([]op, []Conflict) {
 			refuse(false, "its alias %s is rejected in %s", a.key, in)
 		case x == d:
 			refuse(false, "its alias %s is the tag itself in %s", a.key, in)
-		case x.carried && (x.global || opts.merge):
+		case (x.carried || owns(dst, x)) && (x.global || opts.merge):
 			ops = append(ops, op{kind: opMerge, tag: t.key, other: a.key})
 		case x.carried:
 			refuse(true, "its alias %s is a tag on %s in %s", a.key, images(x.usage), in)
+		case owns(dst, x):
+			refuse(true, "its alias %s is a tag with aliases, implications or a note of its own in %s", a.key, in)
 		default:
 			ops = append(ops, op{kind: opAlias, tag: t.key, other: a.key, origin: a.origin, color: src.colors[a.key.Category]})
 		}
@@ -114,6 +117,7 @@ func planTag(src, dst *catalog, t *row, opts planOpts) ([]op, []Conflict) {
 		case y != nil && y.rejected:
 			refuse(false, "it implies %s, rejected in %s", vr.key, in)
 		case y != nil && d != nil && hasEdge(dst, d.id, y.id):
+			ops = append(ops, op{kind: opFanOut, tag: t.key, other: vr.key})
 		case y != nil && d != nil && dst.reaches(y.id, d.id):
 			refuse(false, "implying %s would close a loop in %s", vr.key, in)
 		default:
@@ -151,6 +155,18 @@ func planTag(src, dst *catalog, t *row, opts planOpts) ([]op, []Conflict) {
 		}
 	}
 	return ops, conflicts
+}
+
+func owns(c *catalog, t *row) bool {
+	if len(c.aliases[t.id]) > 0 || len(c.implies[t.id]) > 0 || c.notes[t.id] != (note{}) {
+		return true
+	}
+	for _, implied := range c.implies {
+		if _, ok := implied[t.id]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func hasEdge(c *catalog, parent, implied int64) bool {

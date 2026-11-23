@@ -486,9 +486,10 @@ func (s *Service) UnusedTags() (plain, kept []int64, err error) {
 
 // TagResetScope is everything a tag reset deletes: the aliases pointing at
 // one of the four ratings, which no canonical delete sweeps, then every
-// plain tag but those four. Deleting the canonicals takes every other alias
-// and every implication with them.
-func (s *Service) TagResetScope() (ratingAliases, ids []int64, aliases, implications int, err error) {
+// plain tag but those four and the global ones. Deleting the canonicals
+// takes their aliases and every implication they are part of with them.
+// The global tags are taken off the images and kept with their rules.
+func (s *Service) TagResetScope() (ratingAliases, ids, global []int64, aliases, implications int, err error) {
 	canonical := []any{s.ratingCatID}
 	for _, level := range contract.RatingLevels {
 		canonical = append(canonical, level)
@@ -496,16 +497,24 @@ func (s *Service) TagResetScope() (ratingAliases, ids []int64, aliases, implicat
 	if ratingAliases, err = db.QueryIDs(s.db.Read,
 		`SELECT a.id FROM tags a JOIN tags c ON c.id = a.canonical_tag_id
 		  WHERE a.is_alias = 1 AND c.category_id = ? AND c.name IN (?, ?, ?, ?) ORDER BY a.id`, canonical...); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, nil, 0, 0, err
 	}
 	if ids, err = db.QueryIDs(s.db.Read,
-		`SELECT id FROM tags WHERE is_alias = 0 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
-		return nil, nil, 0, 0, err
+		`SELECT id FROM tags WHERE is_alias = 0 AND is_global = 0 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
+		return nil, nil, nil, 0, 0, err
+	}
+	if global, err = db.QueryIDs(s.db.Read,
+		`SELECT id FROM tags WHERE is_alias = 0 AND is_global = 1 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
+		return nil, nil, nil, 0, 0, err
 	}
 	err = s.db.Read.QueryRow(
-		`SELECT (SELECT COUNT(*) FROM tags WHERE is_alias = 1), (SELECT COUNT(*) FROM tag_implications)`,
+		`SELECT (SELECT COUNT(*) FROM tags a WHERE a.is_alias = 1
+		          AND NOT EXISTS (SELECT 1 FROM tags c WHERE c.id = a.canonical_tag_id AND c.is_global = 1)),
+		        (SELECT COUNT(*) FROM tag_implications i
+		          WHERE NOT EXISTS (SELECT 1 FROM tags p WHERE p.id = i.parent_tag_id AND p.is_global = 1)
+		             OR NOT EXISTS (SELECT 1 FROM tags v WHERE v.id = i.implied_tag_id AND v.is_global = 1))`,
 	).Scan(&aliases, &implications)
-	return ratingAliases, ids, aliases, implications, err
+	return ratingAliases, ids, global, aliases, implications, err
 }
 
 func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, err error) {
@@ -876,7 +885,7 @@ func (s *Service) DeleteTag(id int64) error {
 		return err
 	}
 	if locked {
-		return s.stripTagFromAllImages(id)
+		return s.StripTagFromAllImages(id)
 	}
 	return s.inWriteTx(func(tx *sql.Tx) error {
 		if err := refuseGlobalTx(tx, id); err != nil {
@@ -896,7 +905,7 @@ func (s *Service) DeleteTag(id int64) error {
 	})
 }
 
-func (s *Service) stripTagFromAllImages(tagID int64) error {
+func (s *Service) StripTagFromAllImages(tagID int64) error {
 	return s.inWriteTx(func(tx *sql.Tx) error {
 		if err := stripTagsTx(tx, []int64{tagID}); err != nil {
 			return err

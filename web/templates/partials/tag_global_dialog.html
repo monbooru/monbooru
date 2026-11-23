@@ -64,7 +64,7 @@ function confirmMakeGlobal() {
 </ul>
 {{end}}
 {{if or .Mergeable .Merge}}
-<label style="display:block;margin-top:6px"><input type="checkbox" id="make-global-merge"{{if .Merge}} checked{{end}} onchange="checkMakeGlobal(this.checked)"> Merge a tag that has images into the global tag it is an alias of. This cannot be undone.</label>
+<label style="display:block;margin-top:6px"><input type="checkbox" id="make-global-merge"{{if .Merge}} checked{{end}} onchange="checkMakeGlobal(this.checked)"> Merge a tag that has images or rules of its own into the global tag it is an alias of. This cannot be undone.</label>
 {{end}}
 <span id="make-global-ready" data-ready="{{if .Report.Global}}1{{end}}" hidden></span>
 {{end}}

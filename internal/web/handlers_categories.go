@@ -178,7 +178,8 @@ func categoryStatus(err error) int {
 		errors.Is(err, tags.ErrInvalidCategoryName), errors.Is(err, tags.ErrReservedCategoryName),
 		errors.Is(err, tags.ErrInvalidCategoryColor):
 		return http.StatusBadRequest
-	case errors.As(err, &collision), errors.Is(err, tags.ErrCategoryExists), errors.Is(err, tags.ErrCategoryOrderStale):
+	case errors.As(err, &collision), errors.Is(err, tags.ErrCategoryExists), errors.Is(err, tags.ErrCategoryOrderStale),
+		errors.Is(err, tags.ErrTagGlobal):
 		return http.StatusConflict
 	}
 	return http.StatusInternalServerError

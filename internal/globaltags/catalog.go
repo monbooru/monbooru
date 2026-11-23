@@ -122,7 +122,7 @@ func load(side Side) (*catalog, error) {
 		key Key
 	}
 	changes, err := db.QueryAll(q, db.ScanRow(func(x *change) []any { return []any{&x.id, &x.key.Name, &x.key.Category} }),
-		`SELECT tag_id, name, category FROM global_tag_changes ORDER BY tag_id`)
+		`SELECT abs(tag_id), name, category FROM global_tag_changes ORDER BY tag_id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func load(side Side) (*catalog, error) {
 		r  removal
 	}
 	removed, err := db.QueryAll(q, db.ScanRow(func(x *gone) []any { return []any{&x.id, &x.r.kind, &x.r.key.Name, &x.r.key.Category} }),
-		`SELECT tag_id, kind, name, category FROM global_tag_removals ORDER BY tag_id, kind, category, name`)
+		`SELECT DISTINCT abs(tag_id), kind, name, category FROM global_tag_removals ORDER BY 1, kind, category, name`)
 	if err != nil {
 		return nil, err
 	}
