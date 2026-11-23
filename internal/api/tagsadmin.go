@@ -26,6 +26,7 @@ func toTagResponse(t *models.Tag) tagResponse {
 		UsageCount: t.UsageCount,
 		IsAlias:    t.IsAlias,
 		Rejected:   t.Rejected,
+		Global:     t.Global,
 		Origin:     t.Origin,
 	}
 	if !t.LastUsedAt.IsZero() {

@@ -54,6 +54,7 @@ func buildSpec(baseURL string) map[string]any {
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
 					"rejected":     map[string]any{"type": "boolean", "description": "True when the name is rejected: every add path drops it until it is un-rejected."},
+					"global":       map[string]any{"type": "boolean", "description": "True when the tag is global, the same tag in every gallery; an alias carries its canonical's mark."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label: 'user', a booru site, 'ptr', an auto-tagger name, an import label. Empty on rows predating the column."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; most recent application to an image. Absent when never applied."},
 				}),
@@ -65,6 +66,7 @@ func buildSpec(baseURL string) map[string]any {
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
 					"rejected":     map[string]any{"type": "boolean", "description": "As on TagRow."},
+					"global":       map[string]any{"type": "boolean", "description": "As on TagRow."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label, as on TagRow."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; absent when never applied."},
 					"note":         map[string]any{"type": "string", "description": "The operator's note on the tag, in annotation markup; empty when none. An alias has none."},
@@ -752,6 +754,7 @@ func buildSpec(baseURL string) map[string]any {
 						queryParam("origin", "Filter by stored creation origin ('user', a booru site, 'ptr', an auto-tagger name, ...). The legacy 'alias' value narrows to alias rows. Empty (default) returns every tag."),
 						queryParam("type", "Structural filter: 'tag' (plain rows), 'alias' (alias rows), 'rejected' (rejected names). Empty (default) returns all; any other value matches nothing."),
 						queryParam("used_by", "Only tags this source applied to at least one image (an auto-tagger name, a booru site, 'user', a via label), whoever created the tag."),
+						queryParam("scope", "'global' keeps the global tags and their aliases, 'local' the others. Empty (default) returns both."),
 					},
 					map[string]any{
 						"200": resp("Paginated tag list", "#/components/schemas/PaginatedTags"),
@@ -792,6 +795,7 @@ func buildSpec(baseURL string) map[string]any {
 					map[string]any{
 						"204": map[string]any{"description": "Deleted (the four canonical rating rows are usage-stripped; the catalog row stays)"},
 						"404": resp("Tag not found", "#/components/schemas/Error"),
+						"409": resp("conflict: the tag is global; make it local first", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/aliases": map[string]any{

@@ -16,6 +16,7 @@ type tagResponse struct {
 	UsageCount int    `json:"usage_count"`
 	IsAlias    bool   `json:"is_alias"`
 	Rejected   bool   `json:"rejected"`
+	Global     bool   `json:"global"`
 	Origin     string `json:"origin"`
 	LastUsedAt string `json:"last_used_at,omitempty"`
 }
@@ -82,6 +83,7 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 		UsedBy:    q.Get("used_by"),
 		Type:      q.Get("type"),
 		ShowZero:  q.Get("show_zero") != "0",
+		Scope:     q.Get("scope"),
 	}
 
 	if filter.Type != "" && filter.Type != "tag" && filter.Type != "alias" && filter.Type != "rejected" {
