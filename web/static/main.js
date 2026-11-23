@@ -184,6 +184,7 @@ var readerZoom = null;
 function onSwipe(el, prev, next) {
   var x0 = null, y0 = 0, t0 = 0;
   el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch' && !e.isPrimary) x0 = null;
     if (e.pointerType !== 'touch' || !e.isPrimary || e.target.closest('video[controls]')) return;
     x0 = e.clientX; y0 = e.clientY; t0 = e.timeStamp;
   });
@@ -487,8 +488,10 @@ function zoomer(stage, opts) {
     zoomAt(c.x, c.y, Math.exp(-dy * 0.0018));
   }, { passive: false });
   stage.addEventListener('pointerdown', function (e) {
-    if (e.button !== 0 || !img || e.target.closest('a, button')) return;
-    stage.setPointerCapture(e.pointerId);
+    if (e.button !== 0 || !img) return;
+    var side = e.target.closest('.reader-side');
+    if (e.target.closest('a, button') && !(side && e.pointerType === 'touch')) return;
+    if (!side) stage.setPointerCapture(e.pointerId);
     points[e.pointerId] = { x: e.clientX, y: e.clientY };
     if (Object.keys(points).length === 2) {
       pinch = pinchOf();
@@ -717,6 +720,7 @@ var viewer = (function () {
       if (epoch !== displayEpoch) return;
       if (afterShow) { var merge = afterShow; afterShow = null; merge(); i = index; }
       if (i + dir >= 0 && i + dir < ids.length) { show(i + dir, dir); return; }
+      if (!current && dir > 0 && i > 0) { show(i - 1, -1); return; }
       pause();
       setMessage(text);
       stalled = true;
@@ -886,7 +890,11 @@ var viewer = (function () {
           var r = s.getBoundingClientRect();
           return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
         });
-        if (!side) dlg.close();
+        if (side) return;
+        dlg.close();
+        var swallow = function (c) { if (c.isTrusted) { c.preventDefault(); c.stopPropagation(); } };
+        window.addEventListener('click', swallow, true);
+        setTimeout(function () { window.removeEventListener('click', swallow, true); }, 500);
       },
     });
     onSwipe(stage, function () { if (zoom.atFit()) actions.previous(); }, function () { if (zoom.atFit()) actions.next(); });
@@ -933,7 +941,8 @@ var viewer = (function () {
     });
     // On the document: a button disabled under focus drops it out of the dialog.
     document.addEventListener('keydown', function (e) {
-      if (!dlg || !dlg.open || chorded(e) || e.target.tagName === 'SELECT') return;
+      if (!dlg || !dlg.open || chorded(e)) return;
+      if (e.target.tagName === 'SELECT' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;
       if (zoom.handleKey(e)) return;
       var action = keys[e.key];
       if (!action) return;
@@ -1029,7 +1038,7 @@ var viewer = (function () {
             };
             // The image still loading owns the spare slot until it shows.
             if (current) merge();
-            else if (stalled) { stalled = false; merge(); if (index + 1 < ids.length) show(index + 1, 1); }
+            else if (stalled) { stalled = false; merge(); if (index + 1 < ids.length) show(index + 1, 1); else if (index > 0) show(index - 1, -1); }
             else afterShow = merge;
           });
         }
@@ -2790,8 +2799,15 @@ var _jobAutoClearFinishedAt = '';
 var _lastReloadedFinishedAt = '';
 function refreshGalleryGrid() {
   if (!document.getElementById('gallery-grid') || !window.htmx) return;
+  var viewing = document.querySelector('#viewer-dialog[open]');
+  if (viewing) { viewing.addEventListener('close', refreshGalleryGrid, { once: true }); return; }
   var u = new URL(window.location.href);
-  window.htmx.ajax('GET', u.pathname + u.search, {target: '#gallery-grid', swap: 'innerHTML'});
+  var focused = document.querySelector('.thumb-card.focused');
+  window.htmx.ajax('GET', u.pathname + u.search, {target: '#gallery-grid', swap: 'innerHTML'}).then(function () {
+    var card = focused && document.querySelector('.thumb-card[data-id="' + focused.dataset.id + '"]');
+    var cards = Array.from(document.querySelectorAll('.thumb-card'));
+    if (card) setFocused(cards, cards.indexOf(card));
+  });
 }
 
 function inboxBusy() {
