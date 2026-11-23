@@ -244,9 +244,10 @@ func Check(sides []Side, from string, ids []int64, merge bool) (*Report, error) 
 	return rep, err
 }
 
-func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, merge bool) (*Report, []Skip, error) {
-	skipped, err := Push(ctx, sides)
-	if err != nil {
+// MakeGlobal records ids in the source until it ends without error, so a
+// run stopped part way is run again by Resume.
+func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, merge bool) (rep *Report, skipped []Skip, err error) {
+	if skipped, err = Push(ctx, sides); err != nil {
 		return nil, skipped, err
 	}
 	cats, err := loadAll(sides)
@@ -257,6 +258,15 @@ func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, mer
 	if err != nil {
 		return nil, skipped, err
 	}
+	src := cats[slices.IndexFunc(cats, func(c *catalog) bool { return c.side.Name == from })].side
+	if err := making(src, ids, merge); err != nil {
+		return rep, skipped, err
+	}
+	defer func() {
+		if err == nil {
+			err = made(src, ids)
+		}
+	}()
 	merged := false
 	for i, c := range cats {
 		done, skips, err := apply(ctx, c.side, plans[c.side.Name])
@@ -284,6 +294,65 @@ func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, mer
 		}
 	}
 	return rep, skipped, nil
+}
+
+func making(s Side, ids []int64, merge bool) error {
+	tx, err := s.DB.Write.Begin()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(`DELETE FROM global_tag_making WHERE tag_id = ?`, id); err != nil {
+			return errors.Join(err, tx.Rollback())
+		}
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO global_tag_making (tag_id, merge) VALUES (?, ?)`, -id, merge); err != nil {
+			return errors.Join(err, tx.Rollback())
+		}
+	}
+	return tx.Commit()
+}
+
+func made(s Side, ids []int64) error {
+	tx, err := s.DB.Write.Begin()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(`DELETE FROM global_tag_making WHERE tag_id = ?`, -id); err != nil {
+			return errors.Join(err, tx.Rollback())
+		}
+	}
+	return tx.Commit()
+}
+
+// Resume runs again every Make global a gallery still records.
+func Resume(ctx context.Context, sides []Side) ([]Skip, error) {
+	var skipped []Skip
+	for _, s := range sorted(sides) {
+		type run struct {
+			id    int64
+			merge bool
+		}
+		runs, err := db.QueryAll(s.DB.Read, db.ScanRow(func(r *run) []any { return []any{&r.id, &r.merge} }),
+			`SELECT abs(tag_id), merge FROM global_tag_making ORDER BY 1`)
+		if err != nil {
+			return skipped, err
+		}
+		if len(runs) == 0 {
+			continue
+		}
+		ids := make([]int64, len(runs))
+		merge := false
+		for i, r := range runs {
+			ids[i], merge = r.id, merge || r.merge
+		}
+		_, skips, err := MakeGlobal(ctx, sides, s.Name, ids, merge)
+		skipped = append(skipped, skips...)
+		if err != nil {
+			return skipped, err
+		}
+	}
+	return skipped, nil
 }
 
 func MakeLocal(side Side, ids []int64) error {
@@ -318,7 +387,8 @@ func MakeLocal(side Side, ids []int64) error {
 func Pending(sides []Side) bool {
 	for _, s := range sides {
 		var n int
-		if err := s.DB.Read.QueryRow(`SELECT EXISTS (SELECT 1 FROM global_tag_changes WHERE tag_id > 0)`).Scan(&n); err == nil && n == 1 {
+		if err := s.DB.Read.QueryRow(`SELECT EXISTS (SELECT 1 FROM global_tag_changes WHERE tag_id > 0)
+			OR EXISTS (SELECT 1 FROM global_tag_making WHERE tag_id > 0)`).Scan(&n); err == nil && n == 1 {
 			return true
 		}
 	}
@@ -338,6 +408,7 @@ func Reset(sides []Side) {
 		for _, table := range records {
 			_, _ = s.DB.Write.Exec(`UPDATE ` + table + ` SET tag_id = -tag_id WHERE tag_id < 0`)
 		}
+		_, _ = s.DB.Write.Exec(`UPDATE global_tag_making SET tag_id = -tag_id WHERE tag_id < 0`)
 	}
 }
 

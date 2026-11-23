@@ -348,6 +348,47 @@ func TestARenameAndACategoryMoveFollow(t *testing.T) {
 	}
 }
 
+func TestACategoryRenameFollowsAsARename(t *testing.T) {
+	main, second := open(t, "main"), open(t, "second")
+	all := sides(main, second)
+	second.alias("bodypart:tails", "bodypart:tail")
+	second.tag("bodypart:wings")
+	makeGlobal(t, second, all, false, "bodypart:tail", "bodypart:wings")
+	pic := main.image("bodypart:tail")
+
+	if err := second.Tags.RenameCategory(second.category("bodypart"), "bodyparts"); err != nil {
+		t.Fatal(err)
+	}
+	if skipped := push(t, all); len(skipped) != 0 {
+		t.Fatalf("skipped %v", skipped)
+	}
+	want(t, "main categories", main.strings(`SELECT name FROM tag_categories WHERE is_builtin = 0 ORDER BY 1`), "bodyparts")
+	want(t, "main global", main.global(), "bodyparts:tail", "bodyparts:wings")
+	want(t, "main aliases", main.aliases("bodyparts:tail"), "bodyparts:tails")
+	want(t, "main image", main.tagsOn(pic), "bodyparts:tail")
+}
+
+func TestACategoryMoveLeavesTheOldCategoryWhereItHoldsMore(t *testing.T) {
+	for name, local := range map[string]bool{"a local tag beside": true, "a global tag left behind": false} {
+		main, second := open(t, "main"), open(t, "second")
+		all := sides(main, second)
+		second.tag("bodypart:tail")
+		second.tag("bodypart:wings")
+		makeGlobal(t, second, all, false, "bodypart:tail", "bodypart:wings")
+		if local {
+			main.tag("bodypart:horns")
+		}
+
+		if err := second.Tags.ChangeTagCategory(second.tag("bodypart:tail"), second.category("bodyparts")); err != nil {
+			t.Fatal(err)
+		}
+		if skipped := push(t, all); len(skipped) != 0 {
+			t.Fatalf("%s: skipped %v", name, skipped)
+		}
+		want(t, name+": main global", main.global(), "bodypart:wings", "bodyparts:tail")
+	}
+}
+
 func TestAMergeOfAGlobalTagIsMergedEverywhere(t *testing.T) {
 	a, b := open(t, "a"), open(t, "b")
 	all := sides(a, b)
@@ -720,6 +761,65 @@ func TestMakeGlobalStoppedAnywhereIsFinishedByRunningItAgain(t *testing.T) {
 			t.Fatal(err)
 		}
 		want(t, fmt.Sprintf("stopped at call %d, then run again: b image", cancel), b.tagsOn(pic), "c1", "p1")
+	}
+}
+
+func TestMakeGlobalStoppedAnywhereIsFinishedAtTheNextStart(t *testing.T) {
+	for _, from := range []string{"a", "b"} {
+		for _, merge := range []bool{false, true} {
+			stops := 0
+			for cancel := 1; cancel <= 200; cancel++ {
+				a, b := open(t, "a"), open(t, "b")
+				all := sides(a, b)
+				src, other := a, b
+				if from == "b" {
+					src, other = b, a
+				}
+				src.implies("p1", "c1")
+				src.alias("x1", "p1")
+				src.implies("p2", "c2")
+				src.alias("anime", "p2")
+				src.tag("p3")
+				other.alias("y3", "p3")
+				other.implies("p3", "c3")
+				pic := other.image("p1", "anime")
+				ids := []int64{src.tag("p1"), src.tag("p2"), src.tag("p3")}
+				if _, _, err := MakeGlobal(&hookCtx{Context: context.Background(), cancel: cancel}, all, from, ids, merge); err == nil {
+					break
+				}
+				stops++
+				label := fmt.Sprintf("from %s, merge %v, stopped at call %d", from, merge, cancel)
+				if Pending(all) {
+					t.Errorf("%s: pending before a start", label)
+				}
+				Reset(all)
+				if !Pending(all) {
+					t.Errorf("%s: nothing pending at the start", label)
+				}
+				if _, err := Resume(context.Background(), all); err != nil {
+					t.Fatal(err)
+				}
+				push(t, all)
+				if !slices.Contains(a.global(), "p1") {
+					t.Errorf("%s: a global = %v, want p1 among them", label, a.global())
+				}
+				want(t, label+": b global", b.global(), a.global()...)
+				for _, k := range a.global() {
+					want(t, label+": b aliases of "+k, b.aliases(k), a.aliases(k)...)
+					want(t, label+": b implied by "+k, b.implied(k), a.implied(k)...)
+				}
+				if !slices.Contains(other.tagsOn(pic), "c1") {
+					t.Errorf("%s: image = %v, want c1 fanned out", label, other.tagsOn(pic))
+				}
+				if Pending(all) {
+					t.Errorf("%s: still pending after the resume", label)
+				}
+				want(t, label+": left to make", append(a.strings(`SELECT tag_id FROM global_tag_making`), b.strings(`SELECT tag_id FROM global_tag_making`)...))
+			}
+			if stops == 0 {
+				t.Errorf("from %s, merge %v: never stopped", from, merge)
+			}
+		}
 	}
 }
 

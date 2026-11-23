@@ -109,6 +109,11 @@ func (s *Server) applyGlobalChanges(afterJob bool) {
 		}
 		if err == nil {
 			var skips []globaltags.Skip
+			skips, err = globaltags.Resume(ctx, sides)
+			skipped = append(skipped, skips...)
+		}
+		if err == nil {
+			var skips []globaltags.Skip
 			skips, err = globaltags.Push(ctx, sides)
 			skipped = append(skipped, skips...)
 		}

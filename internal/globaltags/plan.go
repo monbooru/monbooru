@@ -29,6 +29,8 @@ type op struct {
 	origin string
 	color  string
 	note   note
+	// The source holds no category of from's name any more.
+	categoryGone bool
 }
 
 type Conflict struct {
@@ -71,7 +73,8 @@ func planTag(src, dst *catalog, t *row, opts planOpts) ([]op, []Conflict) {
 				refuse(false, "%s is already a name in %s", t.key, in)
 				return nil, conflicts
 			}
-			ops = append(ops, op{kind: opRename, tag: t.key, from: d.key, color: src.colors[t.key.Category]})
+			_, kept := src.colors[d.key.Category]
+			ops = append(ops, op{kind: opRename, tag: t.key, from: d.key, color: src.colors[t.key.Category], categoryGone: !kept})
 			renamed = true
 		}
 		if !d.global {

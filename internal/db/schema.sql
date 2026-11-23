@@ -184,6 +184,10 @@ CREATE TABLE IF NOT EXISTS global_tag_removals (
 CREATE TABLE IF NOT EXISTS global_tag_applying (
     id INTEGER PRIMARY KEY CHECK (id = 1)
 );
+CREATE TABLE IF NOT EXISTS global_tag_making (
+    tag_id INTEGER PRIMARY KEY,
+    merge  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS tag_notes (
     tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
     body   TEXT    NOT NULL DEFAULT '',

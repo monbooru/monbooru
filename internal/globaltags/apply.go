@@ -56,7 +56,8 @@ func count(ops []op) Counts {
 }
 
 type applier struct {
-	dst Side
+	dst     Side
+	renamed map[string]string
 }
 
 func (a applier) id(k Key) (int64, error) {
@@ -82,6 +83,29 @@ func (a applier) category(name, color string) (int64, error) {
 		return 0, err
 	}
 	return cat.ID, nil
+}
+
+func (a applier) renameCategory(from, to string) (bool, error) {
+	if _, taken, err := tags.CategoryIDByName(a.dst.DB, to); err != nil || taken {
+		return false, err
+	}
+	id, _, err := tags.CategoryIDByName(a.dst.DB, from)
+	if err != nil {
+		return false, err
+	}
+	var local int
+	if err := a.dst.DB.Write.QueryRow(`SELECT COUNT(*) FROM tags t WHERE t.category_id = ? AND t.is_global = 0
+		AND NOT EXISTS (SELECT 1 FROM tags g WHERE g.id = t.canonical_tag_id AND g.is_global = 1)`, id).Scan(&local); err != nil || local > 0 {
+		return false, err
+	}
+	if err := a.dst.Tags.RenameCategory(id, to); err != nil {
+		if errors.Is(err, tags.ErrBuiltinCategoryName) {
+			return false, nil
+		}
+		return false, err
+	}
+	a.renamed[from] = to
+	return true, nil
 }
 
 func (a applier) ensure(k Key, origin, color string) (int64, error) {
@@ -116,18 +140,34 @@ func (a applier) run(o op, w *walks) error {
 		_, err := a.ensure(o.tag, o.origin, o.color)
 		return err
 	case opRename:
-		id, err := a.id(o.from)
+		from := o.from
+		if to, ok := a.renamed[from.Category]; ok {
+			from.Category = to
+		}
+		id, err := a.id(from)
 		if err != nil {
 			return err
 		}
-		if o.from.Category == o.tag.Category {
+		if from.Category != o.tag.Category && o.categoryGone {
+			moved, err := a.renameCategory(from.Category, o.tag.Category)
+			if err != nil {
+				return err
+			}
+			if moved {
+				from.Category = o.tag.Category
+			}
+		}
+		if from == o.tag {
+			return nil
+		}
+		if from.Category == o.tag.Category {
 			return svc.RenameTag(id, o.tag.Name)
 		}
 		catID, err := a.category(o.tag.Category, o.color)
 		if err != nil {
 			return err
 		}
-		if o.from.Name == o.tag.Name {
+		if from.Name == o.tag.Name {
 			return svc.ChangeTagCategory(id, catID)
 		}
 		return svc.RenameAndMoveTag(id, o.tag.Name, catID)
@@ -254,7 +294,7 @@ func apply(ctx context.Context, dst Side, ops []op) (Counts, []Skip, error) {
 
 	ops = slices.Clone(ops)
 	slices.SortStableFunc(ops, func(x, y op) int { return phase(x.kind) - phase(y.kind) })
-	a := applier{dst: dst}
+	a := applier{dst: dst, renamed: map[string]string{}}
 	w := &walks{propagate: map[int64]bool{}}
 	var skipped []Skip
 	var applied []op
