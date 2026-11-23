@@ -58,7 +58,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path := strings.Trim(strings.TrimSpace(r.URL.Query().Get("path")), "/")
+	path := strings.Trim(r.URL.Query().Get("path"), "/")
 	node := gallery.FindFolder(tree, path)
 	if node == nil {
 		contract.WriteError(w, http.StatusNotFound, contract.CodeFolderNotFound, "folder not found: "+path)

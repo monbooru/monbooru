@@ -58,6 +58,7 @@ func TestListFolders(t *testing.T) {
 		{"a folder's subfolders", nested, "path=art", []string{"art/sketches:sketches=2/0"}, 1},
 		{"slashes around the path are dropped", nested, "path=/art/", []string{"art/sketches:sketches=2/0"}, 1},
 		{"a leaf lists nothing", nested, "path=art/sketches", []string{}, 0},
+		{"spaces around a name are kept", []image{{"edge/ padded /in", false}}, "path=edge/%20padded%20", []string{"edge/ padded /in:in=1/0"}, 1},
 		{"a folder holding only subfolders", []image{{"a/b/c", false}}, "path=a", []string{"a/b:b=1/1"}, 1},
 		{"missing images are left out", []image{{"kept", false}, {"gone", true}}, "", []string{"kept:kept=1/0"}, 1},
 	}
