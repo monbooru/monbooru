@@ -1428,7 +1428,7 @@ var docsTemplate = template.Must(template.New("api-docs").Parse(`<!DOCTYPE html>
  a:hover { text-decoration:underline; }
  code { font-family:inherit; }
  table { border-collapse:collapse; width:100%; margin:6px 0 10px; font-size:13px; }
- th, td { border:1px solid #2a2a2a; padding:4px 8px; text-align:left; vertical-align:top; }
+ th, td { border:1px solid #2a2a2a; padding:4px 8px; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
  th { color:#666; font-weight:normal; background:#111; }
  .muted { color:#666; font-size:12px; }
  .method { display:inline-block; padding:1px 6px; border:1px solid; font-weight:bold; margin-right:8px; font-size:12px; min-width:52px; text-align:center; }
@@ -1437,7 +1437,7 @@ var docsTemplate = template.Must(template.New("api-docs").Parse(`<!DOCTYPE html>
  .method-put    { color:#ffaa00; border-color:#ffaa00; }
  .method-patch  { color:#ffaa00; border-color:#ffaa00; }
  .method-delete { color:#cc3333; border-color:#cc3333; }
- .path { color:#c8c8c8; }
+ .path { color:#c8c8c8; overflow-wrap:anywhere; }
  ul.toc { list-style:none; padding:0; margin:8px 0 20px; }
  ul.toc li { padding:2px 0; }
  .tag { color:#ffaa00; }

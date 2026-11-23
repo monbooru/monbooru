@@ -218,6 +218,7 @@
         <td class="tag-select-col"><input type="checkbox" class="tag-select" value="{{.ID}}" data-name="{{.Name}}" data-color="{{catColor .CategoryColor}}" data-category="{{.CategoryName}}"{{with index $.DistinctOf .ID}} data-distinct="{{range $i, $p := .}}{{if $i}} {{end}}{{$p.ID}}{{end}}"{{end}} aria-label="Select {{.Name}}"></td>
         <td class="tag-name-cell{{if and (not .IsAlias) (eq .CategoryName "rating")}} tag-name-builtin{{end}}"
             title="{{.Name}}{{if .IsAlias}} → {{.CanonicalName}}{{else if .Rejected}} → nothing{{end}}">
+          <span class="tag-name-line">
           {{if .IsAlias}}
           <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
           <span class="merge-arrow">→</span>
@@ -235,6 +236,7 @@
           {{if .FoldedInto}}<span class="merge-arrow">→</span> <span class="field-hint">{{.FoldedInto}}</span>{{end}}
           {{if eq .CategoryName "rating"}}<span class="field-hint">(built-in)</span>{{end}}
           {{end}}
+          </span>
         </td>
         <td class="tag-implied-cell"
             {{with index $imps .ID}}{{if le (len .) 5}}title="{{range $i, $im := .}}{{if $i}} {{end}}{{$im.ImpliedName}}{{end}}"{{end}}{{end}}>
@@ -1016,7 +1018,7 @@ function updateTagColor(sel) {
   if (!row || !color) return;
   // The row's own name leads the cell; an alias row's canonical keeps its
   // own colour.
-  var target = row.querySelector('.tag-name-cell').firstElementChild;
+  var target = row.querySelector('.tag-name-cell a');
   if (target) target.style.color = color;
 }
 
