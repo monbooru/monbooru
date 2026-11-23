@@ -790,8 +790,8 @@ body.marquee-active { user-select: none; }
 .tag-row.focused { outline: 1px solid var(--link); outline-offset: -1px; }
 .tag-table .tag-name-cell { min-width: 140px; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-name-line { display: flex; align-items: baseline; min-width: 0; }
-.tag-name-line > * { flex: none; }
-.tag-name-line > a { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tag-name-line > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tag-name-line > .alias-badge, .tag-name-line > .merge-arrow { flex: none; }
 .tag-table .tag-name-builtin { white-space: nowrap; }
 .tag-select-col { width: 26px; text-align: center; }
 @media (pointer: coarse) { .tag-select { width: 20px; height: 20px; } }
