@@ -49,6 +49,7 @@ func (q Query) listKey(src Source) string {
 
 func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, error) {
 	database := src.DB
+	src.heldTalliesOnly = q.DeferCount
 	started := time.Now()
 	gen := src.Cache.gen()
 	key := q.listKey(src)
@@ -366,13 +367,17 @@ func pageStart(ids []int64, q Query, page, limit int) int {
 }
 
 // Count is the total an Execute under DeferCount left unknown: the cached
-// list's length once a fan has filled it, else the exact COUNT.
+// list's length once a fan has filled it, a fast count whose tally the
+// page did not wait for, else the exact COUNT.
 func Count(ctx context.Context, src Source, q Query) (int, error) {
 	if ids, ok := src.Cache.get(q.listKey(src)); ok {
 		return len(ids), nil
 	}
 	key := q.listKey(src)
 	if n, ok := src.Cache.total(key); ok {
+		return n, nil
+	}
+	if n, bound, ok := fastTotal(src, q.Expr, containsMissingFilter(q.Expr)); ok && !bound {
 		return n, nil
 	}
 	gen := src.Cache.gen()

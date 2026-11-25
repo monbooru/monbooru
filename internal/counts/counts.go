@@ -59,6 +59,21 @@ func (c *Tallies) UntaggedVisibleCount() (int, bool) {
 		                    AND it.tagger_name IS NOT '`+models.TagSourceMonbooru+`')`)
 }
 
+func (c *Tallies) UntaggedVisibleCountReady() (int, bool) {
+	return c.heldCount(&c.untaggedVisible)
+}
+
+func (c *Tallies) AutoUntaggedVisibleCountReady() (int, bool) {
+	return c.heldCount(&c.autoUntaggedVisible)
+}
+
+func (c *Tallies) heldCount(slot *atomic.Pointer[stampedCount]) (int, bool) {
+	if p := slot.Load(); p != nil && p.gen == c.gen.Load() {
+		return p.n, true
+	}
+	return 0, false
+}
+
 func (c *Tallies) VisibleCount() (int, bool) {
 	return c.cachedCount(&c.visibleCount, &c.gen, `SELECT COUNT(*) FROM images WHERE is_missing = 0`)
 }

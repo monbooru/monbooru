@@ -3631,6 +3631,43 @@ func TestCount_IsRememberedUntilAWrite(t *testing.T) {
 	}
 }
 
+func TestExecute_DeferCountDoesNotWaitForTheUntaggedTallies(t *testing.T) {
+	for _, filter := range []string{"tagged:true", "autotagged:true"} {
+		t.Run(filter, func(t *testing.T) {
+			database, env := setupSearchDB(t)
+			tag := getOrCreateTagID(t, database, "tally_wait")
+			for i := range 3 {
+				id := ingestTestImageWithID(t, database, env, "tally"+strconv.Itoa(i)+".png")
+				mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto, tagger_name) VALUES (?, ?, 1, 'wd')`, id, tag)
+			}
+			src := testSource(database)
+			q := Query{Expr: Parse(filter), Page: 1, Limit: 2, DeferCount: true}
+
+			if res := mustExecute(t, database, q); !res.TotalUnknown || len(res.Results) != 2 {
+				t.Fatalf("first page: unknown=%v rows=%d, want 2 rows and the total left to the count", res.TotalUnknown, len(res.Results))
+			}
+			if _, held := src.Tallies.UntaggedVisibleCountReady(); held {
+				t.Error("the page computed the untagged tally")
+			}
+			if _, held := src.Tallies.AutoUntaggedVisibleCountReady(); held {
+				t.Error("the page computed the auto-untagged tally")
+			}
+			if n, err := Count(context.Background(), src, q); err != nil || n != 3 {
+				t.Fatalf("Count = %d, %v; want 3", n, err)
+			}
+			if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+				t.Errorf("the page after the count: unknown=%v total=%d, want the fast 3", res.TotalUnknown, res.Total)
+			}
+
+			src.Tallies.Invalidate()
+			q.DeferCount = false
+			if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+				t.Errorf("a caller that counts in the request: unknown=%v total=%d, want 3", res.TotalUnknown, res.Total)
+			}
+		})
+	}
+}
+
 func pageIDs(res *models.SearchResult) []int64 {
 	ids := make([]int64, len(res.Results))
 	for i, img := range res.Results {
