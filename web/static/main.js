@@ -840,7 +840,6 @@ var viewer = (function () {
   }
   function pause() {
     if (!playing) return;
-    if (startedAt !== null) remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
     startedAt = null;
     playing = false;
     clearTimeout(autoTimer);
@@ -849,11 +848,15 @@ var viewer = (function () {
   }
   function resume() {
     playing = true;
-    if (current && !current.video && zoom.atFit()) startedAt = Date.now();
     var v = currentVideo();
     if (v) playOrWait(v);
-    schedule();
+    restartTimer();
     updateControls();
+  }
+  function restartTimer() {
+    remainingMs = durationMs;
+    startedAt = playing && current && !current.video && zoom.atFit() ? Date.now() : null;
+    schedule();
   }
   // An AbortError is a play() that lost to a pause, a load or the end of a
   // short clip; only the browser refusing to play waits for Space.
@@ -974,10 +977,7 @@ var viewer = (function () {
       if (b.dataset.duration) {
         try { localStorage.setItem('monbooru_slideshow_duration', b.dataset.duration); } catch (err) {}
         setDuration(parseInt(b.dataset.duration, 10));
-        if (!current || current.video) return;
-        remainingMs = durationMs;
-        startedAt = playing ? Date.now() : null;
-        schedule();
+        restartTimer();
       } else if (b.dataset.loop) {
         if ((b.dataset.loop === '1') !== looping) toggleLoop();
       } else if (b.dataset.opacity) {
