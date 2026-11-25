@@ -41,9 +41,6 @@ func templateFuncs() template.FuncMap {
 			}
 			return r
 		},
-		// template.CSS to pass the style-attribute sanitizer;
-		// categoryColor admits only a validated colour.
-		"catColor":   func(color string) template.CSS { return template.CSS(categoryColor(color)) },
 		"catDefault": tags.DefaultCategoryColor,
 		// template.URL, or html/template would re-escape each % and
 		// double-encode the link.
@@ -356,13 +353,4 @@ func derefOr[T any](p *T) T {
 		return zero
 	}
 	return *p
-}
-
-// Keyed on the colour, not the category, so a theme can remap the shipped
-// palette while an operator's own colour falls through.
-func categoryColor(color string) string {
-	if !tags.IsValidCategoryColor(color) {
-		return tags.SafeCategoryColor(color)
-	}
-	return "var(--cat-" + strings.ToLower(strings.TrimPrefix(color, "#")) + "," + color + ")"
 }

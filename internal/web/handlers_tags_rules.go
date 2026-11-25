@@ -20,6 +20,7 @@ import (
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -310,7 +311,7 @@ func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases [
 
 func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []contract.TagRules, state string) tagPath {
 	colors := s.categoryColors()
-	catColor := func(cat string) string { return categoryColor(colors[cat]) }
+	catColor := func(cat string) string { return string(webui.CategoryColor(colors[cat])) }
 	p := tagPath{Monloader: state, GalleryName: s.activeGallery(), Category: tag.CategoryName, CatColor: catColor(tag.CategoryName)}
 	web := s.monloaderWebBase()
 
