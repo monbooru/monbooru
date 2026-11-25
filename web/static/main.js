@@ -858,15 +858,16 @@ var viewer = (function () {
   function updateControls() {
     var isVideo = !!(current && current.video);
     position.textContent = (index + 1) + ' / ' + ids.length;
-    dlg.querySelector('.viewer-play-label').textContent = playing ? 'Pause' : 'Play';
+    var play = button('play');
+    play.textContent = playing ? '\u275A\u275A' : '\u25B6\uFE0E';
+    play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
     button('play').disabled = ids.length < 2 && !isVideo;
     button('restart').disabled = !isVideo;
     press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
-    var mute = button('mute');
-    mute.setAttribute('aria-pressed', String(!muted));
-    mute.textContent = muted ? 'Sound: off' : 'Sound: on';
+    button('mute').setAttribute('aria-pressed', String(!muted));
+    press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
   }
 
   function teardown() {
@@ -910,6 +911,8 @@ var viewer = (function () {
       } else if (b.dataset.opacity) {
         try { localStorage.setItem('monbooru_viewer_opacity', b.dataset.opacity); } catch (err) {}
         setOpacity(b.dataset.opacity);
+      } else if (b.dataset.fullscreen) {
+        if ((b.dataset.fullscreen === '1') !== !!document.fullscreenElement) toggleFullscreen();
       } else if (b.dataset.zoom) {
         if (b.dataset.zoom === 'fit') zoom.fit(); else zoom.oneToOne();
       }
@@ -996,6 +999,7 @@ var viewer = (function () {
     // In fullscreen the browser keeps Esc to itself, so a fullscreen exit
     // the viewer did not ask for is that Esc.
     document.addEventListener('fullscreenchange', function () {
+      if (dlg) press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
       if (document.fullscreenElement || !dlg) return;
       if (dlg.open && !leavingFullscreen) dlg.close();
       leavingFullscreen = false;
@@ -1015,6 +1019,7 @@ var viewer = (function () {
     looping = false;
     setDuration(readDuration());
     setOpacity(readOpacity());
+    document.querySelectorAll('#viewer-fullscreen button').forEach(function (b) { b.disabled = !document.fullscreenEnabled; });
     updateControls();
     document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
     dlg.classList.toggle('bar-hidden', barHidden());
