@@ -572,7 +572,7 @@ function toggleBar(host) {
 var viewer = (function () {
   var durations = [2, 3, 5, 10, 15, 30], opacities = [100, 95, 90, 80, 70, 60, 50];
   var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, track = null, openLink = null, zoom = null, documentBound = false;
-  var ids = [], videos = new Set();
+  var ids = [], videos = new Set(), silent = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
   var playing = true, muted = true, looping = false, volume = 5;
   var durationMs = 5000, remainingMs = 0, startedAt = null;
@@ -585,7 +585,9 @@ var viewer = (function () {
     previous: function () { go(-1); },
     next: function () { go(1); },
     last: function () { go(ids.length); },
-    play: function () { if (button('play').disabled) return; if (playing) pause(); else resume(); },
+    show: function () { if (button('show').disabled) return; if (playing) pause(); else resume(); },
+    play: function () { var v = currentVideo(); if (!v) return; if (v.paused) playOrWait(v); else v.pause(); },
+    space: function () { actions[currentVideo() ? 'play' : 'show'](); },
     restart: restart,
     loop: toggleLoop,
     mute: toggleMuted,
@@ -596,7 +598,7 @@ var viewer = (function () {
     menu: function () { if (menu.hidden) openMenu(); else closeMenu(); },
     exit: function () { dlg.close(); },
   };
-  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar', ArrowUp: 'louder', ArrowDown: 'quieter' };
+  var keys = { ' ': 'space', s: 'show', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar', ArrowUp: 'louder', ArrowDown: 'quieter' };
 
   function readDuration() {
     var seconds = 5;
@@ -645,7 +647,7 @@ var viewer = (function () {
 
   function itemAt(i) {
     var id = ids[i], video = videos.has(id);
-    return { id: id, video: video, src: '/images/' + id + (video ? '/file' : '/view') };
+    return { id: id, video: video, silent: silent.has(id), src: '/images/' + id + (video ? '/file' : '/view') };
   }
   function setMessage(text) { message.textContent = text; }
   function button(action) { return dlg.querySelector('[data-viewer="' + action + '"]'); }
@@ -726,6 +728,7 @@ var viewer = (function () {
       v.currentTime = 0;
       v.onended = function () { if (index === slide.index) advance(); };
       v.ontimeupdate = function () { if (index === slide.index) drawTrack(); };
+      v.onplay = v.onpause = updateControls;
       drawProgress();
       if (playing) playOrWait(v);
     } else {
@@ -790,7 +793,6 @@ var viewer = (function () {
   }
   function drawTrack() {
     var v = currentVideo(), at = 0, length = 0, done = 0;
-    track.parentNode.classList.toggle('still', !v);
     if (v) {
       length = isFinite(v.duration) ? v.duration : 0;
       at = v.currentTime;
@@ -842,8 +844,6 @@ var viewer = (function () {
     startedAt = null;
     playing = false;
     clearTimeout(autoTimer);
-    var v = currentVideo();
-    if (v) v.pause();
     drawProgress();
     updateControls();
   }
@@ -859,9 +859,9 @@ var viewer = (function () {
   // short clip; only the browser refusing to play waits for Space.
   function playOrWait(v) {
     var at = index;
+    setMessage('');
     v.play().catch(function (err) {
       if (err.name !== 'NotAllowedError' || index !== at) return;
-      pause();
       setMessage('Press Space to play the video.');
     });
   }
@@ -909,16 +909,20 @@ var viewer = (function () {
   }
 
   function updateControls() {
-    var isVideo = !!(current && current.video);
+    var v = currentVideo(), running = !!v && !v.paused;
     position.textContent = (index + 1) + ' / ' + ids.length;
+    var show = button('show');
+    show.disabled = ids.length < 2;
+    show.setAttribute('aria-pressed', String(playing));
+    show.setAttribute('aria-label', playing ? 'Stop the slideshow' : 'Start the slideshow');
     var play = button('play');
-    play.classList.toggle('playing', playing);
-    play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    play.classList.toggle('playing', running);
+    play.setAttribute('aria-label', running ? 'Pause video' : 'Play video');
+    track.parentNode.classList.toggle('still', !v);
+    track.parentNode.classList.toggle('silent', !!v && current.silent);
     dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
-    button('play').disabled = ids.length < 2 && !isVideo;
-    button('restart').disabled = !isVideo;
-    dlg.querySelectorAll('#viewer-menu [data-zoom]').forEach(function (b) { b.disabled = isVideo; });
+    dlg.querySelectorAll('#viewer-menu [data-zoom]').forEach(function (b) { b.disabled = !!v; });
     press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
     button('mute').setAttribute('aria-pressed', String(!muted));
     press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
@@ -1079,9 +1083,13 @@ var viewer = (function () {
     });
   }
 
-  function open(list, videoList, at) {
-    ids = list;
-    videos = new Set(videoList);
+  function setList(data) {
+    ids = data.ids;
+    videos = new Set(data.videos);
+    silent = new Set(data.silent);
+  }
+  function open(data) {
+    setList(data);
     stalled = false;
     index = -1;
     current = null;
@@ -1098,7 +1106,7 @@ var viewer = (function () {
     document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
     dlg.classList.toggle('bar-hidden', barHidden());
     dlg.showModal();
-    show(at);
+    show(data.start);
   }
 
   return {
@@ -1122,7 +1130,7 @@ var viewer = (function () {
       detailBack = btn.dataset.back || '';
       // The page already holds this image, so it shows before the search answers.
       var shown = startID && btn.dataset.playable === '1';
-      if (shown) open([startID], btn.dataset.video === '1' ? [startID] : [], 0);
+      if (shown) open({ ids: [startID], videos: btn.dataset.video === '1' ? [startID] : [], silent: btn.dataset.silent === '1' ? [startID] : [], start: 0 });
       if (startID) {
         if (!btn.dataset.walk) return;
         params = new URLSearchParams({ scope: 'search', q: btn.dataset.q, sort: btn.dataset.sort, order: btn.dataset.order, seed: btn.dataset.seed, next: btn.dataset.next });
@@ -1141,7 +1149,7 @@ var viewer = (function () {
           res.json().then(function (data) {
             if (!shown) {
               if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
-              open(data.ids, data.videos, data.start);
+              open(data);
               return;
             }
             if (run !== runEpoch) return;
@@ -1151,9 +1159,9 @@ var viewer = (function () {
                 at = Math.min(data.start, data.ids.length);
                 data.ids.splice(at, 0, startID);
               }
-              ids = data.ids;
               if (videos.has(startID)) data.videos.push(startID);
-              videos = new Set(data.videos);
+              if (silent.has(startID)) data.silent.push(startID);
+              setList(data);
               index = at;
               updateControls();
               prefetch(index + 1);

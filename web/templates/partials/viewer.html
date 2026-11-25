@@ -21,9 +21,10 @@
   <nav class="reader-bar viewer-bar">
     <span class="viewer-bar-group viewer-show">
       <button type="button" class="viewer-icon" data-viewer="exit" title="Exit (Esc)" aria-label="Exit">{{template "icon-exit"}}</button>
-      <button type="button" class="viewer-icon" data-viewer="play" title="Play / pause (Space)" aria-label="Play" autofocus>{{template "icon-play"}}{{template "icon-pause"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="show" aria-pressed="false" title="Slideshow (s)" aria-label="Start the slideshow" autofocus>{{template "icon-slides"}}{{template "icon-slides-stop"}}</button>
     </span>
     <span class="viewer-bar-group viewer-media">
+      <button type="button" class="viewer-icon" data-viewer="play" title="Play / pause the video (Space)" aria-label="Play video">{{template "icon-play"}}{{template "icon-pause"}}</button>
       <button type="button" class="viewer-icon" data-viewer="restart" title="Restart video (r)" aria-label="Restart video">{{template "icon-restart"}}</button>
       <span id="viewer-time-at" class="viewer-time">0:00</span>
       <span id="viewer-track" class="viewer-track" role="slider" tabindex="-1" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" title="Seek (Shift+&larr; / Shift+&rarr; 10 s)"><span class="viewer-track-fill"></span><span class="viewer-track-knob"></span></span>

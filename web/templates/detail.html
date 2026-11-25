@@ -101,7 +101,7 @@
         {{$playable := and (not .IsManga) (not .Image.IsMissing)}}
         {{if or .PrevID .NextID $playable}}
         <button type="button" id="viewer-btn" class="btn-sm btn-view" onclick="viewer.start(this)"
-                data-start="{{.Image.ID}}"{{if $playable}} data-playable="1"{{end}}{{if or (eq .Image.FileType "mp4") (eq .Image.FileType "webm")}} data-video="1"{{end}}{{if or .PrevID .NextID}} data-walk="1"{{end}} data-q="{{.BackQuery}}" data-sort="{{.BackSort}}" data-order="{{.BackOrder}}" data-seed="{{if .BackSeed}}{{.BackSeed}}{{end}}" data-next="{{if .NextID}}{{deref64 .NextID}}{{end}}" data-back="{{.BackQS}}"
+                data-start="{{.Image.ID}}"{{if $playable}} data-playable="1"{{end}}{{if or (eq .Image.FileType "mp4") (eq .Image.FileType "webm")}} data-video="1"{{end}}{{if .Silent}} data-silent="1"{{end}}{{if or .PrevID .NextID}} data-walk="1"{{end}} data-q="{{.BackQuery}}" data-sort="{{.BackSort}}" data-order="{{.BackOrder}}" data-seed="{{if .BackSeed}}{{.BackSeed}}{{end}}" data-next="{{if .NextID}}{{deref64 .NextID}}{{end}}" data-back="{{.BackQS}}"
                 title="View, and play the search from this image (v)">▶&#xFE0E;</button>
         {{end}}
         <a href="/images/{{.Image.ID}}/file" download class="btn-sm" title="Download image">⤓</a>
