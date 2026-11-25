@@ -59,6 +59,7 @@ type settingsData struct {
 	Desktop            desktop.Integration
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
+	UploadFolder       webui.FolderPicker
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Desktop:            s.desktopIntegration(),
 		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
+		UploadFolder:       s.folderPicker("default-upload").WithValue(cfg.Gallery.DefaultUploadFolder),
 	})
 }
 

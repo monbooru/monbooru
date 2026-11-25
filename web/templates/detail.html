@@ -628,7 +628,7 @@
       </div>
       {{end}}
 
-      {{template "partials/detail_danger_zone.html" (dict "ImageID" .Image.ID "ImageTags" .ImageTags "HasUserTags" .HasUserTags "HasStaleTags" .HasStaleTags "ImageTaggers" .ImageTaggers "ImageSources" .ImageSources "CanTransfer" (gt (len .Galleries) 1) "BackKVQS" .BackKVQS "Ref" .Ref "CurrentFolder" .Image.FolderPath "Filename" .Filename "ExtraPaths" .ExtraPaths "RewrittenBy" .RewrittenBy)}}
+      {{template "partials/detail_danger_zone.html" (dict "ImageID" .Image.ID "ImageTags" .ImageTags "HasUserTags" .HasUserTags "HasStaleTags" .HasStaleTags "ImageTaggers" .ImageTaggers "ImageSources" .ImageSources "CanTransfer" (gt (len .Galleries) 1) "BackKVQS" .BackKVQS "Ref" .Ref "CurrentFolder" .Image.FolderPath "PlaceFolder" .PlaceFolder "Filename" .Filename "ExtraPaths" .ExtraPaths "RewrittenBy" .RewrittenBy)}}
       {{if gt (len .Galleries) 1}}
       <dialog id="transfer-image-dialog">
         <p class="dlg-title">Transfer this image to another gallery:{{template "webui/dialog_x"}}</p>
@@ -689,11 +689,11 @@
       }
       function openPlaceImageDialog() {
         var dlg = document.getElementById('place-image-dialog');
-        var folder = document.getElementById('place-image-folder');
+        var folder = document.getElementById('place-image-folder-input');
         var name = document.getElementById('place-image-name');
         folder.value = dlg.dataset.currentFolder || '';
         name.value = (dlg.dataset.filename || '').replace(/\.[^.]+$/, '');
-        clearSlots('place-image-suggest', 'place-image-error', 'place-image-preview');
+        clearSlots('place-image-folder-suggest', 'place-image-error', 'place-image-preview');
         dlg.showModal();
         name.focus();
         name.select();

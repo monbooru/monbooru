@@ -105,31 +105,31 @@ func TestSuggest_AnAliasRowWritesItsTag(t *testing.T) {
 	wantNotIn(t, do(srv, "GET", "/internal/search/suggest?q=hakurei").Body.String(), "→")
 }
 
-func TestFoldersSuggest_CaseBoundary(t *testing.T) {
+func TestLabelSuggest_CaseBoundary(t *testing.T) {
 	srv := newTestServer(t)
 	cx := srv.active()
-	folders := []string{"Zoo/lions", "zebra/herd", "Foo/Bar", "fooBaz", "Az/one", "aZ/two", "\u00c9bauches/a", "\u00c9T\u00c9/b"}
-	for i, fp := range folders {
+	sites := []string{"Zoo_lions", "zebra_herd", "Foo_Bar", "fooBaz", "Az_one", "aZ_two", "\u00c9bauches_a", "\u00c9T\u00c9_b"}
+	for i, site := range sites {
 		p := filepath.Join(cx.GalleryPath, fmt.Sprintf("f%d.png", i))
 		mustWriteFile(t, p, tinyPNG(t, 8, 8, color.RGBA{byte(i + 1), 0, 0, 255}), 0o644)
 		rec, _ := mustIngest(t, cx.DB, cx.GalleryPath, cx.ThumbnailsPath, p, "")
-		mustExec(t, cx.DB.Write, `UPDATE images SET folder_path=? WHERE id=?`, fp, rec.ID)
+		mustExec(t, cx.DB.Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, ?, '', '')`, rec.ID, site)
 	}
 	body := func(prefix string) string {
-		w := do(srv, "GET", "/internal/folders/suggest?prefix="+url.QueryEscape(prefix))
+		w := do(srv, "GET", "/internal/source/suggest?prefix="+url.QueryEscape(prefix))
 		return w.Body.String()
 	}
 	for _, tc := range []struct{ prefix, want string }{
-		{"zoo", "Zoo/lions"},
-		{"ZEBRA", "zebra/herd"},
-		{"foo", "Foo/Bar"},
+		{"zoo", "Zoo_lions"},
+		{"ZEBRA", "zebra_herd"},
+		{"foo", "Foo_Bar"},
 		{"foo", "fooBaz"},
-		{"az", "Az/one"},
-		{"AZ", "aZ/two"},
-		{"Z", "zebra/herd"},
-		{"z", "Zoo/lions"},
-		{"\u00c9b", "\u00c9bauches/a"},
-		{"\u00c9t", "\u00c9T\u00c9/b"},
+		{"az", "Az_one"},
+		{"AZ", "aZ_two"},
+		{"Z", "zebra_herd"},
+		{"z", "Zoo_lions"},
+		{"\u00c9b", "\u00c9bauches_a"},
+		{"\u00c9t", "\u00c9T\u00c9_b"},
 	} {
 		if got := body(tc.prefix); !strings.Contains(got, tc.want) {
 			t.Errorf("prefix %q: %q missing from suggestions:\n%s", tc.prefix, tc.want, got)

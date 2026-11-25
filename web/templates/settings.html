@@ -92,8 +92,7 @@
           <span class="field-hint">Uploads, and files sent by monloader or the API.</span>
           <div class="dest-row">
             <div class="dest-part">
-              <label for="default_upload_folder">folder</label>
-              <input type="text" name="default_upload_folder" id="default_upload_folder" value="{{$cfg.Gallery.DefaultUploadFolder}}" placeholder="(gallery root)">
+              {{template "webui/folder_picker" .UploadFolder}}
             </div>
             <span class="dest-sep" aria-hidden="true">/</span>
             <div class="dest-part">
@@ -105,12 +104,12 @@
             <span class="field-hint">Blank = the gallery root.</span>
             <span class="field-hint">Blank = the sender's name.</span>
           </div>
-          {{template "partials/name_tokens.html" (dict "Targets" "default_upload_folder default_upload_name" "Received" true)}}
+          {{template "partials/name_tokens.html" (dict "Targets" "default-upload-folder-input default_upload_name" "Received" true)}}
           <div id="upload-dest-preview"
                hx-get="/internal/name/preview"
-               hx-trigger="input delay:200ms from:#default_upload_folder, input delay:200ms from:#default_upload_name"
+               hx-trigger="input delay:200ms from:#default-upload-folder-input, change from:#default-upload-folder-input, input delay:200ms from:#default_upload_name"
                hx-target="this"
-               hx-vals='js:{scope: "upload", folder: document.getElementById("default_upload_folder").value, name: document.getElementById("default_upload_name").value}'></div>
+               hx-vals='js:{scope: "upload", folder: document.getElementById("default-upload-folder-input").value, name: document.getElementById("default_upload_name").value}'></div>
         </div>
         <div class="field">
           <label>

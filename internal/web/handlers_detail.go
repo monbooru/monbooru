@@ -24,6 +24,7 @@ import (
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 )
 
@@ -163,6 +164,7 @@ type detailData struct {
 	BoxW, BoxH int
 	// The thumbnail fills the box meanwhile.
 	Placeholder bool
+	PlaceFolder webui.FolderPicker
 }
 
 // External links go by sha because an image id can be reused after a delete.
@@ -456,6 +458,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	data := detailData{
 		baseData:          s.base(r, "gallery", fmt.Sprintf("%s - %s", titleName, s.booruName())),
 		Image:             *img,
+		PlaceFolder:       s.folderPicker("place-image"),
 		Filename:          baseName,
 		ImageTags:         imageTags,
 		SDMeta:            sdMeta,

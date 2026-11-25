@@ -658,8 +658,12 @@ document.addEventListener('keydown', function(e) {
 
 // The folder fields: a text box the panel's tree, the suggestions and
 // [+ new folder] all write into. The tree's levels load on first open.
+// A change, not an input: what reads the field hears the pick, and the
+// field's own suggestions, which listen for input, stay shut.
 function folderPick(picker, path) {
-  picker.querySelector('.folder-picker-input input').value = path;
+  var input = picker.querySelector('.folder-picker-input input');
+  input.value = path;
+  input.dispatchEvent(new Event('change', {bubbles: true}));
   picker.querySelector('.suggest-dropdown').innerHTML = '';
   picker.querySelectorAll('.folder-node-row.active').forEach(function(r) { r.classList.remove('active'); });
   var row = picker.querySelector('.folder-node-row[data-folder-pick="' + CSS.escape(path) + '"]');
