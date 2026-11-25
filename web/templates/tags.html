@@ -386,7 +386,7 @@
   </div>
   <div class="field" style="position:relative">
     <label for="batch-imply-target">Implied tags</label>
-    {{template "multi_tag_suggest_input" dict "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest" "Placeholder" "tag names, category:name, or IDs" "ValsKey" "target"}}
+    {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest" "Placeholder" "tag names, category:name, or IDs" "ValsKey" "target"}}
   </div>
   <p style="color:var(--fg-dim);font-size:12px">Every image with these tags also gets the implied tags. Add applies them to images already tagged; Remove takes back what they added.</p>
   <div id="batch-imply-flash"></div>
@@ -422,7 +422,7 @@
     <p>Create tags. Separate names with spaces; a name may start with its category.</p>
     <div class="field" style="position:relative">
       <label for="tag-create-name">Tag names</label>
-      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-create-name" "SuggestID" "tag-create-suggest" "ValsKey" "name" "Required" true}}
+      {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "name" "InputID" "tag-create-name" "SuggestID" "tag-create-suggest" "ValsKey" "name" "Required" true}}
       <div id="tag-create-preview" class="field-hint" data-cats="{{range .Categories}}{{.Name}}={{catColor .Color}} {{end}}"></div>
     </div>
     <div class="field">
@@ -461,7 +461,7 @@
     <p>Reject names. Each is removed from every image and dropped on arrival, whatever brings it, until you un-reject it. Separate names with spaces; a name may start with its category. <span class="status-badge status-ok">this gallery</span><span class="status-badge status-off">on arrival</span></p>
     <div class="field" style="position:relative">
       <label for="tag-reject-name">Tag names</label>
-      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-reject-name" "SuggestID" "tag-reject-suggest" "ValsKey" "name" "Required" true}}
+      {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "name" "InputID" "tag-reject-name" "SuggestID" "tag-reject-suggest" "ValsKey" "name" "Required" true}}
     </div>
     <div class="field">
       <label for="tag-reject-cat">Category for names without one</label>

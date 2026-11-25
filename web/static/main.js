@@ -2793,44 +2793,6 @@ function lastWordIndex(words) {
   return -1;
 }
 
-function suggestInputOf(btn) {
-  var dd = btn.closest('.suggest-dropdown');
-  var input = dd && dd.parentElement && dd.parentElement.querySelector('input[type="text"]');
-  if (!input) return null;
-  dd.innerHTML = '';
-  return input;
-}
-
-// The word the caret sits in or at the end of; an input keeps its caret
-// while a click on a suggestion has the focus.
-function wordAtCaret(input) {
-  var v = input.value;
-  var at = input.selectionStart == null ? v.length : input.selectionStart;
-  var start = at, end = at;
-  while (start > 0 && !/\s/.test(v[start - 1])) start--;
-  while (end < v.length && !/\s/.test(v[end])) end++;
-  return {start: start, end: end, word: v.slice(start, end)};
-}
-
-function applyTagSuggest(btn) {
-  var tagName = btn.dataset.tagName;
-  if (!tagName) return;
-  var input = suggestInputOf(btn);
-  if (!input) return;
-  if (input.dataset.multiTags) {
-    var w = wordAtCaret(input);
-    var after = input.value.slice(w.end);
-    if (!/^\s/.test(after)) after = ' ' + after;
-    input.value = input.value.slice(0, w.start) + tagName + after;
-    input.focus();
-    var caret = w.start + tagName.length + 1;
-    input.setSelectionRange(caret, caret);
-    return;
-  }
-  input.value = tagName;
-  input.focus();
-}
-
 function applyLabelSuggest(btn, key) {
   var label = btn.dataset[key];
   if (label == null) return;

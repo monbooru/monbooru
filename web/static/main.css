@@ -1435,7 +1435,6 @@ dialog select { max-width: 100%; }
 }
 .series-input-wrap input { width: 100%; }
 .suggest-dropdown.series-suggest-dropdown,
-.suggest-dropdown.tag-suggest-dropdown,
 #search-suggest {
   position: absolute;
   top: 100%;
@@ -1445,7 +1444,6 @@ dialog select { max-width: 100%; }
 }
 #search-suggest { z-index: 100; }
 .series-suggest-dropdown .suggest-list,
-.tag-suggest-dropdown .suggest-list,
 #search-suggest .suggest-list {
   position: static;
   width: 100%;

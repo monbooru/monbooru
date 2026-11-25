@@ -302,7 +302,7 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.renderSuggestList(w, `data-tag-name`, `onclick="applyTagSuggest(this)"`, tagSuggestItems(suggestions))
+	s.renderTemplate(w, "webui/suggest_list", webui.TagSuggestList(tagSuggestItems(suggestions)))
 }
 
 // Beyond this the id list outgrows what a batch POST can usefully carry.

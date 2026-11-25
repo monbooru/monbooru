@@ -590,7 +590,7 @@
               hx-target="#image-tags"
               hx-swap="outerHTML">
           <div class="add-tag-input-wrap">
-            {{template "multi_tag_suggest_input" dict "Name" "tag" "InputID" "tag-input" "SuggestID" "tag-suggest-dropdown" "Placeholder" "Add tags..." "ValsKey" "tag"}}
+            {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "tag" "InputID" "tag-input" "SuggestID" "tag-suggest-dropdown" "Placeholder" "Add tags..." "ValsKey" "tag"}}
           </div>
           <button type="submit">Add</button>
           {{if .TaggersPresent}}

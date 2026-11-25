@@ -697,6 +697,9 @@ dialog:has(.suggest-dropdown) { overflow: visible; }
 .suggest-description { flex: 1; color: var(--fg-dim); font-size: 11px; font-style: italic; overflow: hidden; text-overflow: ellipsis; }
 .suggest-count { color: var(--fg-dim); font-size: 11px; }
 .suggest-alias { color: var(--fg-dim); }
+/* A tags field's list spans the field's parent, under it. */
+.suggest-dropdown.tag-suggest-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 200; }
+.tag-suggest-dropdown .suggest-list { position: static; width: 100%; min-width: unset; }
 
 /* Folder fields: a gallery's folders as a tree in a panel under the text
    box. Scoped to the field, as an app's sidebar tree may use the same names. */
