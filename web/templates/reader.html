@@ -17,7 +17,7 @@
     <div id="page-notice" class="degraded-banner" hidden></div>
     <div class="reader-stage">
       <img src="/images/{{.Image.ID}}/page/{{.Page}}" alt="Page {{.Page}}" class="reader-img">
-      <button type="button" class="bar-handle" onclick="toggleBar(document.getElementById('reader'))" title="Show the bar (b)" aria-label="Show the bar">&#x25B4;</button>
+      <button type="button" class="bar-handle" onclick="toggleBar(document.getElementById('reader'))" title="Show the bar (b)" aria-label="Show the bar">{{template "icon-show"}}</button>
       {{if gt .Page 1}}
       <a class="reader-side reader-side-prev" href="/images/{{.Image.ID}}/read?page={{sub .Page 1}}{{.BackKVQS}}" title="Previous page (←)" aria-label="Previous page">‹</a>
       {{else}}
@@ -57,7 +57,7 @@
         <button type="submit" title="Extract page as image (e)">Extract</button>
       </form>
       <a class="reader-open" href="/images/{{.Image.ID}}/page/{{.Page}}" target="_blank" rel="noopener" title="Open page in new tab (o)">↗</a>
-      <button type="button" class="reader-hide" onclick="toggleBar(document.getElementById('reader'))" title="Hide the bar (b)" aria-label="Hide the bar">&#x25BE;</button>
+      <button type="button" class="reader-hide" onclick="toggleBar(document.getElementById('reader'))" title="Hide the bar (b)" aria-label="Hide the bar">{{template "icon-hide"}}</button>
     </nav>
   </main>
   <dialog id="reader-jump-dialog">

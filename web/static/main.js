@@ -917,7 +917,7 @@ var viewer = (function () {
     var isVideo = !!(current && current.video);
     position.textContent = (index + 1) + ' / ' + ids.length;
     var play = button('play');
-    play.textContent = playing ? '\u275A\u275A' : '\u25B6\uFE0E';
+    play.classList.toggle('playing', playing);
     play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });

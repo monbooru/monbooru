@@ -6,7 +6,7 @@
     <div id="viewer-message" class="viewer-message" aria-live="polite"></div>
     <button type="button" class="reader-side reader-side-prev" data-viewer="previous" title="Previous (&larr;)" aria-label="Previous">&lsaquo;</button>
     <button type="button" class="reader-side reader-side-next" data-viewer="next" title="Next (&rarr;)" aria-label="Next">&rsaquo;</button>
-    <button type="button" class="bar-handle" data-viewer="bar" title="Show the bar (b)" aria-label="Show the bar">&#x25B4;</button>
+    <button type="button" class="bar-handle" data-viewer="bar" title="Show the bar (b)" aria-label="Show the bar">{{template "icon-show"}}</button>
     <div class="viewer-progress" aria-hidden="true"><span></span></div>
     <div id="viewer-menu" class="viewer-menu" role="group" aria-label="Viewer settings" hidden>
       <p class="viewer-menu-title">Viewer</p>
@@ -20,28 +20,28 @@
   </div>
   <nav class="reader-bar viewer-bar">
     <span class="viewer-bar-group viewer-show">
-      <button type="button" class="viewer-icon" data-viewer="exit" title="Exit (Esc)" aria-label="Exit">&#x2715;</button>
-      <button type="button" class="viewer-icon" data-viewer="play" title="Play / pause (Space)" aria-label="Play" autofocus>&#x25B6;&#xFE0E;</button>
+      <button type="button" class="viewer-icon" data-viewer="exit" title="Exit (Esc)" aria-label="Exit">{{template "icon-exit"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="play" title="Play / pause (Space)" aria-label="Play" autofocus>{{template "icon-play"}}{{template "icon-pause"}}</button>
     </span>
     <span class="viewer-bar-group viewer-media">
-      <button type="button" class="viewer-icon" data-viewer="restart" title="Restart video (r)" aria-label="Restart video">&#x27F2;</button>
+      <button type="button" class="viewer-icon" data-viewer="restart" title="Restart video (r)" aria-label="Restart video">{{template "icon-restart"}}</button>
       <span id="viewer-time-at" class="viewer-time">0:00</span>
       <span id="viewer-track" class="viewer-track" role="slider" tabindex="-1" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" title="Seek (Shift+&larr; / Shift+&rarr; 10 s)"><span class="viewer-track-fill"></span><span class="viewer-track-knob"></span></span>
       <span id="viewer-time-len" class="viewer-time">0:00</span>
-      <button type="button" class="viewer-icon" data-viewer="mute" aria-pressed="false" title="Sound on / off (m)" aria-label="Sound">&#x266A;</button>
+      <button type="button" class="viewer-icon" data-viewer="mute" aria-pressed="false" title="Sound on / off (m)" aria-label="Sound">{{template "icon-sound"}}{{template "icon-muted"}}</button>
       <span id="viewer-volume" class="viewer-volume" role="slider" tabindex="-1" aria-label="Volume" aria-valuemin="1" aria-valuemax="5" aria-valuenow="5" title="Volume (&uarr; / &darr;)"><span></span><span></span><span></span><span></span><span></span></span>
     </span>
     <span class="viewer-bar-group viewer-pos">
-      <button type="button" class="reader-nav" data-viewer="first" title="First (Home)">|&lt;</button>
-      <button type="button" class="reader-nav" data-viewer="previous" title="Previous (&larr;)">&lt;</button>
+      <button type="button" class="viewer-icon" data-viewer="first" title="First (Home)" aria-label="First">{{template "icon-first"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="previous" title="Previous (&larr;)" aria-label="Previous">{{template "icon-previous"}}</button>
       <span id="viewer-position" class="reader-counter"></span>
-      <button type="button" class="reader-nav" data-viewer="next" title="Next (&rarr;)">&gt;</button>
-      <button type="button" class="reader-nav" data-viewer="last" title="Last (End)">&gt;|</button>
+      <button type="button" class="viewer-icon" data-viewer="next" title="Next (&rarr;)" aria-label="Next">{{template "icon-next"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="last" title="Last (End)" aria-label="Last">{{template "icon-last"}}</button>
     </span>
     <span class="viewer-bar-group viewer-view">
-      <button type="button" class="viewer-icon" data-viewer="fullscreen" title="Fullscreen (f)" aria-label="Fullscreen">&#x26F6;</button>
-      <button type="button" class="viewer-icon" data-viewer="menu" aria-expanded="false" aria-controls="viewer-menu" title="Viewer settings" aria-label="Settings">&#x2699;&#xFE0E;</button>
-      <button type="button" class="viewer-icon" data-viewer="bar" title="Hide the bar (b)" aria-label="Hide the bar">&#x25BE;</button>
+      <button type="button" class="viewer-icon" data-viewer="fullscreen" title="Fullscreen (f)" aria-label="Fullscreen">{{template "icon-fullscreen"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="menu" aria-expanded="false" aria-controls="viewer-menu" title="Viewer settings" aria-label="Settings">{{template "icon-settings"}}</button>
+      <button type="button" class="viewer-icon" data-viewer="bar" title="Hide the bar (b)" aria-label="Hide the bar">{{template "icon-hide"}}</button>
     </span>
   </nav>
 </dialog>
