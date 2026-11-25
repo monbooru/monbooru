@@ -76,6 +76,9 @@ func (s *Service) SuggestTags(prefix, categoryName string, limit int) ([]models.
 	return SuggestUsageRanked(s.db, prefix, categoryName, false, limit)
 }
 
+const AliasMatchFrom = `tags a INDEXED BY idx_tags_alias_canonical
+	CROSS JOIN tags c ON c.id = a.canonical_tag_id`
+
 func SuggestUsageRanked(database *db.DB, prefix, categoryName string, requireUsage bool, limit int) ([]models.Tag, error) {
 	prefix = db.EscapeLike(NormalizeTagName(prefix))
 	// Ranked on tags alone so idx_tags_active_usage can stop at the
@@ -96,8 +99,7 @@ func SuggestUsageRanked(database *db.DB, prefix, categoryName string, requireUsa
 	                        UNION ALL
 	                        SELECT * FROM (
 	                            SELECT c.id, c.name, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
-	                            FROM tags a INDEXED BY idx_tags_alias_canonical
-	                            JOIN tags c ON c.id = a.canonical_tag_id
+	                            FROM ` + AliasMatchFrom + `
 	                            WHERE a.is_alias = 1 AND c.is_alias = 0 AND c.rejected = 0
 	                              %[3]s
 	                              AND a.name LIKE ? ESCAPE '\'

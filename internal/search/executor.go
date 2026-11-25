@@ -1126,8 +1126,7 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                      UNION ALL
 	                      SELECT * FROM (
 	                          SELECT c.id, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
-	                          FROM tags a INDEXED BY idx_tags_alias_canonical
-	                          JOIN tags c ON c.id = a.canonical_tag_id
+	                          FROM ` + tags.AliasMatchFrom + `
 	                          WHERE a.is_alias = 1 AND c.is_alias = 0
 	                            AND a.name LIKE ? ESCAPE '\'
 	                            %[4]s

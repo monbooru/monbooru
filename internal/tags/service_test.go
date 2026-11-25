@@ -3849,6 +3849,53 @@ func TestFoldedDuplicates_PlanDrivesFromThePairsUnderStaleStatistics(t *testing.
 	}
 }
 
+func TestAliasMatchFrom_PlanStartsFromTheAliases(t *testing.T) {
+	database, _ := setupTestDB(t)
+	for _, stat := range [][2]string{
+		{"idx_tags_alias_canonical", "13401 6 1"},
+		{"idx_tags_active_usage", "16595 6 1"},
+		{"idx_tags_active_name", "16595 1"},
+		{"idx_tags_name", "29996 2"},
+		{"sqlite_autoindex_tags_1", "29996 2 1"},
+	} {
+		if _, err := database.Write.Exec(`DELETE FROM sqlite_stat1 WHERE tbl = 'tags' AND idx = ?`, stat[0]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Write.Exec(`INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES ('tags', ?, ?)`, stat[0], stat[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn, err := database.Read.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(context.Background(), `ANALYZE sqlite_schema`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := conn.QueryContext(context.Background(), `EXPLAIN QUERY PLAN
+		SELECT c.id, MIN(a.name) FROM `+AliasMatchFrom+`
+		WHERE a.is_alias = 1 AND c.is_alias = 0 AND c.rejected = 0 AND c.usage_count > 0
+		  AND a.name LIKE 'x%' ESCAPE '\'
+		GROUP BY c.id ORDER BY c.usage_count DESC, c.name ASC LIMIT 10`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var steps []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		steps = append(steps, detail)
+	}
+	if plan := strings.Join(steps, "; "); !strings.HasPrefix(plan, "SCAN a USING COVERING INDEX idx_tags_alias_canonical") {
+		t.Errorf("plan = %q, want the alias index scanned first", plan)
+	}
+}
+
 func TestMergeTags_DropsTheAliasFoldedPairs(t *testing.T) {
 	for _, side := range []string{"old", "wide"} {
 		t.Run(side, func(t *testing.T) {
