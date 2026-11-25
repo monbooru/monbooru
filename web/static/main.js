@@ -571,7 +571,7 @@ function toggleBar(host) {
 
 var viewer = (function () {
   var durations = [2, 3, 5, 10, 15, 30], opacities = [100, 95, 90, 80, 70, 60, 50];
-  var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, openLink = null, zoom = null, documentBound = false;
+  var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, track = null, openLink = null, zoom = null, documentBound = false;
   var ids = [], videos = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
   var playing = true, muted = true, looping = false;
@@ -708,6 +708,7 @@ var viewer = (function () {
       v.muted = muted;
       v.currentTime = 0;
       v.onended = function () { if (index === slide.index) advance(); };
+      v.ontimeupdate = function () { if (index === slide.index) drawTrack(); };
       drawProgress();
       if (playing) playOrWait(v);
     } else {
@@ -763,6 +764,46 @@ var viewer = (function () {
       if (v || startedAt !== null) progressTimer = setInterval(drawProgress, 100);
     }
     progress.style.width = Math.max(0, Math.min(100, Math.floor(done * 20) * 5)) + '%';
+    drawTrack();
+  }
+  function clock(seconds) {
+    var s = Math.max(0, Math.floor(seconds)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+    s %= 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  function drawTrack() {
+    var v = currentVideo(), at = 0, length = 0, done = 0;
+    if (v) {
+      length = isFinite(v.duration) ? v.duration : 0;
+      at = v.currentTime;
+      done = length ? at / length : 0;
+    } else if (current) {
+      length = durationMs / 1000;
+      at = length - (startedAt === null ? remainingMs : remainingMs - (Date.now() - startedAt)) / 1000;
+      done = Math.floor(at / length * 20) / 20;
+    }
+    var pct = Math.max(0, Math.min(100, done * 100)) + '%';
+    track.querySelector('.viewer-track-fill').style.width = pct;
+    track.querySelector('.viewer-track-knob').style.left = pct;
+    track.classList.toggle('still', !v);
+    track.parentNode.classList.toggle('still', !v);
+    track.setAttribute('aria-valuemax', String(Math.floor(length)));
+    track.setAttribute('aria-valuenow', String(Math.floor(at)));
+    document.getElementById('viewer-time-at').textContent = clock(at);
+    document.getElementById('viewer-time-len').textContent = clock(length);
+  }
+  function seekTo(x) {
+    var v = currentVideo();
+    if (!v || !isFinite(v.duration)) return;
+    var r = track.getBoundingClientRect();
+    v.currentTime = Math.max(0, Math.min(1, (x - r.left) / r.width)) * v.duration;
+    drawTrack();
+  }
+  function seekBy(seconds) {
+    var v = currentVideo();
+    if (!v || !isFinite(v.duration)) return;
+    v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + seconds));
+    drawTrack();
   }
   // The timer waits while an image is zoomed.
   function zoomChanged() {
@@ -894,6 +935,15 @@ var viewer = (function () {
     position = document.getElementById('viewer-position');
     menu = document.getElementById('viewer-menu');
     progress = dlg.querySelector('.viewer-progress span');
+    track = document.getElementById('viewer-track');
+    track.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || !currentVideo()) return;
+      track.setPointerCapture(e.pointerId);
+      seekTo(e.clientX);
+    });
+    track.addEventListener('pointermove', function (e) {
+      if (track.hasPointerCapture(e.pointerId)) seekTo(e.clientX);
+    });
     dlg.addEventListener('click', function (e) {
       var b = e.target.closest('[data-viewer]');
       if (b) { actions[b.dataset.viewer](); return; }
@@ -991,6 +1041,11 @@ var viewer = (function () {
         return;
       }
       if (zoom.handleKey(e)) return;
+      if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        seekBy(e.key === 'ArrowLeft' ? -10 : 10);
+        return;
+      }
       var action = keys[e.key];
       if (!action) return;
       e.preventDefault();
