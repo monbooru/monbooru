@@ -27,18 +27,6 @@ func tagSuggestItems(ts []models.Tag) []webui.SuggestItem {
 	return items
 }
 
-func qualifySearchSuggestions(ts []models.Tag, typedCategory string) {
-	for i := range ts {
-		t := &ts[i]
-		switch {
-		case typedCategory != "" && t.ViaAlias == "":
-			t.Name = typedCategory + ":" + t.Name
-		case t.CategoryName != "" && t.CategoryName != "general":
-			t.Name = t.CategoryName + ":" + t.Name
-		}
-	}
-}
-
 // attr and onclick become HTMLAttr unescaped: only ever pass constants.
 func (s *Server) renderSuggestList(w http.ResponseWriter, attr, onclick string, items []webui.SuggestItem) {
 	s.renderTemplate(w, "webui/suggest_list", webui.SuggestList{
@@ -273,13 +261,7 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only a real category splits: "nier:automata" is one tag name.
-	catName, tagPrefix := "", prefix
-	if f, err := tags.SplitForm(s.db(), prefix); err == nil && f.CategoryID != 0 {
-		catName, tagPrefix = f.Category, f.Name
-	}
-
-	suggestions, _ := s.tagSvc().SuggestTags(tagPrefix, catName, 10)
+	suggestions, catName, _ := s.tagSvc().SuggestTyped(prefix, 10)
 	if q.Has("name") {
 		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool {
 			return t.CategoryName == "rating" || t.ViaAlias != ""
@@ -292,15 +274,7 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 	if q.Has("canonical_id") || q.Has("target") {
 		ambiguous = s.ambiguousGeneralNames(suggestions)
 	}
-	for i := range suggestions {
-		t := &suggestions[i]
-		switch {
-		case catName != "" && t.ViaAlias == "":
-			t.Name = catName + ":" + t.Name
-		case t.CategoryName != "" && (t.CategoryName != "general" || ambiguous[t.Name]):
-			t.Name = t.CategoryName + ":" + t.Name
-		}
-	}
+	tags.QualifySuggestions(suggestions, catName, ambiguous)
 
 	s.renderTemplate(w, "webui/suggest_list", webui.TagSuggestList(tagSuggestItems(suggestions)))
 }
@@ -387,7 +361,7 @@ func (s *Server) searchSuggest(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, _ := search.SuggestTagsWithFilter(s.source(), contextExpr, prefix, catFilter, 10)
 
-	qualifySearchSuggestions(suggestions, catFilter)
+	tags.QualifySuggestions(suggestions, catFilter, nil)
 
 	if alreadyTyped := alreadyTypedTags(contextTokens); len(alreadyTyped) > 0 {
 		out := suggestions[:0]
@@ -531,7 +505,7 @@ func (s *Server) systemSuggestLevel2(key, valPrefix string) []webui.SuggestItem 
 	}
 	if s.categoryExists(key) {
 		suggestions, _ := search.SuggestTagsWithFilter(s.source(), nil, valPrefix, key, 10)
-		qualifySearchSuggestions(suggestions, key)
+		tags.QualifySuggestions(suggestions, key, nil)
 		return tagSuggestItems(suggestions)
 	}
 	return nil

@@ -76,6 +76,33 @@ func (s *Service) SuggestTags(prefix, categoryName string, limit int) ([]models.
 	return SuggestUsageRanked(s.db, prefix, categoryName, false, limit)
 }
 
+// SuggestTyped answers a word as it was typed. Only a real category splits
+// it ("nier:automata" is one tag name); that category comes back too.
+func (s *Service) SuggestTyped(typed string, limit int) ([]models.Tag, string, error) {
+	category, name := "", typed
+	if f, err := SplitForm(s.db, typed); err == nil && f.CategoryID != 0 {
+		category, name = f.Category, f.Name
+	}
+	ts, err := s.SuggestTags(name, category, limit)
+	return ts, category, err
+}
+
+// QualifySuggestions spells each name the way it is typed back: under the
+// category typed, else with its category unless general. A general name in
+// spellOut is written out in full too, for an input that reads a bare name
+// in every category.
+func QualifySuggestions(ts []models.Tag, typedCategory string, spellOut map[string]bool) {
+	for i := range ts {
+		t := &ts[i]
+		switch {
+		case typedCategory != "" && t.ViaAlias == "":
+			t.Name = typedCategory + ":" + t.Name
+		case t.CategoryName != "" && (t.CategoryName != "general" || spellOut[t.Name]):
+			t.Name = t.CategoryName + ":" + t.Name
+		}
+	}
+}
+
 const AliasMatchFrom = `tags a INDEXED BY idx_tags_alias_canonical
 	CROSS JOIN tags c ON c.id = a.canonical_tag_id`
 
