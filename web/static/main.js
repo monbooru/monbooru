@@ -923,6 +923,7 @@ var viewer = (function () {
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
     button('play').disabled = ids.length < 2 && !isVideo;
     button('restart').disabled = !isVideo;
+    dlg.querySelectorAll('#viewer-menu [data-zoom]').forEach(function (b) { b.disabled = isVideo; });
     press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
     button('mute').setAttribute('aria-pressed', String(!muted));
     press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
