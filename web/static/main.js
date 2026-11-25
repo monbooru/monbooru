@@ -574,7 +574,7 @@ var viewer = (function () {
   var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, track = null, openLink = null, zoom = null, documentBound = false;
   var ids = [], videos = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
-  var playing = true, muted = true, looping = false;
+  var playing = true, muted = true, looping = false, volume = 5;
   var durationMs = 5000, remainingMs = 0, startedAt = null;
   var displayEpoch = 0, preloadEpoch = 0;
   var autoTimer = null, skipTimer = null, progressTimer = null;
@@ -589,17 +589,33 @@ var viewer = (function () {
     restart: restart,
     loop: toggleLoop,
     mute: toggleMuted,
+    louder: function () { setVolume(volume + 1); if (muted) toggleMuted(); },
+    quieter: function () { setVolume(volume - 1); },
     fullscreen: toggleFullscreen,
     bar: function () { closeMenu(); toggleBar(dlg); },
     menu: function () { if (menu.hidden) openMenu(); else closeMenu(); },
     exit: function () { dlg.close(); },
   };
-  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar' };
+  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar', ArrowUp: 'louder', ArrowDown: 'quieter' };
 
   function readDuration() {
     var seconds = 5;
     try { seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10); } catch (e) {}
     return durations.indexOf(seconds) >= 0 ? seconds : 5;
+  }
+  function readVolume() {
+    var level = 5;
+    try { level = parseInt(localStorage.getItem('monbooru_viewer_volume') || '5', 10); } catch (e) {}
+    return level >= 1 && level <= 5 ? level : 5;
+  }
+  function setVolume(level) {
+    volume = Math.max(1, Math.min(5, level));
+    try { localStorage.setItem('monbooru_viewer_volume', String(volume)); } catch (e) {}
+    var v = currentVideo();
+    if (v) v.volume = volume / 5;
+    var meter = document.getElementById('viewer-volume');
+    Array.from(meter.children).forEach(function (block, i) { block.classList.toggle('on', i < volume); });
+    meter.setAttribute('aria-valuenow', String(volume));
   }
   function readOpacity() {
     var percent = 95;
@@ -706,6 +722,7 @@ var viewer = (function () {
       var v = slide.media;
       v.loop = looping;
       v.muted = muted;
+      v.volume = volume / 5;
       v.currentTime = 0;
       v.onended = function () { if (index === slide.index) advance(); };
       v.ontimeupdate = function () { if (index === slide.index) drawTrack(); };
@@ -936,6 +953,11 @@ var viewer = (function () {
     menu = document.getElementById('viewer-menu');
     progress = dlg.querySelector('.viewer-progress span');
     track = document.getElementById('viewer-track');
+    document.getElementById('viewer-volume').addEventListener('click', function (e) {
+      var r = this.getBoundingClientRect();
+      setVolume(Math.ceil((e.clientX - r.left) / r.width * 5));
+      if (muted) toggleMuted();
+    });
     track.addEventListener('pointerdown', function (e) {
       if (e.button !== 0 || !currentVideo()) return;
       track.setPointerCapture(e.pointerId);
@@ -1074,6 +1096,7 @@ var viewer = (function () {
     looping = false;
     setDuration(readDuration());
     setOpacity(readOpacity());
+    setVolume(readVolume());
     document.querySelectorAll('#viewer-fullscreen button').forEach(function (b) { b.disabled = !document.fullscreenEnabled; });
     updateControls();
     document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
