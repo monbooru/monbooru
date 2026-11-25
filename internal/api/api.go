@@ -183,6 +183,7 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/tags/aliases", h.auth(h.createAlias))
 	mux.HandleFunc("POST /api/v1/tags/merge", h.auth(h.mergeTags))
 	mux.HandleFunc("POST /api/v1/tags/resolve", h.auth(h.resolveTags))
+	mux.HandleFunc("GET /api/v1/tags/suggest", h.auth(h.suggestTags))
 	mux.HandleFunc("GET /api/v1/tags/{id}", h.auth(h.getTag))
 	mux.HandleFunc("PATCH /api/v1/tags/{id}", h.auth(h.patchTag))
 	mux.HandleFunc("DELETE /api/v1/tags/{id}", h.auth(h.deleteTag))
