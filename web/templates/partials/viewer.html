@@ -8,24 +8,23 @@
     <button type="button" class="reader-side reader-side-next" data-viewer="next" title="Next (&rarr;)" aria-label="Next">&rsaquo;</button>
     <button type="button" class="bar-handle" data-viewer="bar" title="Show the bar (b)">show</button>
     <div class="viewer-progress" aria-hidden="true"><span></span></div>
+    <div id="viewer-menu" class="viewer-menu" role="group" aria-label="Viewer settings" hidden>
+      <p class="viewer-menu-title">Viewer</p>
+      <div class="viewer-menu-row"><span>Each image</span><span id="viewer-duration" class="pref-ramp" role="group" aria-label="Seconds per image"><button type="button" data-duration="2">2 s</button><button type="button" data-duration="3">3 s</button><button type="button" data-duration="5">5 s</button><button type="button" data-duration="10">10 s</button><button type="button" data-duration="15">15 s</button><button type="button" data-duration="30">30 s</button></span></div>
+      <div class="viewer-menu-row"><span>Loop videos <span class="btn-key-hint">(l)</span></span><span id="viewer-loop" class="pref-ramp" role="group" aria-label="Loop videos"><button type="button" data-loop="0">off</button><button type="button" data-loop="1">on</button></span></div>
+      <div class="viewer-menu-row"><span>Backdrop</span><span id="viewer-opacity" class="pref-ramp" role="group" aria-label="How much the viewer covers the page behind"><button type="button" data-opacity="100">100%</button><button type="button" data-opacity="95">95%</button><button type="button" data-opacity="90">90%</button><button type="button" data-opacity="80">80%</button><button type="button" data-opacity="70">70%</button><button type="button" data-opacity="60">60%</button><button type="button" data-opacity="50">50%</button></span></div>
+      <div class="viewer-menu-row"><span>Zoom</span><span class="viewer-menu-zoom"><span id="viewer-zoom" class="reader-counter" title="Zoom (wheel, + -, 0 fit, 1 for 1:1)"></span><span class="pref-ramp" role="group" aria-label="Zoom"><button type="button" data-zoom="fit" title="Fit (0)">Fit</button><button type="button" data-zoom="1" title="1:1 (1)">1:1</button></span></span></div>
+      <div class="viewer-menu-row"><span>Original</span><a id="viewer-open" href="" target="_blank" rel="noopener">Open in a new tab &nearr;</a></div>
+    </div>
   </div>
   <nav class="reader-bar viewer-bar">
     <span class="viewer-bar-group">
       <span class="viewer-bar-set">
         <button type="button" class="reader-back" data-viewer="exit" title="Exit (Esc)">&larr; Exit</button>
         <button type="button" data-viewer="play" title="Play / pause (Space)" autofocus><span class="viewer-play-label">Play</span> <span class="btn-key-hint">(Space)</span></button>
-        <select id="viewer-duration" title="Seconds per image">
-          <option value="2">2 s</option>
-          <option value="3">3 s</option>
-          <option value="5">5 s</option>
-          <option value="10">10 s</option>
-          <option value="15">15 s</option>
-          <option value="30">30 s</option>
-        </select>
       </span>
       <span class="viewer-bar-set">
         <button type="button" data-viewer="restart" title="Restart video (r)">Restart</button>
-        <button type="button" data-viewer="loop" aria-pressed="false" title="Loop videos (l)">Loop: off</button>
         <button type="button" data-viewer="mute" aria-pressed="false" title="Sound on / off (m)">Sound: off</button>
       </span>
     </span>
@@ -37,18 +36,8 @@
       <button type="button" class="reader-nav" data-viewer="last" title="Last (End)">&gt;|</button>
     </span>
     <span class="viewer-bar-group">
-      <span id="viewer-zoom" class="reader-counter" title="Zoom (wheel, + -, 0 fit, 1 for 1:1)"></span>
-      <select id="viewer-opacity" title="How much the viewer covers the page behind">
-        <option value="100">Opacity 100%</option>
-        <option value="95">Opacity 95%</option>
-        <option value="90">Opacity 90%</option>
-        <option value="80">Opacity 80%</option>
-        <option value="70">Opacity 70%</option>
-        <option value="60">Opacity 60%</option>
-        <option value="50">Opacity 50%</option>
-      </select>
       <button type="button" data-viewer="fullscreen" title="Fullscreen (f)">&#x26F6; Fullscreen</button>
-      <a id="viewer-open" href="" target="_blank" rel="noopener" title="Open original in new tab">&nearr;</a>
+      <button type="button" data-viewer="menu" aria-expanded="false" aria-controls="viewer-menu" title="Viewer settings" aria-label="Settings">&#x2699;&#xFE0E;</button>
       <button type="button" data-viewer="bar" title="Hide the bar (b)">Hide</button>
     </span>
   </nav>

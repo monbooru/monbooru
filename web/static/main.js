@@ -534,6 +534,8 @@ function zoomer(stage, opts) {
   });
   return {
     atFit: atFit,
+    fit: function () { if (img) reset(); },
+    oneToOne: function () { if (img) oneToOne(); },
     attach: function (el) {
       if (img) img.style.transform = '';
       // The readout needs the natural size, which a src set just now has not brought yet.
@@ -569,7 +571,7 @@ function toggleBar(host) {
 
 var viewer = (function () {
   var durations = [2, 3, 5, 10, 15, 30], opacities = [100, 95, 90, 80, 70, 60, 50];
-  var dlg = null, slots = [], message = null, position = null, durationSelect = null, opacitySelect = null, progress = null, openLink = null, zoom = null, documentBound = false;
+  var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, openLink = null, zoom = null, documentBound = false;
   var ids = [], videos = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
   var playing = true, muted = true, looping = false;
@@ -588,7 +590,8 @@ var viewer = (function () {
     loop: toggleLoop,
     mute: toggleMuted,
     fullscreen: toggleFullscreen,
-    bar: function () { toggleBar(dlg); },
+    bar: function () { closeMenu(); toggleBar(dlg); },
+    menu: function () { if (menu.hidden) openMenu(); else closeMenu(); },
     exit: function () { dlg.close(); },
   };
   var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar' };
@@ -603,10 +606,27 @@ var viewer = (function () {
     try { percent = parseInt(localStorage.getItem('monbooru_viewer_opacity') || '95', 10); } catch (e) {}
     return opacities.indexOf(percent) >= 0 ? percent : 95;
   }
+  function press(ramp, attr, value) {
+    ramp.querySelectorAll('[data-' + attr + ']').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset[attr] === String(value))); });
+  }
   function setOpacity(percent) {
-    opacitySelect.value = String(percent);
+    press(document.getElementById('viewer-opacity'), 'opacity', percent);
     dlg.style.setProperty('--viewer-opacity', percent + '%');
   }
+  function setDuration(seconds) {
+    durationMs = seconds * 1000;
+    press(document.getElementById('viewer-duration'), 'duration', seconds);
+  }
+  function openMenu() {
+    menu.hidden = false;
+    button('menu').setAttribute('aria-expanded', 'true');
+  }
+  function closeMenu() {
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    button('menu').setAttribute('aria-expanded', 'false');
+  }
+
   function itemAt(i) {
     var id = ids[i], video = videos.has(id);
     return { id: id, video: video, src: '/images/' + id + (video ? '/file' : '/view') };
@@ -843,9 +863,7 @@ var viewer = (function () {
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
     button('play').disabled = ids.length < 2 && !isVideo;
     button('restart').disabled = !isVideo;
-    var loop = button('loop');
-    loop.setAttribute('aria-pressed', String(looping));
-    loop.textContent = looping ? 'Loop: on' : 'Loop: off';
+    press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
     var mute = button('mute');
     mute.setAttribute('aria-pressed', String(!muted));
     mute.textContent = muted ? 'Sound: off' : 'Sound: on';
@@ -857,6 +875,7 @@ var viewer = (function () {
     clearTimeout(autoTimer);
     clearTimeout(skipTimer);
     clearInterval(progressTimer);
+    closeMenu();
     prepared = null;
     current = null;
     afterShow = null;
@@ -872,11 +891,45 @@ var viewer = (function () {
     slots = Array.from(dlg.querySelectorAll('.viewer-slot'));
     message = document.getElementById('viewer-message');
     position = document.getElementById('viewer-position');
-    durationSelect = document.getElementById('viewer-duration');
+    menu = document.getElementById('viewer-menu');
     progress = dlg.querySelector('.viewer-progress span');
     dlg.addEventListener('click', function (e) {
       var b = e.target.closest('[data-viewer]');
-      if (b) actions[b.dataset.viewer]();
+      if (b) { actions[b.dataset.viewer](); return; }
+      b = e.target.closest('#viewer-menu button');
+      if (!b) return;
+      if (b.dataset.duration) {
+        try { localStorage.setItem('monbooru_slideshow_duration', b.dataset.duration); } catch (err) {}
+        setDuration(parseInt(b.dataset.duration, 10));
+        if (!current || current.video) return;
+        remainingMs = durationMs;
+        startedAt = playing ? Date.now() : null;
+        schedule();
+      } else if (b.dataset.loop) {
+        if ((b.dataset.loop === '1') !== looping) toggleLoop();
+      } else if (b.dataset.opacity) {
+        try { localStorage.setItem('monbooru_viewer_opacity', b.dataset.opacity); } catch (err) {}
+        setOpacity(b.dataset.opacity);
+      } else if (b.dataset.zoom) {
+        if (b.dataset.zoom === 'fit') zoom.fit(); else zoom.oneToOne();
+      }
+    });
+    dlg.addEventListener('pointerdown', function (e) {
+      menuPress = false;
+      if (menu.hidden || menu.contains(e.target) || button('menu').contains(e.target)) return;
+      closeMenu();
+      if (e.target.closest('.viewer-bar')) return;
+      e.stopPropagation();
+      menuPress = true;
+    }, true);
+    dlg.addEventListener('click', function (e) {
+      if (!menuPress) return;
+      menuPress = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+    ['pointerdown', 'wheel', 'dblclick'].forEach(function (type) {
+      menu.addEventListener(type, function (e) { e.stopPropagation(); });
     });
     openLink = document.getElementById('viewer-open');
     var stage = dlg.querySelector('.viewer-stage');
@@ -915,19 +968,6 @@ var viewer = (function () {
       params.set('at', id);
       window.location.href = '/?' + params + '#img-' + id;
     });
-    durationSelect.addEventListener('change', function () {
-      try { localStorage.setItem('monbooru_slideshow_duration', durationSelect.value); } catch (e) {}
-      durationMs = parseInt(durationSelect.value, 10) * 1000;
-      if (!current || current.video) return;
-      remainingMs = durationMs;
-      startedAt = playing ? Date.now() : null;
-      schedule();
-    });
-    opacitySelect = document.getElementById('viewer-opacity');
-    opacitySelect.addEventListener('change', function () {
-      try { localStorage.setItem('monbooru_viewer_opacity', opacitySelect.value); } catch (e) {}
-      setOpacity(opacitySelect.value);
-    });
     if (!documentBound) bindDocument();
     return true;
   }
@@ -942,7 +982,11 @@ var viewer = (function () {
     // On the document: a button disabled under focus drops it out of the dialog.
     document.addEventListener('keydown', function (e) {
       if (!dlg || !dlg.open || chorded(e)) return;
-      if (e.target.tagName === 'SELECT' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;
+      if (e.key === 'Escape' && !menu.hidden) {
+        e.preventDefault();
+        closeMenu();
+        return;
+      }
       if (zoom.handleKey(e)) return;
       var action = keys[e.key];
       if (!action) return;
@@ -969,8 +1013,7 @@ var viewer = (function () {
     playing = false;
     muted = true;
     looping = false;
-    durationMs = readDuration() * 1000;
-    durationSelect.value = String(durationMs / 1000);
+    setDuration(readDuration());
     setOpacity(readOpacity());
     updateControls();
     document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
