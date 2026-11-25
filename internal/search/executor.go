@@ -295,7 +295,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 				ids[i] = img.ID
 			}
 			src.Cache.set(key, ids, gen)
-		} else if page == 1 && src.Cache.tryAcquireBackgroundFan(key) {
+		} else if _, filled := src.Cache.get(key); page == 1 && !filled && src.Cache.tryAcquireBackgroundFan(key) {
 			if idBounded {
 				unbound()
 			}

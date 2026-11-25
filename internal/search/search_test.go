@@ -3712,6 +3712,24 @@ func TestExecute_Page1FansAfterTheAnswer(t *testing.T) {
 	}
 }
 
+func TestExecute_AListThatLandedMeanwhileIsNotFannedAgain(t *testing.T) {
+	database, env := setupSearchDB(t)
+	for i := range 5 {
+		ingestTestImage(t, database, env, "refan"+strconv.Itoa(i)+".png")
+	}
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "re-fan", Expr: Parse("width:>0")}
+	landed := []int64{901, 902, 903}
+	src.Cache.Seed(q, landed)
+	total := 5
+	q.PresetTotal = &total
+	mustExecute(t, database, q)
+	waitForFan(t, src.Cache, q.listKey(Source{}))
+	if ids, _ := src.Cache.get(q.listKey(Source{})); !slices.Equal(ids, landed) {
+		t.Errorf("cached ids = %v, want the list that had landed %v: a second fan ran", ids, landed)
+	}
+}
+
 func TestExecute_AnUnknownTotalPastTheCapIsNotCached(t *testing.T) {
 	database, env := setupSearchDB(t)
 	for i := range 5 {
