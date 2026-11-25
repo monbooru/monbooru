@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/monbooru/monbooru/internal/db"
@@ -22,30 +21,8 @@ import (
 // their other runes.
 const tagDecorationClass = "_()!@#$.~+:-"
 
-// With foldReserved false, '"' and '*' survive so the validator can
-// reject them.
-func buildTagName(name string, foldReserved bool) string {
-	name = strings.ToLower(name)
-	var b strings.Builder
-	b.Grow(len(name))
-	pendingFold := false
-	for _, r := range name {
-		switch {
-		case unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Co):
-		case unicode.IsSpace(r) || (foldReserved && (r == '"' || r == '*')):
-			pendingFold = true
-		default:
-			if pendingFold && b.Len() > 0 {
-				b.WriteByte('_')
-			}
-			pendingFold = false
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func NormalizeTagName(name string) string { return buildTagName(name, false) }
+// '"' and '*' survive so the validator can reject them.
+func NormalizeTagName(name string) string { return contract.FoldTagName(name, `"*`) }
 
 func HasTagContent(name string) bool {
 	return strings.ContainsFunc(name, func(r rune) bool {
@@ -70,7 +47,7 @@ func ValidateTagName(name string) (string, error) {
 
 // NormalizeName is for imported names: '"' and '*' fold to '_' instead of
 // failing, and it may return "".
-func NormalizeName(name string) string { return strings.Trim(buildTagName(name, true), "_") }
+func NormalizeName(name string) string { return contract.NormalizeTagName(name) }
 
 func (s *Service) GetOrCreateTag(name string, categoryID int64) (*models.Tag, error) {
 	return s.GetOrCreateTagFrom(name, categoryID, "user")

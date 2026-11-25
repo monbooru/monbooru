@@ -8,6 +8,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 // A form is a tag as the tag language spells it: category:name, or the
@@ -35,20 +36,23 @@ var ErrEmptyFormName = errors.New("empty tag name after category prefix")
 // SplitForm answers a failed category read with the error: reading the
 // form as general would file character:foo as a general tag.
 func SplitForm(database *db.DB, form string) (Form, error) {
-	form = strings.TrimSpace(form)
-	idx := strings.Index(form, ":")
-	if idx <= 0 {
-		return Form{Name: form}, nil
+	var id int64
+	var lookupErr error
+	category, name, ok := contract.CutTagCategory(form, func(c string) bool {
+		var found bool
+		id, found, lookupErr = CategoryIDByName(database, c)
+		return found
+	})
+	switch {
+	case lookupErr != nil:
+		return Form{}, lookupErr
+	case ok:
+		return Form{CategoryID: id, Category: category, Name: name}, nil
 	}
-	category := strings.ToLower(form[:idx])
-	id, ok, err := CategoryIDByName(database, category)
-	if err != nil {
-		return Form{}, err
+	if prefix, _, cut := strings.Cut(name, ":"); cut && prefix != "" {
+		return Form{Name: name, Namespace: prefix}, nil
 	}
-	if !ok {
-		return Form{Name: form, Namespace: form[:idx]}, nil
-	}
-	return Form{CategoryID: id, Category: category, Name: form[idx+1:]}, nil
+	return Form{Name: name}, nil
 }
 
 // ParseForm reads a prefix that names no category as part of a general
