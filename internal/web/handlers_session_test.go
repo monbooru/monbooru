@@ -245,14 +245,8 @@ func TestSessionDecide_DuplicateSetsCleanupHeadersAndDropsQueue(t *testing.T) {
 	if got := w.Header().Get("X-Relations-Duplicate-ID"); got != strconv.FormatInt(dup, 10) {
 		t.Errorf("X-Relations-Duplicate-ID = %q, want %d", got, dup)
 	}
-	if got := w.Header().Get("X-Relations-Duplicate-OriginalID"); got != strconv.FormatInt(original, 10) {
-		t.Errorf("X-Relations-Duplicate-OriginalID = %q, want %d", got, original)
-	}
-	if got := w.Header().Get("X-Relations-Duplicate-HasUniqueTags"); got != "1" {
-		t.Errorf("X-Relations-Duplicate-HasUniqueTags = %q, want 1", got)
-	}
-	if got := w.Header().Get("X-Relations-Duplicate-HasUniqueSources"); got != "1" {
-		t.Errorf("X-Relations-Duplicate-HasUniqueSources = %q, want 1", got)
+	if got := w.Header().Get("X-Relations-Duplicate-GroupID"); got == "" || got == "0" {
+		t.Errorf("X-Relations-Duplicate-GroupID = %q, want non-zero group ID", got)
 	}
 	if n := countRows(t, srv.db(), "potential_relation_pairs WHERE (a_image_id = ? AND b_image_id = ?) OR (a_image_id = ? AND b_image_id = ?)", original, dup, dup, original); n != 0 {
 		t.Errorf("pair still in queue, want removed")

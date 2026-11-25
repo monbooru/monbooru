@@ -6,8 +6,6 @@ import (
 	"slices"
 
 	"github.com/monbooru/monbooru/internal/db"
-	"github.com/monbooru/monbooru/internal/models"
-	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 // DuplicateCandidateDetails inspects what a duplicate relationship between
@@ -99,11 +97,7 @@ func (s *Service) DuplicateCandidateDetails(originalCandidate, dupCandidate int6
 	tagQuery := `SELECT 1 FROM image_tags it
 		LEFT JOIN tags t ON t.id = it.tag_id
 		WHERE it.image_id IN (` + placeholders + `)
-		  AND it.is_implied = 0
-		  AND (? = 0 OR t.category_id != ?)
-		  AND (NOT EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source = '` + models.TagSourceMonbooru + `')
-		       OR EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source != '` + models.TagSourceMonbooru + `'))
-		  AND NOT EXISTS (SELECT 1 FROM image_tags o WHERE o.image_id = ? AND o.tag_id = it.tag_id)
+		  AND ` + copyableTagRule("?") + `
 		LIMIT 1`
 	tagArgs := append(slices.Clone(args), rc, rc, effectiveOriginal)
 	err = s.db.Read.QueryRow(tagQuery, tagArgs...).Scan(&hasTagsInt)
@@ -115,9 +109,7 @@ func (s *Service) DuplicateCandidateDetails(originalCandidate, dupCandidate int6
 	var hasSourcesInt int
 	sourceQuery := `SELECT 1 FROM image_sources s
 		WHERE s.image_id IN (` + placeholders + `)
-		  AND lower(s.site) != '` + contract.SourcePTR + `'
-		  AND NOT EXISTS (SELECT 1 FROM image_sources o WHERE o.image_id = ? AND o.site = s.site AND o.post_id = s.post_id)
-		  AND (s.url = '' OR NOT EXISTS (SELECT 1 FROM image_sources o WHERE o.image_id = ? AND o.url = s.url))
+		  AND ` + copyableSourceRule("?") + `
 		LIMIT 1`
 	sourceArgs := append(slices.Clone(args), effectiveOriginal, effectiveOriginal)
 	err = s.db.Read.QueryRow(sourceQuery, sourceArgs...).Scan(&hasSourcesInt)

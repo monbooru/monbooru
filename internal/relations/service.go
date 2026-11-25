@@ -757,18 +757,22 @@ func clearBetweenTx(tx *sql.Tx, a, b int64) error {
 	return err
 }
 
+func copyableTagRule(originalColOrPlaceholder string) string {
+	return `it.is_implied = 0
+	  AND (? = 0 OR t.category_id != ?)
+	  AND (NOT EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source = '` + models.TagSourceMonbooru + `')
+	       OR EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source != '` + models.TagSourceMonbooru + `'))
+	  AND NOT EXISTS (SELECT 1 FROM image_tags o WHERE o.image_id = ` + originalColOrPlaceholder + ` AND o.tag_id = it.tag_id)`
+}
+
 // Ratings are left out: they are highest-wins, so a copy would raise the
 // original's. Implied rows come back through the fan-out of their tags.
-const tagsToCopyFrom = `
+var tagsToCopyFrom = `
 	FROM image_tags it
 	JOIN dup_group_members m ON m.image_id = it.image_id
 	JOIN dup_groups g ON g.id = m.group_id
 	LEFT JOIN tags t ON t.id = it.tag_id
-	WHERE m.image_id != g.original_image_id AND it.is_implied = 0
-	  AND (? = 0 OR t.category_id != ?)
-	  AND (NOT EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source = '` + models.TagSourceMonbooru + `')
-	       OR EXISTS (SELECT 1 FROM image_tag_sources s WHERE s.image_id = it.image_id AND s.tag_id = it.tag_id AND s.source != '` + models.TagSourceMonbooru + `'))
-	  AND NOT EXISTS (SELECT 1 FROM image_tags o WHERE o.image_id = g.original_image_id AND o.tag_id = it.tag_id)`
+	WHERE m.image_id != g.original_image_id AND ` + copyableTagRule("g.original_image_id")
 
 // TagsToCopy is what CopyTagsFromDuplicatesToOriginal would add.
 func (s *Service) TagsToCopy(groupID int64) ([]int64, error) {

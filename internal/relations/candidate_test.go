@@ -105,3 +105,35 @@ func TestDuplicateCandidateDetails_BothInGroups(t *testing.T) {
 	}
 }
 
+func TestDuplicateCandidateDetails_OnlyImpliedTag(t *testing.T) {
+	database, svc := setupTestDB(t)
+	orig := insertImage(t, database, "cand-imp-o", 1000)
+	dup := insertImage(t, database, "cand-imp-d", 1000)
+
+	addTagRow(t, database, dup, "implied-tag", true)
+
+	_, hasTags, _, err := svc.DuplicateCandidateDetails(orig, dup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasTags {
+		t.Errorf("hasTags = true, want false when only an implied tag differs")
+	}
+}
+
+func TestDuplicateCandidateDetails_OriginalAlreadyHasSource(t *testing.T) {
+	database, svc := setupTestDB(t)
+	orig := insertImage(t, database, "cand-src-o", 1000)
+	dup := insertImage(t, database, "cand-src-d", 1000)
+
+	addSourceRow(t, database, orig, "site_b", "7", "https://b.example/7")
+	addSourceRow(t, database, dup, "site_b", "7", "https://b.example/7")
+
+	_, _, hasSources, err := svc.DuplicateCandidateDetails(orig, dup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSources {
+		t.Errorf("hasSources = true, want false when original already has source")
+	}
+}
