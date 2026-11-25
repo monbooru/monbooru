@@ -381,12 +381,13 @@ function zoomer(stage, opts) {
   var points = {}, pinch = null;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function naturalSize() { return img ? { w: img.naturalWidth || img.videoWidth || 0, h: img.naturalHeight || img.videoHeight || 0 } : { w: 0, h: 0 }; }
   // object-fit: contain letterboxes the image inside the element, so the
   // painted rect is computed; the letterbox is not "on the image".
   function contentRect() {
     var r = img.getBoundingClientRect();
     if (!r.width || !r.height) return null;
-    var iw = img.naturalWidth, ih = img.naturalHeight;
+    var n = naturalSize(), iw = n.w, ih = n.h;
     if (!iw || !ih) return r;
     var ia = iw / ih, ba = r.width / r.height;
     var w, h;
@@ -399,10 +400,11 @@ function zoomer(stage, opts) {
   // scale multiplies the CSS fit, so 1:1 is read back off the painted box
   // rather than assumed to be 1.
   function oneToOneScale() {
-    if (!img || !img.naturalWidth) return 0;
+    var n = naturalSize();
+    if (!n.w) return 0;
     var r = contentRect();
     if (!r || !r.width) return 0;
-    return img.naturalWidth * scale / r.width;
+    return n.w * scale / r.width;
   }
   // 1:1 on an image smaller than the stage sits below 0.5, and the floor
   // must not rule it out.
@@ -539,7 +541,7 @@ function zoomer(stage, opts) {
     attach: function (el) {
       if (img) img.style.transform = '';
       // The readout needs the natural size, which a src set just now has not brought yet.
-      if (el) el.addEventListener('load', apply, { once: true });
+      if (el) el.addEventListener(el.tagName === 'VIDEO' ? 'loadedmetadata' : 'load', apply, { once: true });
       img = el;
       points = {};
       pinch = null;
@@ -736,7 +738,7 @@ var viewer = (function () {
     }
     updateControls();
     // After the controls: the bar's height sets the stage's, which the readout is measured on.
-    zoom.attach(current.video ? null : slide.media);
+    zoom.attach(slide.media);
     openLink.href = current.src;
     if (afterShow) {
       var merge = afterShow;
@@ -925,7 +927,6 @@ var viewer = (function () {
     track.parentNode.classList.toggle('silent', !!v && current.silent);
     dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
     dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
-    dlg.querySelectorAll('#viewer-menu [data-zoom]').forEach(function (b) { b.disabled = !!v; });
     press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
     button('mute').setAttribute('aria-pressed', String(!muted));
     press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);

@@ -2520,7 +2520,7 @@ body.reader-body {
 }
 .viewer-slot.active { visibility: visible; z-index: 1; }
 .viewer-stage.grabbing { cursor: grabbing; }
-.viewer-slot img { transform-origin: center center; pointer-events: none; -webkit-user-drag: none; user-select: none; }
+.viewer-slot img, .viewer-slot video { transform-origin: center center; pointer-events: none; -webkit-user-drag: none; user-select: none; }
 .viewer-slot img,
 .viewer-slot video {
   display: block;
