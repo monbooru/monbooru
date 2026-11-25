@@ -1,5 +1,5 @@
 # monbooru and ffmpeg on the monworker image, which tags on CPU.
-ARG MONWORKER_VERSION=1.0.2
+ARG MONWORKER_VERSION=1.0.3
 
 FROM golang:1.27.4-trixie AS build
 WORKDIR /src

@@ -25,6 +25,7 @@
     <span id="tag-detail-name" style="color:{{catColor .Tag.CategoryColor}}">{{.Tag.Name}}</span>
     {{if .Tag.IsAlias}}<span class="alias-badge">alias</span>{{end}}
     {{if .Tag.Rejected}}<span class="alias-badge rejected-badge">rejected</span>{{end}}
+    {{if .Tag.Global}}<span class="alias-badge" title="The same tag in every gallery">global</span>{{end}}
     {{if .IsRating}}
     <span class="field-hint">(built-in rating)</span>
     {{else}}
@@ -38,6 +39,13 @@
       <button type="button" id="btn-detail-rename" class="btn-sm" data-id="{{.Tag.ID}}" data-name="{{.Tag.Name}}" onclick="openRenameDialog(this)">Rename</button>
       <button type="button" id="btn-detail-category" class="btn-sm" onclick="document.getElementById('detail-category-dialog').showModal()">Change category…</button>
       <button type="button" id="btn-detail-alias" class="btn-sm" onclick="openDetailAlias()">{{if .Tag.IsAlias}}Repoint to…{{else}}Alias to…{{end}}</button>
+      {{if not .Tag.IsAlias}}{{if .Tag.Global}}
+      <button type="button" id="btn-detail-local" class="btn-sm" hx-post="/tags/{{.Tag.ID}}/local" hx-swap="none"
+              title="Stop sharing this tag: every gallery keeps what it has">Make local</button>
+      {{else if .OtherGalleries}}
+      <button type="button" id="btn-detail-global" class="btn-sm" title="Share this tag with {{joinAnd .OtherGalleries}}"
+              onclick="openMakeGlobal(new URLSearchParams({ids: '{{.Tag.ID}}'}), 'this tag', armGalleryReload)">Make global…</button>
+      {{end}}{{end}}
       {{end}}
       <button type="button" id="btn-detail-delete" class="btn-sm btn-danger" onclick="deleteThisTag(this)"
               data-name="{{.Tag.Name}}" data-category="{{.Tag.CategoryName}}" data-rejected="{{if .Tag.Rejected}}1{{end}}" data-alias="{{if .Tag.IsAlias}}1{{end}}"
@@ -55,6 +63,7 @@
     · created <strong>{{.Tag.CreatedAt.Format "2006-01-02"}}</strong>
     · last used {{if .Tag.LastUsedAt.IsZero}}<span class="origin-none">—</span>{{else}}<strong>{{.Tag.LastUsedAt.Format "2006-01-02"}}</strong>{{end}}
     {{if .Tag.Rejected}}· dropped on arrival <strong>{{.Tag.RejectedDrops}}</strong>{{end}}
+    {{if and .Tag.Global .OtherGalleries}}· global, shared with {{joinAnd .OtherGalleries}}{{end}}
   </p>
 
   <div id="tag-flash" data-action-flash role="status"></div>
@@ -253,6 +262,7 @@
 </div>
 
 {{template "partials/tag_rename_dialog.html" (dict "KeepAlias" (not .Tag.IsAlias))}}
+{{if .OtherGalleries}}{{template "partials/tag_global_dialog.html" .}}{{end}}
 
 {{if not .IsRating}}
 <dialog id="detail-category-dialog">

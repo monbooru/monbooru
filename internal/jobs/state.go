@@ -30,6 +30,13 @@ type Manager struct {
 	lane     *Reservation
 	viewed   bool
 	finished uint64
+	onEnd    func()
+}
+
+func (m *Manager) OnEnd(f func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onEnd = f
 }
 
 // Reservation is a hold on the job lane; only its own Release frees it.
@@ -178,6 +185,9 @@ func (m *Manager) end(set func(*models.JobState)) {
 	set(m.state)
 	m.finished++
 	m.armDismiss(dismissDelay)
+	if m.onEnd != nil {
+		go m.onEnd()
+	}
 }
 
 func (m *Manager) Get() *models.JobState {

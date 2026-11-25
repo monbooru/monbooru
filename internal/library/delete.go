@@ -54,6 +54,8 @@ func (cx *Gallery) DeleteImages(ctx context.Context, ids []int64, opts DeleteOpt
 		if ids, res.Kept, err = cx.filesGone(ids); err != nil {
 			return res, err
 		}
+	} else if err := gallery.RootReadable(cx.Boundary().Root()); err != nil {
+		return res, err
 	}
 	total := len(ids)
 	for start := 0; start < total; start += deleteChunk {
@@ -210,6 +212,9 @@ func (cx *Gallery) DeleteCopies(ctx context.Context, pathIDs []int64, progress f
 	}
 	var res CopiesResult
 	b := cx.Boundary()
+	if err := gallery.RootReadable(b.Root()); err != nil {
+		return res, err
+	}
 	total := len(pathIDs)
 	for start := 0; start < total; start += deleteChunk {
 		if ctx.Err() != nil {

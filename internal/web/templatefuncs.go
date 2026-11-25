@@ -140,8 +140,10 @@ func templateFuncs() template.FuncMap {
 			}
 			return d.Round(time.Millisecond).String()
 		},
-		"plural":     models.Plural,
-		"searchTime": searchTime,
+		"plural":       models.Plural,
+		"joinAnd":      joinAnd,
+		"globalCounts": globalCounts,
+		"searchTime":   searchTime,
 		// Always quoted: a term may carry spaces the parser would split on.
 		"comfySearch": func(term string) string {
 			if term == "" {

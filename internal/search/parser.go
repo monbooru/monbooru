@@ -42,8 +42,13 @@ func Parse(query string) Expr {
 	return expr
 }
 
+const maxQueryTokens = 500
+
 func parse(query string) (Expr, []string) {
 	tokens, open := tokenize(query)
+	if len(tokens) > maxQueryTokens {
+		return TagExpr{}, []string{"query too long"}
+	}
 	p := &parser{tokens: tokens}
 	if open {
 		p.problem("unterminated quote")

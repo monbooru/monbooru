@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -198,6 +199,30 @@ func TestDeleteTag(t *testing.T) {
 	apiJSON(t, env, "DELETE", fmt.Sprintf("/api/v1/tags/%d", id), nil, http.StatusNoContent)
 
 	apiJSON(t, env, "DELETE", fmt.Sprintf("/api/v1/tags/%d", id), nil, http.StatusNotFound)
+}
+
+func TestGlobalTag_IsMarkedFilteredAndKeptFromDelete(t *testing.T) {
+	env := newTestEnv(t)
+	shared := int64(apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "shared"}, http.StatusCreated)["id"].(float64))
+	apiJSON(t, env, "POST", "/api/v1/tags", map[string]any{"name": "own"}, http.StatusCreated)
+	mustExec(t, env.database.Write, `UPDATE tags SET is_global = 1 WHERE id = ?`, shared)
+
+	if resp := apiJSON(t, env, "GET", fmt.Sprintf("/api/v1/tags/%d", shared), nil, http.StatusOK); resp["global"] != true {
+		t.Errorf("detail global = %v, want true", resp["global"])
+	}
+	for scope, want := range map[string]string{"global": "shared:true", "local": "own:false"} {
+		var got []string
+		for _, r := range apiJSON(t, env, "GET", "/api/v1/tags?type=tag&scope="+scope, nil, http.StatusOK)["results"].([]any) {
+			row := r.(map[string]any)
+			if name := row["name"]; name == "shared" || name == "own" {
+				got = append(got, fmt.Sprintf("%s:%v", name, row["global"]))
+			}
+		}
+		if !slices.Equal(got, []string{want}) {
+			t.Errorf("scope=%s = %v, want [%s]", scope, got, want)
+		}
+	}
+	apiJSON(t, env, "DELETE", fmt.Sprintf("/api/v1/tags/%d", shared), nil, http.StatusConflict)
 }
 
 func TestCreateAlias(t *testing.T) {

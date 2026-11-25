@@ -12,6 +12,7 @@ import (
 type slideshowResult struct {
 	IDs    []int64 `json:"ids"`
 	Videos []int64 `json:"videos"`
+	Silent []int64 `json:"silent"`
 	Start  int     `json:"start"`
 }
 
@@ -114,7 +115,7 @@ func TestSlideshow_EmptyScopeAnswersEmptyLists(t *testing.T) {
 
 	w := postForm(t, srv, "/internal/slideshow", url.Values{"scope": {"search"}, "q": {""}})
 	mustCode(t, w, http.StatusOK)
-	if body := w.Body.String(); body != "{\"ids\":[],\"start\":0,\"videos\":[]}\n" {
+	if body := w.Body.String(); body != "{\"ids\":[],\"silent\":[],\"start\":0,\"videos\":[]}\n" {
 		t.Errorf("body = %q, want empty lists, not null", body)
 	}
 }

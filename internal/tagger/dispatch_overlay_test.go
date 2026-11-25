@@ -194,3 +194,40 @@ func TestMoveDispatchOverlays_CopiesOnceAndLeavesTheOld(t *testing.T) {
 		t.Errorf("a reset mapping came back: %v", err)
 	}
 }
+
+func TestMoveDispatchOverlays_LeavesNoMarkerUntilEveryMappingIsRead(t *testing.T) {
+	dataPath := t.TempDir()
+	marked := func() bool {
+		_, err := os.Stat(filepath.Join(dataPath, dispatchMoved))
+		return err == nil
+	}
+	root := t.TempDir()
+	notADir := filepath.Join(root, "file")
+	mustWriteFile(t, notADir, nil, 0o644)
+	empty := filepath.Join(root, "unmounted")
+	mustMkdirAll(t, empty, 0o755)
+	for _, modelPath := range []string{notADir, filepath.Join(root, "missing"), empty} {
+		MoveDispatchOverlays(modelPath, dataPath)
+		if marked() {
+			t.Fatalf("%s: marked as copied", modelPath)
+		}
+	}
+
+	modelPath := t.TempDir()
+	unreadable := filepath.Join(modelPath, "wd-swinv2", "dispatch.json")
+	mustMkdirAll(t, unreadable, 0o755)
+	MoveDispatchOverlays(modelPath, dataPath)
+	if marked() {
+		t.Fatal("a mapping that could not be read: marked as copied")
+	}
+
+	if err := os.Remove(unreadable); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"version":1,"rules":[{"source":"1koma","category":""}]}`
+	mustWriteFile(t, unreadable, []byte(body), 0o644)
+	MoveDispatchOverlays(modelPath, dataPath)
+	if got, _ := os.ReadFile(OverlayPath(dataPath, "wd-swinv2")); string(got) != body || !marked() {
+		t.Errorf("once readable: copy = %q, marked = %v", got, marked())
+	}
+}

@@ -189,6 +189,13 @@ func TestDeleteCategory_StatusFollowsTheRefusal(t *testing.T) {
 	}
 	mustTag(t, srv.tagSvc(), "clash", cat.ID)
 	mustTag(t, srv.tagSvc(), "clash", general)
+	shared, err := srv.tagSvc().CreateCategory("shared", "#123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.tagSvc().SetGlobal([]int64{mustTag(t, srv.tagSvc(), "animation", shared.ID).ID}, true); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, c := range []struct {
 		id    int64
@@ -199,6 +206,7 @@ func TestDeleteCategory_StatusFollowsTheRefusal(t *testing.T) {
 		{general, "action=delete_all", http.StatusBadRequest},
 		{cat.ID, "action=move&target_id=" + strconv.FormatInt(general, 10), http.StatusConflict},
 		{cat.ID, "action=move&target_id=" + strconv.FormatInt(cat.ID, 10), http.StatusBadRequest},
+		{shared.ID, "action=delete_all", http.StatusConflict},
 	} {
 		if w := deleteCategory(t, srv, c.id, c.query); w.Code != c.want {
 			t.Errorf("category %d %s: %d %s, want %d", c.id, c.query, w.Code, strings.TrimSpace(w.Body.String()), c.want)

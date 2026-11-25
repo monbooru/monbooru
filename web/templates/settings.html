@@ -239,7 +239,7 @@
             <input type="text" name="gallery_path" id="gallery-add-path" required>
             {{if .DesktopProfile}}
             <button type="button" class="btn-sm dir-picker-open" data-into="gallery-add-path"
-                    hx-get="/internal/browse?into=gallery-add-path" hx-target="#dir-picker-body">Browse</button>
+                    hx-get="/internal/browse?into=gallery-add-path" hx-vals='js:{path: document.getElementById("gallery-add-path").value}' hx-target="#dir-picker-body">Browse</button>
             {{end}}
           </div>
         </div>
@@ -535,6 +535,18 @@
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
     {{template "partials/tagger_workers.html" .Workers}}
+    {{template "partials/worker_add_dialog.html" .Workers}}
+    {{if not .Workers.None}}
+    <form hx-post="/settings/tagger/jobs" hx-target="#flash-tagger" hx-swap="innerHTML">
+      <div class="settings-sub">
+        <h4>Jobs</h4>
+        <div class="settings-cols">
+          {{template "partials/range_field.html" dict "Name" "prepare_parallel" "Label" "Images prepared at once" "Min" 0 "Max" .CPUCount "Step" 1 "Value" $cfg.Tagger.PrepareParallel "ZeroLabel" "auto"}}
+        </div>
+        <div class="settings-actions"><button type="submit">Save</button></div>
+      </div>
+    </form>
+    {{end}}
     {{if .LocalRunning}}
     <form hx-post="/settings/tagger" hx-target="#flash-tagger" hx-swap="innerHTML">
       <div class="settings-sub">
@@ -972,7 +984,7 @@
           <table class="maintenance-table">
             <tbody>
               {{template "maintenance_row" dict "Title" "Vacuum database" "Desc" "Shrink the database file after deleting many images" "URL" "/settings/maintenance/vacuum-db" "Verb" "Vacuum" "Mark" "long job" "Confirm" "Compact the SQLite database now?" "ConfirmDanger" "Holds a database lock for the duration of the VACUUM; other jobs and queries will wait." "ConfirmOK" "Vacuum"}}
-              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, including a loaded tagger model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
+              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, and the local worker's model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
             </tbody>
           </table>
           </div>
@@ -1099,9 +1111,6 @@
           <label><input type="checkbox" name="remove_orphans"{{if $sched.RemoveOrphans}} checked{{end}}> Remove orphaned thumbnails</label>
         </div>
         <div class="field">
-          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
-        </div>
-        <div class="field">
           <label><input type="checkbox" name="find_relation_pairs"{{if $sched.FindRelationPairs}} checked{{end}}> Find relation pairs</label>
         </div>
         {{if .MonloaderPaired}}
@@ -1111,6 +1120,42 @@
         </div>
         <div class="field">
           <label class="peer-accent{{if not .MonloaderUsable}} label-off{{end}}"{{if not .MonloaderUsable}} title="{{monloaderOffReason .MonloaderConn}}"{{end}}><input type="checkbox" name="lookup_booru"{{if $sched.LookupBooru}} checked{{end}}> Look up unsourced images on online boorus</label>
+        </div>
+        {{end}}
+      </div>
+      {{$at := .ScheduleAutotag}}
+      <div class="schedule-autotag">
+        <div class="field">
+          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
+        </div>
+        {{if $at.Show}}
+        <div class="schedule-autotag-opts{{if not $sched.RunAutoTaggers}} scope-off{{end}}" data-scope-col="run_auto_taggers">
+          <input type="hidden" name="autotag_opts" value="1">
+          <div class="settings-cols">
+            {{if $at.ShowTaggers}}
+            <div class="field">
+              <label>Taggers</label>
+              <input type="hidden" name="autotag_taggers_drawn" value="1">
+              <label><input type="checkbox" name="every_autotag_taggers" value="on" data-scope-every="autotag_taggers"{{if $at.EveryTagger}} checked{{end}}> All enabled taggers</label>
+              {{range $at.Taggers}}<label><input type="checkbox" name="on_autotag_taggers" value="{{.Name}}"{{if or $at.EveryTagger .On}} checked{{end}}{{if $at.EveryTagger}} disabled{{end}}> {{.Name}}</label>
+              {{end}}
+            </div>
+            {{end}}
+            {{if $at.ShowWorkers}}
+            <div class="field">
+              <label>Workers</label>
+              <input type="hidden" name="autotag_workers_drawn" value="1">
+              <label><input type="radio" name="autotag_worker_mode" value="any"{{if $at.AnyWorker}} checked{{end}}> Any worker <span class="field-hint">paired ones first, this machine when none is up</span></label>
+              <label><input type="radio" name="autotag_worker_mode" value="named"{{if not $at.AnyWorker}} checked{{end}}> These workers</label>
+              <div class="schedule-autotag-workers">
+                {{range $at.Workers}}<label><input type="checkbox" name="autotag_worker" value="{{.Name}}"{{if .On}} checked{{end}}{{if $at.AnyWorker}} disabled{{end}}> {{.Name}} <span class="field-hint">{{.Hint}}</span></label>
+                {{end}}
+              </div>
+              <span class="field-hint">With none of them up, the run skips auto-tagging and says so above.</span>
+            </div>
+            {{end}}
+          </div>
+          <label class="schedule-max" for="autotag_max_images">At most <input type="number" id="autotag_max_images" name="autotag_max_images" min="1" step="1" inputmode="numeric" class="schedule-max-input" value="{{with $at.MaxImages}}{{.}}{{end}}"> images a run <span class="field-hint">empty for no limit</span></label>
         </div>
         {{end}}
       </div>
@@ -1172,6 +1217,12 @@
       });
       return;
     }
+    if (box.name === 'autotag_worker_mode') {
+      form.querySelectorAll('input[name="autotag_worker"]').forEach(function(b) {
+        b.disabled = box.value === 'any';
+      });
+      return;
+    }
     form.querySelectorAll('[data-scope-col="' + box.name + '"]').forEach(function(c) {
       c.classList.toggle('scope-off', !box.checked);
     });
@@ -1188,14 +1239,14 @@
     <div class="settings-sub">
       <h4>Database size per gallery</h4>
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Gallery</th><th>DB path</th><th>Size</th></tr></thead>
         <tbody>
           {{range $stats.Galleries}}
           <tr>
-            <td><strong>{{.Name}}</strong></td>
-            <td class="stats-path"><code>{{.DBPath}}</code></td>
-            <td>{{humanBytes .DBSize}}</td>
+            <td class="stack-head"><strong>{{.Name}}</strong></td>
+            <td class="stats-path" data-label="DB path"><code>{{.DBPath}}</code></td>
+            <td data-label="Size">{{humanBytes .DBSize}}</td>
           </tr>
           {{end}}
         </tbody>
@@ -1206,16 +1257,16 @@
       <h4>Filesystem free space</h4>
       {{if $stats.Mounts}}
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th>Used %</th></tr></thead>
         <tbody>
           {{range $stats.Mounts}}
           <tr>
-            <td>{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
-            <td>{{humanBytes .UsedSize}}</td>
-            <td>{{humanBytes .FreeSize}}</td>
-            <td>{{humanBytes .TotalSize}}</td>
-            <td>{{.UsedPct}}%</td>
+            <td class="stack-head">{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
+            <td data-label="Used">{{humanBytes .UsedSize}}</td>
+            <td data-label="Free">{{humanBytes .FreeSize}}</td>
+            <td data-label="Total">{{humanBytes .TotalSize}}</td>
+            <td data-label="Used %">{{.UsedPct}}%</td>
           </tr>
           {{end}}
         </tbody>

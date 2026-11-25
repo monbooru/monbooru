@@ -1768,6 +1768,30 @@ func TestDeleteImage_SaysHowManyChangedFilesItKept(t *testing.T) {
 	}
 }
 
+func TestImageWrites_AnUnreadableGalleryIs503(t *testing.T) {
+	env := newTestEnv(t)
+	id := env.createTestImage(t, "kept.png", 10, 10)
+	if err := os.Rename(env.galleryDir, env.galleryDir+".away"); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, w := range map[string]*httptest.ResponseRecorder{
+		"delete":  env.do("DELETE", fmt.Sprintf("/api/v1/images/%d", id)),
+		"create":  env.postUpload(t, "new.png", pngFileBytes(t, 12, 12), nil),
+		"replace": env.postReplace(t, id, "better.png", pngFileBytes(t, 20, 20), nil),
+	} {
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), `"gallery_unavailable"`) {
+			t.Errorf("%s = %d %s, want 503 gallery_unavailable", name, w.Code, w.Body.String())
+		}
+	}
+	if n := countRows(t, env.database, "images WHERE id = ?", id); n != 1 {
+		t.Errorf("the row went (n=%d)", n)
+	}
+	if _, err := os.Stat(env.galleryDir); !os.IsNotExist(err) {
+		t.Errorf("the gallery folder was created again (err=%v)", err)
+	}
+}
+
 func TestDeleteImage_NotFound(t *testing.T) {
 	env := newTestEnv(t)
 	w := env.do("DELETE", "/api/v1/images/99999")

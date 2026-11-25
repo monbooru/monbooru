@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strconv"
@@ -98,5 +99,79 @@ func TestAJobItsTickedWorkersCannotRunIsRefused(t *testing.T) {
 	}
 	if ws[0].Calls()+ws[1].Calls() != 0 {
 		t.Error("a refused job made calls")
+	}
+}
+
+func TestAddAWorkerByAddressOnceItAnswersWithItsToken(t *testing.T) {
+	srv := newTestServer(t)
+	enableOnWorkers(t, srv, tagger.WorkerDef{Name: "gpu-box"})
+	addr := tagger.CurrentPool().Workers()[0].URL
+	add := func(name, url_, token string) string {
+		t.Helper()
+		w := postForm(t, srv, "/settings/workers/add", url.Values{"name": {name}, "url": {url_}, "token": {token}, "gateway_token": {""}})
+		mustCode(t, w, http.StatusOK)
+		if w.Header().Get("HX-Refresh") == "true" {
+			return ""
+		}
+		return w.Body.String()
+	}
+	for _, tc := range []struct{ name, url, token, want string }{
+		{"two words", addr, "tok", "letters, digits"},
+		{tagger.LocalWorker, addr, "tok", "local is the worker monbooru runs itself"},
+		{"rented", "ftp://example.invalid", "tok", "must start with http:// or https://"},
+		{"rented", addr, "", "A token is required"},
+		{"rented", addr, "wrong", "refused the token"},
+		{"rented", "http://127.0.0.1:1", "tok", "No worker answered at http://127.0.0.1:1"},
+	} {
+		wantIn(t, add(tc.name, tc.url, tc.token), tc.want)
+	}
+	if len(srv.cfg.Workers) != 0 {
+		t.Fatalf("a refused form wrote %+v", srv.cfg.Workers)
+	}
+	if body := add("rented", addr+"/", "tok"); body != "" {
+		t.Fatalf("a worker that answers was refused: %s", body)
+	}
+	if got := srv.cfg.Workers; len(got) != 1 || got[0].Name != "rented" || got[0].URL != addr || got[0].Token != "tok" || !got[0].Manual {
+		t.Fatalf("workers = %+v", got)
+	}
+	var told bool
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { told = true }))
+	t.Cleanup(gone.Close)
+	srv.cfgMu.Lock()
+	srv.cfg.Workers[0].URL = gone.URL
+	srv.cfgMu.Unlock()
+	wantIn(t, add("rented", addr, "tok"), "A worker named rented is already listed")
+	mustCode(t, postForm(t, srv, "/settings/workers/rented/remove", url.Values{}), http.StatusOK)
+	if told || len(srv.cfgSnapshot().Workers) != 0 {
+		t.Errorf("removing a worker added by address: told %v, left %+v; it holds no pairing to end", told, srv.cfgSnapshot().Workers)
+	}
+}
+
+func TestAnOnDemandWorkerShowsAsleepAndIsOfferedUnticked(t *testing.T) {
+	srv := newTestServer(t)
+	enableOnWorkers(t, srv, tagger.WorkerDef{Name: "gpu-box"}, tagger.WorkerDef{Name: "rented", OnDemand: true})
+	_, body := getBody(t, srv, "/internal/workers")
+	row := workerRowHTML(t, body, "rented")
+	for _, want := range []string{"footer-dot-paused", `>on demand</span>`, ">asleep<"} {
+		wantIn(t, row, want)
+	}
+	if err := tagger.CurrentPool().Wake(t.Context(), []string{"rented"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, body = getBody(t, srv, "/internal/workers")
+	wantIn(t, workerRowHTML(t, body, "rented"), ">asleep, last seen ")
+
+	_, body = getBody(t, srv, "/")
+	box := workerBox(t, body, "rented")
+	wantIn(t, box, `data-on-demand="1"`)
+	wantIn(t, body, "2 at once, on demand: starts with the job</span>")
+	wantNotIn(t, workerBox(t, body, "gpu-box"), "data-on-demand")
+
+	id := strconv.FormatInt(seedImage(t, srv, "one.png", 32, 32), 10)
+	w := postHTMXForm(t, srv, "/internal/autotag", url.Values{"scope": {"selection"}, "ids": {id}, "workers": {"rented"}})
+	mustCode(t, w, http.StatusAccepted)
+	awaitJobsDrain(t, srv)
+	if msg := srv.jobs.Get().Summary; !strings.Contains(msg, "(rented 1) in ") || !strings.HasSuffix(msg, " s") {
+		t.Errorf("the job on a started worker ended on %q, want its time", msg)
 	}
 }

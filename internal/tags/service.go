@@ -18,6 +18,7 @@ import (
 var (
 	ErrInvalidTagName       = errors.New("invalid tag name")
 	ErrTagNotFound          = errors.New("tag not found")
+	ErrTagGlobal            = errors.New("this tag is global: make it local first")
 	ErrTagNameTaken         = errors.New("already exists in this category")
 	ErrTagImplied           = errors.New("this tag is implied by another tag on the image; remove the parent")
 	ErrCategoryNotFound     = errors.New("category not found")
@@ -103,6 +104,7 @@ type TagFilter struct {
 	Stale         string
 	FoldedOnly    bool
 	DistinctOnly  bool
+	Scope         string
 }
 
 type Service struct {

@@ -82,34 +82,83 @@ func TestDecodeEXIF_CorruptSubIFDKeepsIFD0(t *testing.T) {
 	}
 }
 
-func TestDecodeEXIF_UnknownTypeRefused(t *testing.T) {
-	t.Parallel()
+func decodeBetweenNeighbours(t *testing.T, bad []byte) {
+	t.Helper()
 	order := binary.LittleEndian
-	entries := [][]byte{entryBytes(order, 0x010E, 13, 1, []byte{1, 0, 0, 0})}
-	if _, err := decodeEXIF(tiffBlock(order, entries, 0, nil)); err == nil {
-		t.Error("an entry with an unknown value type must not decode")
+	entries := [][]byte{
+		entryBytes(order, 0x0112, exifShort, 1, []byte{6, 0}),
+		bad,
+		entryBytes(order, 0x013B, exifASCII, 3, []byte("ab\x00")),
+	}
+	x, err := decodeEXIF(tiffBlock(order, entries, 0, nil))
+	if err != nil {
+		t.Fatalf("one bad entry failed the block: %v", err)
+	}
+	if _, ok := x.tags["ImageDescription"]; ok {
+		t.Error("the bad entry was kept")
+	}
+	if o, ok := exifOrientation(x); !ok || o != 6 {
+		t.Errorf("Orientation = %d %v, want 6", o, ok)
+	}
+	if tag, ok := x.tags["Artist"]; !ok || tag.String() != `"ab"` {
+		t.Errorf("Artist = %v %v, want \"ab\"", tag, ok)
 	}
 }
 
-func TestDecodeEXIF_OutOfBoundsValueRefused(t *testing.T) {
+func TestDecodeEXIF_SkipsAnEntryOfUnknownType(t *testing.T) {
 	t.Parallel()
-	order := binary.LittleEndian
+	decodeBetweenNeighbours(t, entryBytes(binary.LittleEndian, 0x010E, 13, 1, []byte{1, 0, 0, 0}))
+}
+
+func TestDecodeEXIF_SkipsAnEntryOfTheUTF8Type(t *testing.T) {
+	t.Parallel()
+	decodeBetweenNeighbours(t, entryBytes(binary.LittleEndian, 0x010E, 129, 1, []byte{'A', 0, 0, 0}))
+}
+
+func TestDecodeEXIF_SkipsAnEntryOfZeroCount(t *testing.T) {
+	t.Parallel()
+	decodeBetweenNeighbours(t, entryBytes(binary.LittleEndian, 0x010E, exifASCII, 0, nil))
+}
+
+func TestDecodeEXIF_SkipsAValueOutOfBounds(t *testing.T) {
+	t.Parallel()
 
 	off := make([]byte, 4)
 	binary.LittleEndian.PutUint32(off, 4096)
-	entries := [][]byte{entryBytes(order, 0x010E, exifASCII, 64, off)}
-	if _, err := decodeEXIF(tiffBlock(order, entries, 0, nil)); err == nil {
-		t.Error("a value addressed outside the block must not decode")
-	}
+	decodeBetweenNeighbours(t, entryBytes(binary.LittleEndian, 0x010E, exifASCII, 64, off))
 }
 
-func TestDecodeEXIF_WrappingCountRefused(t *testing.T) {
+func TestDecodeEXIF_SkipsAWrappingCount(t *testing.T) {
 	t.Parallel()
-	order := binary.LittleEndian
 
-	entries := [][]byte{entryBytes(order, 0x010E, exifLong, 0x40000001, []byte{0, 0, 0, 0})}
-	if _, err := decodeEXIF(tiffBlock(order, entries, 0, nil)); err == nil {
-		t.Error("a count that wraps a 32-bit length must not decode")
+	decodeBetweenNeighbours(t, entryBytes(binary.LittleEndian, 0x010E, exifLong, 0x40000001, []byte{0, 0, 0, 0}))
+}
+
+func TestDecodeEXIF_AnOddEntryInTheExifDirectoryKeepsUserComment(t *testing.T) {
+	t.Parallel()
+	order := binary.BigEndian
+	comment := append([]byte("ASCII\x00\x00\x00"), "Steps: 20"...)
+
+	var sub bytes.Buffer
+	_ = binary.Write(&sub, order, uint16(2))
+	sub.Write(entryBytes(order, 0x9286, exifUndefined, uint32(len(comment)), binary.BigEndian.AppendUint32(nil, 68)))
+	sub.Write(entryBytes(order, 0x9003, exifASCII, 0, nil))
+	_ = binary.Write(&sub, order, uint32(0))
+	sub.Write(comment)
+	entries := [][]byte{
+		entryBytes(order, 0x0112, exifShort, 1, []byte{0, 6}),
+		entryBytes(order, 0x8769, exifLong, 1, binary.BigEndian.AppendUint32(nil, 38)),
+	}
+	x, err := decodeEXIF(tiffBlock(order, entries, 0, sub.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, ok := x.tags[userCommentField]
+	if !ok {
+		t.Fatal("UserComment was dropped with the odd entry beside it")
+	}
+	if text, _ := tag.userCommentText(); text != "Steps: 20" {
+		t.Errorf("UserComment = %q", text)
 	}
 }
 

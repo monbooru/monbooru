@@ -1,0 +1,81 @@
+{{define "partials/tag_global_dialog.html"}}
+<dialog id="make-global-dialog">
+  <p class="dlg-title"><span id="make-global-scope"></span>{{template "webui/dialog_x"}}</p>
+  <p style="font-size:12px">A global tag is the same tag in every gallery: its name, category, aliases, what it implies and its note. Images and counts stay per gallery. Editing it in one gallery edits it in all.</p>
+  <div id="make-global-check" style="font-size:12px"></div>
+  <div id="make-global-flash"></div>
+  <div class="dialog-actions">
+    <button type="button" id="make-global-confirm" onclick="confirmMakeGlobal()">Make global</button>
+    <button type="button" onclick="document.getElementById('make-global-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+<script>
+var makeGlobalParams = null;
+var makeGlobalDone = null;
+
+function openMakeGlobal(params, label, onOK) {
+  makeGlobalParams = params;
+  makeGlobalDone = onOK;
+  document.getElementById('make-global-scope').textContent = 'Make ' + label + ' global';
+  document.getElementById('make-global-dialog').showModal();
+  checkMakeGlobal(false);
+}
+
+function checkMakeGlobal(merge) {
+  var values = Object.fromEntries(makeGlobalParams);
+  if (merge) values.merge = '1';
+  clearSlots('make-global-flash');
+  document.getElementById('make-global-confirm').disabled = true;
+  document.getElementById('make-global-check').textContent = 'Checking every gallery…';
+  htmx.ajax('POST', '/tags/global/check', {target: '#make-global-check', swap: 'innerHTML', values: values});
+}
+
+['htmx:responseError', 'htmx:sendError'].forEach(function (name) {
+  document.body.addEventListener(name, function (e) {
+    var slot = document.getElementById('make-global-check');
+    if (e.detail.target !== slot) return;
+    slot.textContent = '';
+    setFlashText(document.getElementById('make-global-flash'), 'err', 'The check failed.');
+  });
+});
+
+function confirmMakeGlobal() {
+  var params = new URLSearchParams(makeGlobalParams);
+  var merge = document.getElementById('make-global-merge');
+  if (merge && merge.checked) params.set('merge', '1');
+  clearSlots('make-global-flash');
+  postForm('/tags/global', params, {
+    dialogId: 'make-global-dialog',
+    flashId: 'make-global-flash',
+    failMsg: 'Make global failed.',
+    catchMsg: 'Make global request failed.',
+    onOK: makeGlobalDone
+  });
+}
+</script>
+{{end}}
+
+{{define "partials/tag_global_check.html"}}
+{{if .Error}}<p style="color:var(--error)">{{.Error}}</p>
+{{else}}
+{{range .Report.Galleries}}{{if .Any}}
+<p><strong>{{.Name}}</strong> gets {{globalCounts .Counts}}.</p>
+{{end}}{{end}}
+{{if not .Changes}}<p style="color:var(--fg-dim)">{{if .Report.Global}}Every gallery already has {{if eq (len .Report.Global) 1}}it{{else}}them{{end}}; only the mark is set.{{else}}Nothing can be made global.{{end}}</p>{{end}}
+{{if .Report.ComesAlong}}
+<p style="color:var(--fg-dim)">{{if eq (len .Report.ComesAlong) 1}}Comes{{else}}Come{{end}} along, being implied: {{range $i, $k := .ComesAlong}}{{if $i}}, {{end}}{{$k}}{{end}}{{if .MoreAlong}} and {{.MoreAlong}} more{{end}}.</p>
+{{end}}
+{{if .Local}}
+<p style="color:var(--error);margin-top:10px">{{.LocalTags}} tag{{if ne .LocalTags 1}}s{{end}} stay{{if eq .LocalTags 1}}s{{end}} local:</p>
+<ul class="make-global-local">
+{{range .Local}}<li>{{.Tag}}: {{.Reason}}</li>
+{{end}}{{if .MoreLocal}}<li>and {{.MoreLocal}} more</li>{{end}}
+</ul>
+{{end}}
+{{if or .Mergeable .Merge}}
+<label style="display:block;margin-top:6px"><input type="checkbox" id="make-global-merge"{{if .Merge}} checked{{end}} onchange="checkMakeGlobal(this.checked)"> Merge a tag that has images or rules of its own into the global tag it is an alias of. This cannot be undone.</label>
+{{end}}
+<span id="make-global-ready" data-ready="{{if .Report.Global}}1{{end}}" hidden></span>
+{{end}}
+<script>document.getElementById('make-global-confirm').disabled = !document.querySelector('#make-global-ready[data-ready="1"]');</script>
+{{end}}

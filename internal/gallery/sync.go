@@ -132,6 +132,18 @@ func Sync(ctx context.Context, h Handle, maxFileSizeMB int, naming Naming, progr
 	// reorganise a tree the operator arranged before monbooru saw it.
 	adopting := len(bySHA) == 0
 
+	// A canonical file goes before its copies: rewritten alike, the copy
+	// met first would take the new bytes as an image of its own.
+	slices.SortStableFunc(found, func(a, b syncFileInfo) int {
+		switch ca, cb := known[a.path].canonical, known[b.path].canonical; {
+		case ca && !cb:
+			return -1
+		case cb && !ca:
+			return 1
+		}
+		return 0
+	})
+
 	var ingested []int64
 	changed := 0
 	for i, fi := range found {
@@ -723,6 +735,11 @@ func applyInPlaceEdit(h Handle, path, newSHA, newMD5 string, newMtime, newMtimeN
 			newSHA, newMD5, newSize, fileType, facts.width, facts.height, facts.pageCount, facts.durationSec, facts.sourceType, newSHA, imageID,
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
+		}
+		if oldSHA != newSHA {
+			if _, err := tx.Exec(`DELETE FROM image_tagger_runs WHERE image_id = ?`, imageID); err != nil {
+				return fmt.Errorf("forget tagger runs: %w", err)
+			}
 		}
 		// A placeholder read keeps its bytes, so its copies still match.
 		if err := rewroteBytesTx(tx, imageID, oldSHA != newSHA, facts.sd, facts.comfy); err != nil {

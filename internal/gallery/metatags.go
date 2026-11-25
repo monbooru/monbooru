@@ -227,6 +227,38 @@ func heldMetaTags(database *db.DB, imageID int64) (map[int64]bool, error) {
 	return out, nil
 }
 
+// SilentVideos is the ids among ids that monbooru tagged video and not
+// sound. A file it never tagged, or tagged with no ffprobe to probe the
+// sound, is left out: its sound is unknown.
+func SilentVideos(database *db.DB, ids []int64) ([]int64, error) {
+	out := []int64{}
+	if len(ids) == 0 || !ffprobeAvailable() {
+		return out, nil
+	}
+	metaCat, err := metaCategoryID(database)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := resolveMetaNames(database, metaCat, []string{"video", "sound"})
+	if err != nil {
+		return nil, err
+	}
+	video, ok := resolved["video"]
+	if !ok {
+		return out, nil
+	}
+	err = db.Chunked(ids, 500, func(chunk []int64) error {
+		in, args := db.InPlaceholders(chunk)
+		got, err := db.QueryIDs(database.Read,
+			`SELECT s.image_id FROM image_tag_sources s WHERE s.source = ? AND s.tag_id = ? AND s.image_id IN (`+in+`)
+			 AND NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = ? AND it.image_id = s.image_id)`,
+			append([]any{models.TagSourceMonbooru, video}, append(args, resolved["sound"])...)...)
+		out = append(out, got...)
+		return err
+	})
+	return out, err
+}
+
 // Names with no row yet are left out; creating them is the caller's write.
 func resolveMetaNames(database *db.DB, metaCatID int64, names []string) (map[string]int64, error) {
 	out := make(map[string]int64, len(names))

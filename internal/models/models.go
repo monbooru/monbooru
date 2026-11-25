@@ -217,6 +217,7 @@ type Tag struct {
 	CanonicalName          string // alias rows only, from the queries that join the canonical
 	CanonicalCategoryName  string
 	CanonicalCategoryColor string
+	ViaAlias               string
 	CreatedAt              time.Time
 	Origin                 string    // creation provenance label; "" when not recorded
 	LastUsedAt             time.Time // zero when never applied to an image
@@ -225,6 +226,7 @@ type Tag struct {
 	FoldedInto             string    // corrected spelling on the folded-duplicates view; "" otherwise
 	Rejected               bool      // a name mapped to nothing: every add path drops it
 	RejectedDrops          int       // arrivals dropped since the reject
+	Global                 bool
 }
 
 type TagCategory struct {

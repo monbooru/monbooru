@@ -17,6 +17,7 @@ import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/schedule"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 	"github.com/monbooru/monbooru/internal/shared/desktop"
@@ -38,6 +39,7 @@ type settingsData struct {
 	TaggerRows         []taggerRow
 	ScheduleStatus     schedule.Status
 	ScheduleScope      scheduleScope
+	ScheduleAutotag    scheduleAutotag
 	Stats              statsData
 	ExecutionProviders []struct{ Name, Label string }
 	Workers            workersData
@@ -114,6 +116,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		TaggerRows:         taggerRows,
 		ScheduleStatus:     s.sched.Status(),
 		ScheduleScope:      scheduleScopeView(cfg, taggers, base.MonloaderPaired),
+		ScheduleAutotag:    scheduleAutotagView(cfg, taggers, tagger.CurrentPool().Workers()),
 		Stats:              s.gatherStats(),
 		ExecutionProviders: config.ExecutionProviders,
 		Workers:            workers,
@@ -156,6 +159,11 @@ func (s *Server) settingsSchedulePost(w http.ResponseWriter, r *http.Request) {
 	if !config.IsValidScheduleMode(mode) {
 		mode = config.ScheduleAtTime
 	}
+	autotag, refusal := scheduleAutotagForm(r)
+	if refusal != "" {
+		writeInlineFlash(w, "err", refusal)
+		return
+	}
 	if err := s.withConfig(func(c *config.Config) error {
 		c.Schedule.Time = timeVal
 		c.Schedule.Mode = mode
@@ -170,6 +178,7 @@ func (s *Server) settingsSchedulePost(w http.ResponseWriter, r *http.Request) {
 			c.Schedule.LookupBooru = r.FormValue("lookup_booru") == "on"
 		}
 		c.Schedule.Galleries = scheduleGalleriesForm(r, c.Schedule.Galleries, c.Galleries)
+		autotag(c)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -212,6 +221,105 @@ func scheduleGalleriesForm(r *http.Request, lists map[string][]string, galleries
 		return nil
 	}
 	return out
+}
+
+type scheduleAutotag struct {
+	Show        bool
+	ShowTaggers bool
+	EveryTagger bool
+	Taggers     []scheduleChoice
+	ShowWorkers bool
+	AnyWorker   bool
+	Workers     []scheduleChoice
+	MaxImages   int
+}
+
+type scheduleChoice struct {
+	Name string
+	Hint string
+	On   bool
+}
+
+// Each group shows once there are two to choose from, or while a list is
+// set, which would otherwise narrow the run unseen.
+func scheduleAutotagView(cfg *config.Config, taggers []tagger.TaggerStatus, workers []tagger.WorkerView) scheduleAutotag {
+	o := cfg.Schedule.AutotagOptions()
+	v := scheduleAutotag{EveryTagger: len(o.Taggers) == 0, AnyWorker: len(o.Workers) == 0, MaxImages: o.MaxImages}
+	for _, t := range taggers {
+		if t.Enabled {
+			v.Taggers = append(v.Taggers, scheduleChoice{Name: t.Name, On: slices.Contains(o.Taggers, t.Name)})
+		}
+	}
+	for _, w := range workers {
+		hint := fmt.Sprintf("%d at once", max(1, w.Info.Slots))
+		if w.Info.Provider != "" {
+			hint = config.ExecutionProviderLabel(w.Info.Provider) + ", " + hint
+		}
+		switch {
+		case w.Local:
+			hint += ", this machine"
+		case w.OnDemand:
+			hint += ", on demand"
+		case w.Paused:
+			hint += ", paused"
+		case !w.Up:
+			hint += ", offline"
+		}
+		v.Workers = append(v.Workers, scheduleChoice{Name: w.Name, Hint: hint, On: slices.Contains(o.Workers, w.Name)})
+	}
+	v.ShowTaggers = len(v.Taggers) > 1 || !v.EveryTagger
+	v.ShowWorkers = len(v.Workers) > 1 || !v.AnyWorker
+	v.Show = len(v.Taggers) > 0
+	return v
+}
+
+// scheduleAutotagForm reads the auto-tag block and returns the write to
+// apply, or why the form is refused; a group the page did not draw keeps
+// its list.
+func scheduleAutotagForm(r *http.Request) (func(*config.Config), string) {
+	if r.FormValue("autotag_opts") == "" {
+		return func(*config.Config) {}, ""
+	}
+	on := r.FormValue("run_auto_taggers") == "on"
+	taggersDrawn, workersDrawn := r.FormValue("autotag_taggers_drawn") != "", r.FormValue("autotag_workers_drawn") != ""
+	everyTagger := r.FormValue("every_autotag_taggers") == "on"
+	anyWorker := r.FormValue("autotag_worker_mode") != "named"
+	pickedTaggers, pickedWorkers := r.Form["on_autotag_taggers"], r.Form["autotag_worker"]
+	if on && taggersDrawn && !everyTagger && len(pickedTaggers) == 0 {
+		return nil, "Tick a tagger."
+	}
+	if on && workersDrawn && !anyWorker && len(pickedWorkers) == 0 {
+		return nil, "Tick a worker."
+	}
+	maxImages := 0
+	if v := strings.TrimSpace(r.FormValue("autotag_max_images")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, "The image limit must be a number above 0, or empty."
+		}
+		maxImages = n
+	}
+	return func(c *config.Config) {
+		o := c.Schedule.AutotagOptions()
+		o.MaxImages = maxImages
+		switch {
+		case !taggersDrawn:
+		case everyTagger:
+			o.Taggers = nil
+		case len(pickedTaggers) > 0:
+			o.Taggers = slices.Clone(pickedTaggers)
+		}
+		switch {
+		case !workersDrawn:
+		case anyWorker:
+			o.Workers = nil
+		case len(pickedWorkers) > 0:
+			o.Workers = slices.DeleteFunc(slices.Clone(pickedWorkers), func(name string) bool {
+				return name != config.LocalWorkerName && peer.FindWorker(c, name) == nil
+			})
+		}
+		c.Schedule.SetAutotagOptions(o)
+	}, ""
 }
 
 type scheduleScope struct {

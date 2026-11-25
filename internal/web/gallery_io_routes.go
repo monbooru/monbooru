@@ -34,6 +34,7 @@ func (s *Server) importGallery(name, format string, upload io.Reader) (int, erro
 	if err := s.startRebuildThumbsJob(newCx); err != nil {
 		logx.Infof("gallery %q: skipped post-import rebuild: %v", name, err)
 	}
+	s.queueGlobalPull(name)
 	return leftOut, nil
 }
 

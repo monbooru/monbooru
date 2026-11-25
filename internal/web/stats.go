@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/desktop"
+	"github.com/monbooru/monbooru/internal/tagger"
 )
 
 type galleryDBStats struct {
@@ -41,7 +42,7 @@ type statsData struct {
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
-	Tagger     []workerStats
+	Tagger     taggerStats
 }
 
 // Cheap by design: no directory walks.
@@ -123,26 +124,43 @@ func (s *Server) gatherStats() statsData {
 	return out
 }
 
-func gatherTaggerStats(s *Server) []workerStats {
+// taggerStats is the Stats block: each worker, and while calls run, which
+// side they wait on.
+type taggerStats struct {
+	Workers []workerStats
+	Load    tagger.Load
+}
+
+func gatherTaggerStats(s *Server) taggerStats {
 	rows := s.workersView().Rows
 	out := make([]workerStats, 0, len(rows))
 	for _, r := range rows {
 		st := workerStats{Name: r.Name, Provider: r.Provider, State: r.State, Up: r.Dot == "ok", Loaded: r.Loaded}
-		// The models live in the worker's inference child, so its memory
-		// counts with the worker's.
-		if pid := s.peers.PID(localWorkerName); r.Local && !r.Disabled && pid > 0 {
-			st.WorkerPID = pid
-			for _, p := range append([]int{pid}, procChildren(pid)...) {
-				if rss, ok := desktop.ProcRSS(p); ok {
-					st.WorkerRSS += int64(rss.Total)
-					st.WorkerAnon += int64(rss.Anon)
-					st.WorkerFile += int64(rss.File)
-				}
-			}
+		if r.Local && !r.Disabled {
+			var rss desktop.RSS
+			st.WorkerPID, rss = s.localWorkerRSS()
+			st.WorkerRSS, st.WorkerAnon, st.WorkerFile = int64(rss.Total), int64(rss.Anon), int64(rss.File)
 		}
 		out = append(out, st)
 	}
-	return out
+	return taggerStats{Workers: out, Load: tagger.CurrentPool().Load()}
+}
+
+// The models live in the worker's inference child, so its memory counts
+// with the worker's.
+func (s *Server) localWorkerRSS() (pid int, rss desktop.RSS) {
+	pid = s.peers.PID(localWorkerName)
+	if pid <= 0 {
+		return 0, rss
+	}
+	for _, p := range append([]int{pid}, procChildren(pid)...) {
+		if r, ok := desktop.ProcRSS(p); ok {
+			rss.Total += r.Total
+			rss.Anon += r.Anon
+			rss.File += r.File
+		}
+	}
+	return pid, rss
 }
 
 // procChildren reads every thread's list: a child is listed under the

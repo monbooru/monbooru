@@ -165,6 +165,22 @@ func TestMoveImage_IntoSubfolder(t *testing.T) {
 	}
 }
 
+func TestPlaceImage_RefusesAnUnreadableRootBeforeCreatingTheFolder(t *testing.T) {
+	database, env, galleryDir := setupSyncTest(t)
+	srcPath := createTestPNGFile(t, galleryDir, "original.png")
+	rec, _ := mustIngest(t, database, galleryDir, env.thumbnailsPath, srcPath, "")
+	if err := os.Rename(galleryDir, galleryDir+".away"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := moveTo(database, galleryDir, rec.ID, "2026/april"); !errors.Is(err, ErrRootUnreadable) {
+		t.Fatalf("err = %v, want ErrRootUnreadable", err)
+	}
+	if _, err := os.Stat(galleryDir); !os.IsNotExist(err) {
+		t.Errorf("the gallery folder was created again (err=%v)", err)
+	}
+}
+
 func TestAFolderNamedWithTwoLeadingDotsIsInsideTheGallery(t *testing.T) {
 	database, env, galleryDir := setupSyncTest(t)
 	dir := filepath.Join(galleryDir, "..drafts")

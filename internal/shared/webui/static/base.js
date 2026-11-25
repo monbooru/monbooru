@@ -23,6 +23,30 @@ function setFlashText(slot, kind, text) {
   slot.appendChild(d);
 }
 
+function handleSuggestKey(e, dropdownId, inputId) {
+  var dd = document.getElementById(dropdownId);
+  if (!dd) return;
+  var items = Array.from(dd.querySelectorAll('.suggest-item'));
+  var focused = dd.querySelector('.suggest-item.kbd-focused');
+  var idx = focused ? items.indexOf(focused) : -1;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items.forEach(function(i){ i.classList.remove('kbd-focused'); });
+    idx = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+    if (idx >= 0) {
+      items[idx].classList.add('kbd-focused');
+      items[idx].scrollIntoView({ block: 'nearest' });
+    }
+  } else if (e.key === 'Enter' && focused) {
+    e.preventDefault();
+    focused.click();
+  } else if (e.key === 'Escape') {
+    // An open list takes this Escape, so a dialog around the input stays open.
+    if (dd.childElementCount > 0) e.preventDefault();
+    dd.innerHTML = '';
+  }
+}
+
 function writeStash(key, obj) {
   obj.t = Date.now();
   try { sessionStorage.setItem(key, JSON.stringify(obj)); } catch (e) {}
@@ -478,6 +502,18 @@ function fitPairNotice() {
 }
 fitPairNotice();
 document.fonts.ready.then(fitPairNotice);
+
+function showActiveNav() {
+  const nav = document.getElementById('nav');
+  const active = nav && nav.querySelector('a.active');
+  if (!active) return;
+  const notice = nav.querySelector('.pair-notice:not([hidden])');
+  const edge = notice && getComputedStyle(notice).position === 'sticky' ? notice.getBoundingClientRect().left : nav.getBoundingClientRect().right;
+  const over = active.getBoundingClientRect().right - edge;
+  if (over > 0) nav.scrollLeft += over + 24;
+}
+showActiveNav();
+document.fonts.ready.then(showActiveNav);
 let fitFrame = 0;
 window.addEventListener('resize', function() {
   cancelAnimationFrame(fitFrame);
@@ -488,6 +524,7 @@ document.body.addEventListener('htmx:oobAfterSwap', function(e) {
     syncPairTitle();
     fitPairNotice();
   }
+  if (e.detail && e.detail.target && e.detail.target.classList.contains('pair-notice')) showActiveNav();
 });
 
 // History restore swaps with neither target nor xhr.
@@ -651,7 +688,7 @@ function folderNewClose(picker) {
 document.addEventListener('click', function(e) {
   var picker = e.target.closest('.folder-picker');
   document.querySelectorAll('.folder-picker .suggest-dropdown').forEach(function(d) {
-    if (!picker || !picker.contains(d)) d.innerHTML = '';
+    if (!picker || !picker.contains(d) || !e.target.closest('.folder-picker-input')) d.innerHTML = '';
   });
   if (!picker) return;
   var t = e.target;
@@ -692,6 +729,12 @@ document.addEventListener('click', function(e) {
   } else if (t.closest('[data-folder-pick]') && !t.closest('.folder-new-form')) {
     folderPick(picker, t.closest('[data-folder-pick]').dataset.folderPick);
   }
+});
+
+document.body.addEventListener('htmx:beforeSwap', function(e) {
+  var slot = e.detail.target;
+  if (!slot || !slot.matches || !slot.matches('.folder-picker .suggest-dropdown')) return;
+  if (document.activeElement !== slot.parentNode.querySelector('input')) e.detail.shouldSwap = false;
 });
 
 // Enter in the new folder's name takes it rather than submitting the form.

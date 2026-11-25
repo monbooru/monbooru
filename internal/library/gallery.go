@@ -262,8 +262,8 @@ func Open(g config.Gallery) (*Gallery, error) {
 	}
 	gallery.SweepStaleTemps(filepath.Dir(g.DBPath), processStart)
 	degraded := false
-	if _, err := os.ReadDir(g.GalleryPath); err != nil {
-		logx.Warnf("gallery %q: path %q unreadable: %v - degraded mode", g.Name, g.GalleryPath, err)
+	if err := gallery.RootReadable(g.GalleryPath); err != nil {
+		logx.Warnf("gallery %q: %v - degraded mode", g.Name, err)
 		degraded = true
 	}
 	cx, err := New(gallery.Handle{

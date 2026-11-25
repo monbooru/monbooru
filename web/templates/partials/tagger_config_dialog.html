@@ -34,6 +34,7 @@
     <p class="field-hint">Threshold sets the minimum confidence a tag in this category needs to be added. <span class="status-badge status-ok">this tagger</span><span class="status-badge status-off">at tagging</span><br>
       Max tags caps how many tags the auto-tagger adds in this category per image. (set to 0 to keep every tag)<br>
       Disable a category to stop this tagger emitting it at all.</p>
+    <div class="table-scroll">
     <table class="tagger-thresh-table">
       <thead><tr><th>Category</th><th>Threshold</th><th>Max tags</th><th>Enable</th><th></th></tr></thead>
       <tbody>
@@ -75,6 +76,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </div>
   <div class="dialog-panel tc-mappings" id="tc-mappings-{{.Name}}" hidden>
     <p class="field-hint">Rules rename a label, change its category, or drop it for this tagger. <span class="status-badge status-ok">this tagger</span><span class="status-badge status-off">at tagging</span><br>

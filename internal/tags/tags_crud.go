@@ -204,6 +204,8 @@ func lookupTag(q db.RowQuerier, name string, categoryID int64) (*models.Tag, err
 	return &tag, nil
 }
 
+const globalTagWhere = `(t.is_global = 1 OR EXISTS (SELECT 1 FROM tags g WHERE g.id = t.canonical_tag_id AND g.is_global = 1))`
+
 func tagFilterWhere(filter TagFilter) (string, []any) {
 	args := []any{}
 	where := "1=1"
@@ -221,6 +223,12 @@ func tagFilterWhere(filter TagFilter) (string, []any) {
 		}
 		where += " AND t.name LIKE ? ESCAPE '\\'"
 		args = append(args, pat)
+	}
+	switch filter.Scope {
+	case "global":
+		where += " AND " + globalTagWhere
+	case "local":
+		where += " AND NOT " + globalTagWhere
 	}
 	switch filter.Origin {
 	case "":
@@ -336,7 +344,7 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 	query := fmt.Sprintf(
 		`SELECT t.id, t.name, t.category_id, tc.name, tc.color,
 		        t.usage_count, t.is_alias, t.canonical_tag_id, t.created_at,
-		        t.origin, t.last_used_at, t.rejected, t.rejected_drops,
+		        t.origin, t.last_used_at, t.rejected, t.rejected_drops, COALESCE((SELECT g.is_global FROM tags g WHERE g.id = t.canonical_tag_id), t.is_global),
 		        (SELECT COUNT(*) FROM image_tags it WHERE it.tag_id = t.id AND it.stale = 1),
 		        %s,
 		        c.name, cc.name, cc.color
@@ -357,7 +365,7 @@ func (s *Service) ListTags(filter TagFilter) ([]models.Tag, int, error) {
 		if err := rows.Scan(
 			&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor,
 			&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt,
-			&t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops, &t.StaleUsage, &foldedInto,
+			&t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops, &t.Global, &t.StaleUsage, &foldedInto,
 			&canonName, &canonCatName, &canonCatColor,
 		); err != nil {
 			return t, err
@@ -458,6 +466,7 @@ func (s *Service) UnusedTags() (plain, kept []int64, err error) {
 		        OR EXISTS (SELECT 1 FROM tag_implications i WHERE i.parent_tag_id = t.id)
 		        OR EXISTS (SELECT 1 FROM tag_implications i WHERE i.implied_tag_id = t.id)
 		        OR EXISTS (SELECT 1 FROM tag_notes n WHERE n.tag_id = t.id AND (n.body != '' OR n.links != ''))
+		        OR t.is_global = 1
 		   FROM tags t
 		  WHERE t.is_alias = 0 AND t.rejected = 0 AND t.category_id != ?
 		    AND NOT EXISTS (SELECT 1 FROM image_tags it WHERE it.tag_id = t.id)
@@ -477,9 +486,10 @@ func (s *Service) UnusedTags() (plain, kept []int64, err error) {
 
 // TagResetScope is everything a tag reset deletes: the aliases pointing at
 // one of the four ratings, which no canonical delete sweeps, then every
-// plain tag but those four. Deleting the canonicals takes every other alias
-// and every implication with them.
-func (s *Service) TagResetScope() (ratingAliases, ids []int64, aliases, implications int, err error) {
+// plain tag but those four and the global ones. Deleting the canonicals
+// takes their aliases and every implication they are part of with them.
+// The global tags are taken off the images and kept with their rules.
+func (s *Service) TagResetScope() (ratingAliases, ids, global []int64, aliases, implications int, err error) {
 	canonical := []any{s.ratingCatID}
 	for _, level := range contract.RatingLevels {
 		canonical = append(canonical, level)
@@ -487,16 +497,24 @@ func (s *Service) TagResetScope() (ratingAliases, ids []int64, aliases, implicat
 	if ratingAliases, err = db.QueryIDs(s.db.Read,
 		`SELECT a.id FROM tags a JOIN tags c ON c.id = a.canonical_tag_id
 		  WHERE a.is_alias = 1 AND c.category_id = ? AND c.name IN (?, ?, ?, ?) ORDER BY a.id`, canonical...); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, nil, 0, 0, err
 	}
 	if ids, err = db.QueryIDs(s.db.Read,
-		`SELECT id FROM tags WHERE is_alias = 0 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
-		return nil, nil, 0, 0, err
+		`SELECT id FROM tags WHERE is_alias = 0 AND is_global = 0 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
+		return nil, nil, nil, 0, 0, err
+	}
+	if global, err = db.QueryIDs(s.db.Read,
+		`SELECT id FROM tags WHERE is_alias = 0 AND is_global = 1 AND NOT (category_id = ? AND name IN (?, ?, ?, ?)) ORDER BY id`, canonical...); err != nil {
+		return nil, nil, nil, 0, 0, err
 	}
 	err = s.db.Read.QueryRow(
-		`SELECT (SELECT COUNT(*) FROM tags WHERE is_alias = 1), (SELECT COUNT(*) FROM tag_implications)`,
+		`SELECT (SELECT COUNT(*) FROM tags a WHERE a.is_alias = 1
+		          AND NOT EXISTS (SELECT 1 FROM tags c WHERE c.id = a.canonical_tag_id AND c.is_global = 1)),
+		        (SELECT COUNT(*) FROM tag_implications i
+		          WHERE NOT EXISTS (SELECT 1 FROM tags p WHERE p.id = i.parent_tag_id AND p.is_global = 1)
+		             OR NOT EXISTS (SELECT 1 FROM tags v WHERE v.id = i.implied_tag_id AND v.is_global = 1))`,
 	).Scan(&aliases, &implications)
-	return ratingAliases, ids, aliases, implications, err
+	return ratingAliases, ids, global, aliases, implications, err
 }
 
 func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, err error) {
@@ -531,7 +549,8 @@ func (s *Service) AdjacentTags(filter TagFilter, id int64) (prev, next *int64, e
 }
 
 const tagSelect = `SELECT t.id, t.name, t.category_id, tc.name, tc.color, t.usage_count,
-	        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at, t.rejected, t.rejected_drops
+	        t.is_alias, t.canonical_tag_id, t.created_at, t.origin, t.last_used_at, t.rejected, t.rejected_drops,
+	        COALESCE((SELECT g.is_global FROM tags g WHERE g.id = t.canonical_tag_id), t.is_global)
 	 FROM tags t
 	 JOIN tag_categories tc ON tc.id = t.category_id`
 
@@ -542,7 +561,7 @@ func scanTag(row interface{ Scan(...any) error }) (*models.Tag, error) {
 	var lastUsed sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.CategoryColor,
-		&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt, &t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops,
+		&t.UsageCount, &isAlias, &t.CanonicalTagID, &createdAt, &t.Origin, &lastUsed, &t.Rejected, &t.RejectedDrops, &t.Global,
 	); err != nil {
 		return nil, err
 	}
@@ -866,9 +885,12 @@ func (s *Service) DeleteTag(id int64) error {
 		return err
 	}
 	if locked {
-		return s.stripTagFromAllImages(id)
+		return s.StripTagFromAllImages(id)
 	}
 	return s.inWriteTx(func(tx *sql.Tx) error {
+		if err := refuseGlobalTx(tx, id); err != nil {
+			return err
+		}
 		if err := deleteTagsTx(tx, []int64{id}); err != nil {
 			return err
 		}
@@ -883,7 +905,7 @@ func (s *Service) DeleteTag(id int64) error {
 	})
 }
 
-func (s *Service) stripTagFromAllImages(tagID int64) error {
+func (s *Service) StripTagFromAllImages(tagID int64) error {
 	return s.inWriteTx(func(tx *sql.Tx) error {
 		if err := stripTagsTx(tx, []int64{tagID}); err != nil {
 			return err
@@ -1143,4 +1165,27 @@ func (s *Service) changeTagCategoryTx(tx *sql.Tx, tagID, newCategoryID int64, ne
 	}
 	_, err = tx.Exec(`UPDATE tags SET name = ?, category_id = ? WHERE id = ?`, newName, newCategoryID, tagID)
 	return err
+}
+
+func refuseGlobalTx(tx *sql.Tx, id int64) error {
+	var global bool
+	err := tx.QueryRow(`SELECT is_global FROM tags WHERE id = ? AND is_alias = 0`, id).Scan(&global)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if global {
+		return ErrTagGlobal
+	}
+	return nil
+}
+
+func (s *Service) SetGlobal(ids []int64, on bool) error {
+	return s.inWriteTx(func(tx *sql.Tx) error {
+		for _, id := range ids {
+			if _, err := tx.Exec(`UPDATE tags SET is_global = ? WHERE id = ? AND is_alias = 0 AND rejected = 0`, on, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

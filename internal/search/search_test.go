@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -154,6 +155,29 @@ func TestUnreadable_Grouping(t *testing.T) {
 	} {
 		if got := Unreadable(tc.in); !slices.Equal(got, tc.want) {
 			t.Errorf("Unreadable(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestParse_AQueryOfTooManyTermsMatchesNothing(t *testing.T) {
+	database, _ := setupSearchDB(t)
+	seedWalkFixture(t, database)
+	if got := Unreadable(strings.Repeat("walk_a ", 500)); got != nil {
+		t.Errorf("500 terms: Unreadable = %q, want nil", got)
+	}
+	for name, q := range map[string]string{
+		"501 terms":    strings.Repeat("walk_a ", 501),
+		"chained NOTs": strings.Repeat("-", 300000) + "walk_a",
+		"plain terms":  strings.Repeat("walk_a ", 300000),
+	} {
+		if got := Unreadable(q); !slices.Equal(got, []string{"query too long"}) {
+			t.Errorf("%s: Unreadable = %q, want query too long", name, got)
+		}
+		res, err := Execute(context.Background(), testSource(database), Query{Expr: Parse(q), Page: 1, Limit: 4})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+		} else if len(res.Results) != 0 || res.Total != 0 {
+			t.Errorf("%s: %d rows of %d, want none", name, len(res.Results), res.Total)
 		}
 	}
 }
@@ -3553,6 +3577,97 @@ func TestExecute_DeferCountKeepsAFastCount(t *testing.T) {
 	}
 }
 
+func TestExecute_AnEmptyDeferredSearchIsRememberedUntilAWrite(t *testing.T) {
+	database, env := setupSearchDB(t)
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "kept-zero", Expr: Parse("width:>0"), DeferCount: true}
+	if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 0 {
+		t.Fatalf("empty library: unknown=%v total=%d, want known 0", res.TotalUnknown, res.Total)
+	}
+	ingestTestImage(t, database, env, "keptzero.png")
+	if res := mustExecute(t, database, q); res.Total != 0 || len(res.Results) != 0 {
+		t.Errorf("before the cache is dropped: total=%d rows=%d, want the remembered 0", res.Total, len(res.Results))
+	}
+	src.Cache.Drop()
+	if res := mustExecute(t, database, q); len(res.Results) != 1 {
+		t.Errorf("after the drop: rows=%d, want the new image", len(res.Results))
+	}
+}
+
+func TestCount_IsRememberedUntilAWrite(t *testing.T) {
+	database, env := setupSearchDB(t)
+	for i := range 3 {
+		ingestTestImage(t, database, env, "keptcount"+strconv.Itoa(i)+".png")
+	}
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "kept-count", Expr: Parse("width:>0"), DeferCount: true}
+	old := adjacencyCacheMaxIDs
+	adjacencyCacheMaxIDs = 2
+	t.Cleanup(func() { adjacencyCacheMaxIDs = old })
+	count := func() int {
+		t.Helper()
+		n, err := Count(context.Background(), src, q)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		return n
+	}
+	if n := count(); n != 3 {
+		t.Fatalf("Count = %d, want 3", n)
+	}
+	ingestTestImage(t, database, env, "keptcount3.png")
+	if n := count(); n != 3 {
+		t.Errorf("before the cache is dropped: Count = %d, want the remembered 3", n)
+	}
+	if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+		t.Errorf("the page after a count: unknown=%v total=%d, want the remembered 3", res.TotalUnknown, res.Total)
+	}
+	src.Cache.Drop()
+	if n := count(); n != 4 {
+		t.Errorf("after the drop: Count = %d, want 4", n)
+	}
+	if n, err := Count(context.Background(), src, Query{Expr: q.Expr}); err != nil || n != 4 {
+		t.Errorf("uncached query: Count = %d, %v; want 4", n, err)
+	}
+}
+
+func TestExecute_DeferCountDoesNotWaitForTheUntaggedTallies(t *testing.T) {
+	for _, filter := range []string{"tagged:true", "autotagged:true"} {
+		t.Run(filter, func(t *testing.T) {
+			database, env := setupSearchDB(t)
+			tag := getOrCreateTagID(t, database, "tally_wait")
+			for i := range 3 {
+				id := ingestTestImageWithID(t, database, env, "tally"+strconv.Itoa(i)+".png")
+				mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto, tagger_name) VALUES (?, ?, 1, 'wd')`, id, tag)
+			}
+			src := testSource(database)
+			q := Query{Expr: Parse(filter), Page: 1, Limit: 2, DeferCount: true}
+
+			if res := mustExecute(t, database, q); !res.TotalUnknown || len(res.Results) != 2 {
+				t.Fatalf("first page: unknown=%v rows=%d, want 2 rows and the total left to the count", res.TotalUnknown, len(res.Results))
+			}
+			if _, held := src.Tallies.UntaggedVisibleCountReady(); held {
+				t.Error("the page computed the untagged tally")
+			}
+			if _, held := src.Tallies.AutoUntaggedVisibleCountReady(); held {
+				t.Error("the page computed the auto-untagged tally")
+			}
+			if n, err := Count(context.Background(), src, q); err != nil || n != 3 {
+				t.Fatalf("Count = %d, %v; want 3", n, err)
+			}
+			if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+				t.Errorf("the page after the count: unknown=%v total=%d, want the fast 3", res.TotalUnknown, res.Total)
+			}
+
+			src.Tallies.Invalidate()
+			q.DeferCount = false
+			if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+				t.Errorf("a caller that counts in the request: unknown=%v total=%d, want 3", res.TotalUnknown, res.Total)
+			}
+		})
+	}
+}
+
 func pageIDs(res *models.SearchResult) []int64 {
 	ids := make([]int64, len(res.Results))
 	for i, img := range res.Results {
@@ -3631,6 +3746,24 @@ func TestExecute_Page1FansAfterTheAnswer(t *testing.T) {
 	}
 	if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 5 {
 		t.Errorf("the next visit: unknown=%v total=%d, want the cached 5", res.TotalUnknown, res.Total)
+	}
+}
+
+func TestExecute_AListThatLandedMeanwhileIsNotFannedAgain(t *testing.T) {
+	database, env := setupSearchDB(t)
+	for i := range 5 {
+		ingestTestImage(t, database, env, "refan"+strconv.Itoa(i)+".png")
+	}
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "re-fan", Expr: Parse("width:>0")}
+	landed := []int64{901, 902, 903}
+	src.Cache.Seed(q, landed)
+	total := 5
+	q.PresetTotal = &total
+	mustExecute(t, database, q)
+	waitForFan(t, src.Cache, q.listKey(Source{}))
+	if ids, _ := src.Cache.get(q.listKey(Source{})); !slices.Equal(ids, landed) {
+		t.Errorf("cached ids = %v, want the list that had landed %v: a second fan ran", ids, landed)
 	}
 }
 
@@ -4330,6 +4463,85 @@ func TestSuggestTagsWithFilter(t *testing.T) {
 	}
 	if got[0].UsageCount != 2 {
 		t.Errorf("expected combo count 2 for alpha+beta, got %d", got[0].UsageCount)
+	}
+}
+
+func TestSuggestTagsWithFilter_CountsAnAliasAsItsTag(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	for _, name := range []string{"alias1.png", "alias2.png", "alias3.png"} {
+		ingestTestImage(t, database, cfg, name)
+	}
+	ids, err := db.QueryIDs(database.Read, `SELECT id FROM images ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catID := categoryID(t, database, "general")
+	alpha := insertTag(t, database, "alpha", catID, 0)
+	canine := insertTag(t, database, "canine", catID, 0)
+	dogma := insertTag(t, database, "dogma", catID, 0)
+	mustExec(t, database.Write,
+		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('doggo', ?, 1, ?)`, catID, canine)
+	for _, pair := range [][2]int64{{ids[0], alpha}, {ids[1], alpha}, {ids[0], canine}, {ids[2], canine}, {ids[2], dogma}} {
+		mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto) VALUES (?, ?, 0)`, pair[0], pair[1])
+		mustExec(t, database.Write, `UPDATE tags SET usage_count = usage_count + 1 WHERE id = ?`, pair[1])
+	}
+
+	type row struct {
+		Name, ViaAlias string
+		Count          int
+	}
+	for _, tc := range []struct {
+		context string
+		want    []row
+	}{
+		{"", []row{{"canine", "doggo", 2}, {"dogma", "", 1}}},
+		{"alpha", []row{{"canine", "doggo", 1}}},
+	} {
+		var expr Expr
+		if tc.context != "" {
+			expr = Parse(tc.context)
+		}
+		got, err := SuggestTagsWithFilter(testSource(database), expr, "dog", "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := []row{}
+		for _, g := range got {
+			rows = append(rows, row{g.Name, g.ViaAlias, g.UsageCount})
+		}
+		if !reflect.DeepEqual(rows, tc.want) {
+			t.Errorf("context %q: got %v, want %v", tc.context, rows, tc.want)
+		}
+	}
+}
+
+func TestSuggestTagsWithFilter_KeepsRoomForEachTagAnAliasNames(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "room.png")
+	ids, err := db.QueryIDs(database.Read, `SELECT id FROM images ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catID := categoryID(t, database, "general")
+	alpha := insertTag(t, database, "alpha", catID, 1)
+	crowded := insertTag(t, database, "crowded", catID, 2)
+	other := insertTag(t, database, "other", catID, 1)
+	for _, tagID := range []int64{alpha, crowded, other} {
+		mustExec(t, database.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto) VALUES (?, ?, 0)`, ids[0], tagID)
+	}
+	for i := 0; i < suggestCandidateCap+5; i++ {
+		mustExec(t, database.Write,
+			`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES (?, ?, 1, ?)`, fmt.Sprintf("zz_%02d", i), catID, crowded)
+	}
+	mustExec(t, database.Write,
+		`INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('zz_second', ?, 1, ?)`, catID, other)
+
+	got, err := SuggestTagsWithFilter(testSource(database), Parse("alpha"), "zz", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "crowded" || got[0].ViaAlias != "zz_00" || got[1].Name != "other" || got[1].ViaAlias != "zz_second" {
+		t.Errorf("got %+v, want crowded through zz_00, then other through zz_second", got)
 	}
 }
 

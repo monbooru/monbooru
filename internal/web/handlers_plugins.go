@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -146,6 +145,20 @@ func (s *Server) pairedTokenInfo(app string) (string, []string) {
 	return "", nil
 }
 
+// pairedKey changes with any paired token, a re-pair's new one included.
+func (s *Server) pairedKey() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	var ids []string
+	for _, t := range s.cfg.Auth.Tokens {
+		if t.Paired != "" {
+			ids = append(ids, t.ID)
+		}
+	}
+	slices.Sort(ids)
+	return strings.Join(ids, ".")
+}
+
 func (s *Server) pairedPeerCount() int {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
@@ -179,7 +192,7 @@ func (s *Server) pairViewData() map[string]any {
 	plugins, _ := s.pendingCounts()
 	data := map[string]any{
 		"Pending":        s.pendingOffers(),
-		"Paired":         s.pairedPeerCount(),
+		"Paired":         s.pairedKey(),
 		"Notice":         n,
 		"PluginsPending": plugins,
 		"PairKey":        n.Key(),
@@ -242,12 +255,12 @@ func (s *Server) pendingOffers() []pendingOffer {
 
 func (s *Server) pluginPairingFragment(w http.ResponseWriter, r *http.Request) {
 	data := s.pairViewData()
-	count, _ := data["Paired"].(int)
 	if r.URL.Query().Get("pair") == data["PairKey"] {
 		delete(data, "Notice")
 	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", data)
-	if was := r.URL.Query().Get("paired"); was != "" && was != strconv.Itoa(count) {
+	s.win.markSeen()
+	if r.URL.Query().Has("paired") && r.URL.Query().Get("paired") != data["Paired"] {
 		s.renderPluginRows(w, r, true)
 		s.renderAuthTokensOOB(w, r)
 	}

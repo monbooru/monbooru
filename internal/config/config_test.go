@@ -1103,6 +1103,51 @@ func TestAnUpgradeThatTagsKeepsItsLocalWorker(t *testing.T) {
 	}
 }
 
+func TestAnUpgradeWithAModelAndNoTaggerEntryKeepsItsLocalWorker(t *testing.T) {
+	models := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(models, "wd-swinv2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(models, "wd-swinv2", "model.onnx"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("in the config", func(t *testing.T) {
+		path := writeConfig(t, baseTOML+"model_path = \""+models+"\"\n")
+		if !mustLoad(t, path).Tagger.LocalWorker {
+			t.Error("local_worker is off")
+		}
+	})
+	t.Run("in the environment", func(t *testing.T) {
+		t.Setenv("MONBOORU_PATHS_MODEL_PATH", models)
+		path := writeConfig(t, baseTOML+"model_path = \""+t.TempDir()+"\"\n")
+		if !mustLoad(t, path).Tagger.LocalWorker {
+			t.Error("local_worker is off")
+		}
+	})
+}
+
+func TestAnUpgradeStartsWhenItsConfigCannotBeWritten(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root, chmod has no effect")
+	}
+	path := writeConfig(t, baseTOML+"[tagger]\n\n[[tagger.taggers]]\nname = \"wd-swinv2\"\nenabled = true\n")
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if !mustLoad(t, path).Tagger.LocalWorker {
+		t.Error("local_worker is off in memory")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "local_worker") {
+		t.Errorf("the read-only config was written:\n%s", data)
+	}
+}
+
 func TestANewInstallStartsWithTheLocalWorkerOff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "monbooru.toml")
 	cfg, err := LoadWithDefaults(path, nil)
@@ -1115,5 +1160,50 @@ func TestANewInstallStartsWithTheLocalWorkerOff(t *testing.T) {
 	t.Setenv("MONBOORU_TAGGER_LOCAL_WORKER", "true")
 	if cfg := mustLoad(t, path); !cfg.Tagger.LocalWorker || cfg.EnvPinned("tagger.local_worker") != "MONBOORU_TAGGER_LOCAL_WORKER" {
 		t.Errorf("the variable did not turn it on: %v", cfg.Tagger.LocalWorker)
+	}
+}
+
+func TestScheduleAutotagRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "monbooru.toml")
+	cfg := Default()
+	if err := Save(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "[schedule.autotag]") {
+		t.Errorf("nothing is narrowed, yet the file carries the table:\n%s", raw)
+	}
+
+	cfg.Workers = []WorkerConfig{{Name: "gpu-box", URL: "http://10.0.0.2:8457", Token: "t"}}
+	cfg.Schedule.SetAutotagOptions(ScheduleAutotag{Workers: []string{"gpu-box", "local"}, Taggers: []string{"wd-swinv2"}, MaxImages: 500})
+	if err := Save(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	got := mustLoad(t, path).Schedule.AutotagOptions()
+	if !slices.Equal(got.Workers, []string{"gpu-box", "local"}) || !slices.Equal(got.Taggers, []string{"wd-swinv2"}) || got.MaxImages != 500 {
+		t.Errorf("options = %+v", got)
+	}
+}
+
+func TestScheduleAutotagDropsAWorkerThatIsGone(t *testing.T) {
+	path := writeConfig(t, baseTOML+`
+[[worker]]
+name = "gpu-box"
+url = "http://10.0.0.2:8457"
+token = "t"
+
+[schedule.autotag]
+workers = ["attic", "gpu-box"]
+`)
+	cfg := mustLoad(t, path)
+	if got := cfg.Schedule.AutotagOptions().Workers; !slices.Equal(got, []string{"gpu-box"}) {
+		t.Errorf("workers = %v, want gpu-box alone", got)
+	}
+	cfg.DropWorkerRefs("gpu-box")
+	if cfg.Schedule.Autotag != nil {
+		t.Errorf("the last worker left, yet the table stays: %+v", cfg.Schedule.Autotag)
 	}
 }

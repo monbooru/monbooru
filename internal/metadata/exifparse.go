@@ -66,9 +66,9 @@ type exifData struct {
 	tags map[string]*exifTag
 }
 
-// Every offset and length is checked against the block. Only the header
-// and IFD0 must parse: past them, what fails to decode is dropped, which
-// can lose tags but never surface a wrong one.
+// Every offset and length is checked against the block. Only the header and
+// IFD0's table must parse: an entry or a later directory that fails is
+// dropped, which can lose tags but never surface a wrong one.
 func decodeEXIF(data []byte) (*exifData, error) {
 	order, first, err := exifHeader(data)
 	if err != nil {
@@ -144,11 +144,9 @@ func exifDir(data []byte, order binary.ByteOrder, off uint64) ([]*exifTag, uint6
 	tags := make([]*exifTag, 0, n)
 	for i := uint64(0); i < n; i++ {
 		e := data[start+2+i*12:][:12]
-		tag, err := exifEntry(data, order, e)
-		if err != nil {
-			return nil, 0, err
+		if tag, err := exifEntry(data, order, e); err == nil {
+			tags = append(tags, tag)
 		}
-		tags = append(tags, tag)
 	}
 	return tags, uint64(order.Uint32(data[end-4 : end])), nil
 }

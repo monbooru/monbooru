@@ -1,6 +1,10 @@
 package web
 
 import (
+	"bytes"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -78,8 +82,16 @@ func TestNoLocalWorkerWithoutTheBinary(t *testing.T) {
 	w := &localWorker{addr: "127.0.0.1:47001"}
 	cfg := &config.Config{}
 	cfg.Tagger.LocalWorker = true
-	if w.apply(sup, cfg) {
-		t.Error("a worker runs with no monworker found")
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	for range 3 {
+		if w.apply(sup, cfg) {
+			t.Error("a worker runs with no monworker found")
+		}
+	}
+	if n := strings.Count(buf.String(), "no monworker beside monbooru or on PATH"); n != 1 {
+		t.Errorf("three config writes logged the missing monworker %d times, want once:\n%s", n, buf.String())
 	}
 }
 
@@ -99,6 +111,34 @@ func TestTheServerGivesThePoolItsLocalWorker(t *testing.T) {
 	}
 	if names := workerNames(srv); len(names) != 0 {
 		t.Errorf("pool = %v after the switch off", names)
+	}
+}
+
+func TestFreeMemoryRestartsTheLocalWorker(t *testing.T) {
+	path, envFile := standIn(t)
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	waitEnv(t, envFile, "MONWORKER_TOKEN=")
+	before := srv.peers.PID(localWorkerName)
+
+	if w := postForm(t, srv, "/settings/maintenance/free-memory", url.Values{}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "flash-ok") {
+		t.Fatalf("free memory: %d %s", w.Code, w.Body)
+	}
+	if after := srv.peers.PID(localWorkerName); after == 0 || after == before {
+		t.Errorf("the worker's pid is %d after, %d before: it did not restart", after, before)
+	}
+}
+
+func TestFreeMemoryStartsNoWorkerWhileItIsOff(t *testing.T) {
+	path, _ := standIn(t)
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	srv := newTestServerWith(t, false, nil)
+
+	if w := postForm(t, srv, "/settings/maintenance/free-memory", url.Values{}); w.Code != http.StatusOK {
+		t.Fatalf("free memory: %d %s", w.Code, w.Body)
+	}
+	if state := srv.peers.State(localWorkerName); state != "stopped" {
+		t.Errorf("the worker is %s after a free memory with local_worker off", state)
 	}
 }
 

@@ -288,15 +288,23 @@ func TestPairingFragmentRefreshesRowsOnTransition(t *testing.T) {
 	pairPeer(srv, "monloader")
 
 	rr := httptest.NewRecorder()
-	srv.pluginPairingFragment(rr, httptest.NewRequest("GET", "/internal/plugins/pairing?paired=0", nil))
+	srv.pluginPairingFragment(rr, httptest.NewRequest("GET", "/internal/plugins/pairing?paired=", nil))
 	body := rr.Body.String()
 	if !strings.Contains(body, `id="auth-tokens"`) || !strings.Contains(body, `id="plugin-rows"`) {
 		t.Errorf("transition should OOB-refresh the rows and the token list, got %q", body)
 	}
 
+	was := srv.pairedKey()
 	rr2 := httptest.NewRecorder()
-	srv.pluginPairingFragment(rr2, httptest.NewRequest("GET", "/internal/plugins/pairing?paired=1", nil))
+	srv.pluginPairingFragment(rr2, httptest.NewRequest("GET", "/internal/plugins/pairing?paired="+was, nil))
 	wantNotIn(t, rr2.Body.String(), "hx-swap-oob")
+
+	pairPeer(srv, "monloader")
+	rr3 := httptest.NewRecorder()
+	srv.pluginPairingFragment(rr3, httptest.NewRequest("GET", "/internal/plugins/pairing?paired="+was, nil))
+	if !strings.Contains(rr3.Body.String(), `id="auth-tokens"`) || !strings.Contains(rr3.Body.String(), `id="plugin-rows"`) {
+		t.Errorf("a re-pair should OOB-refresh the rows and the token list, got %q", rr3.Body.String())
+	}
 }
 
 func TestPairingPreservesConfiguredAPIURL(t *testing.T) {

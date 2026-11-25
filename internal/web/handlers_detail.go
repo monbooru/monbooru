@@ -113,6 +113,7 @@ type detailData struct {
 	GenericMeta       []models.SDParam
 	MangaMeta         *models.MangaMetadata
 	IsManga           bool
+	Silent            bool
 	MisnamedExt       string
 	ResumePage        int
 	MangaHint         string
@@ -303,6 +304,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		annotations []models.Annotation
 		sidebar     tagSidebar
 		lookupState lookupView
+		silent      []int64
 		prevID      *int64
 		nextID      *int64
 	)
@@ -331,6 +333,9 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if isManga {
 		wg.Go(func() { mangaMeta = loadMangaMeta(ctx, s.db(), id) })
+	}
+	if gallery.IsVideoType(img.FileType) {
+		wg.Go(func() { silent, _ = gallery.SilentVideos(s.db(), []int64{id}) })
 	}
 	if wantAdjacent {
 		wg.Go(func() {
@@ -462,6 +467,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		GenericMeta:       genericMeta,
 		MangaMeta:         mangaMeta,
 		IsManga:           isManga,
+		Silent:            len(silent) > 0,
 		MisnamedExt:       misnamedExt,
 		MangaHint:         mangaHint,
 		ResumePage:        resumePage(img),

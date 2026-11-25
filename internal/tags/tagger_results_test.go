@@ -44,6 +44,12 @@ func TestApplyTaggerResults_DropsOnlyTheRunsOwnRows(t *testing.T) {
 	if n := countRows(t, database, "images WHERE id = ? AND auto_tagged_at IS NOT NULL", imageID); n != 1 {
 		t.Error("auto_tagged_at is not stamped")
 	}
+	if n := countRows(t, database, "image_tagger_runs WHERE image_id = ? AND tagger_name = 'tagger-A'", imageID); n != 1 {
+		t.Errorf("runs of tagger-A = %d, want the one this run made", n)
+	}
+	if n := countRows(t, database, "image_tagger_runs WHERE image_id = ?", imageID); n != 1 {
+		t.Errorf("runs on the image = %d: tagger-B did not run", n)
+	}
 	fresh := mustTag(t, svc, "fresh_auto_a", general).ID
 	if got := ledgerSources(t, database, imageID, fresh); !slices.Equal(got, []string{"tagger-A"}) {
 		t.Errorf("ledger for the new row = %v, want [tagger-A]", got)

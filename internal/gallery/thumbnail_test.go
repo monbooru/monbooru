@@ -300,6 +300,14 @@ func TestDecodeImageWithCap_CountsProgressiveCoefficients(t *testing.T) {
 	}
 }
 
+func TestProgressiveJPEGCoefficientBytes_AZeroSamplingFactorCountsNothing(t *testing.T) {
+	for _, hv := range []byte{0x00, 0x01, 0x10} {
+		if got := progressiveJPEGCoefficientBytes(jpegHeader(0xC2, 16, 16, hv, 0x11, 0x11)); got != 0 {
+			t.Errorf("first component factors %#02x: %d bytes, want 0", hv, got)
+		}
+	}
+}
+
 func behindAPP0(header []byte, between ...byte) []byte {
 	return slices.Concat(header[:20], between, header[20:])
 }

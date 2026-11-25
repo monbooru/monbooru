@@ -325,9 +325,6 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		data.SimilarityPercent = scores
 	}
-	if inboxClustersActive(sortStr, orderStr, expr) {
-		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1, page < totalPages || result.TotalUnknown)
-	}
 	if inboxFilterActive(expr) {
 		data.InboxUploadActive = true
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
@@ -343,6 +340,9 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 			data.PagerMorePrev = s.cursorPageEdge(r.Context(), sq, first, 0)
 		}
 		data.PagerMoreNext = next == "more"
+	}
+	if inboxClustersActive(sortStr, orderStr, expr) {
+		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1 || data.PagerMorePrev, page < totalPages || result.TotalUnknown || data.PagerMoreNext)
 	}
 	if result.TotalUnknown || hiddenLater {
 		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, next, took)
@@ -819,6 +819,7 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 	}
 	markers := make([]*inboxCluster, len(images))
 	gap := time.Duration(batchGapMinutes) * time.Minute
+	flagged := len(search.Unreadable(queryStr)) > 0
 	start := 0
 	for i := 1; i <= len(images); i++ {
 		closeCluster := i == len(images)
@@ -835,6 +836,9 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 		if closeCluster {
 			spills := (start == 0 && moreAbove) || (i == len(images) && moreBelow)
 			markers[start] = buildInboxCluster(images[start:i], queryStr, !spills)
+			if flagged {
+				markers[start].RangeLink, markers[start].RangeQuery = "", ""
+			}
 			start = i
 		}
 	}

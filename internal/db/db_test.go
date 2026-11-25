@@ -821,6 +821,15 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 		t.Errorf("keys = %q, want only the http(s) original", got)
 	}
 
+	const sameOriginal = `INSERT INTO image_sources (image_id, site, post_id, original) VALUES (1, 'social', '1', 'https://social.example/user_a/status/1')
+		ON CONFLICT(image_id, site, post_id) DO UPDATE SET original = excluded.original`
+	if _, err := db.Write.Exec(sameOriginal); err != nil {
+		t.Fatalf("an upsert giving a second source the same original: %v", err)
+	}
+	if got := sourceURLKeysOf(t, db, 1); !slices.Equal(got, want) {
+		t.Errorf("after the upsert: keys = %q, want %q", got, want)
+	}
+
 	mustExec(t, db.Write, `UPDATE image_sources SET original = '' WHERE image_id = 1 AND site = 'booru'`)
 	if got, want := sourceURLKeysOf(t, db, 1), []string{"booru.example/posts/7", "social.example/user_a/status/1"}; !slices.Equal(got, want) {
 		t.Errorf("after clearing the original: keys = %q, want %q (the social row still carries its url)", got, want)
@@ -842,6 +851,24 @@ func TestSourceURLKeysFollowTheSources(t *testing.T) {
 	}
 	if got := sourceURLKeysOf(t, db, 2); !slices.Equal(got, []string{`quote.example/"q"\`}) {
 		t.Errorf("another image's keys = %q after the delete", got)
+	}
+
+	triggers, err := QueryStrings(db.Read, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_image_sources_urls_%'`)
+	if err != nil || len(triggers) != 3 {
+		t.Fatalf("source url triggers: %d, %v", len(triggers), err)
+	}
+	mustExec(t, db.Write, `DROP TRIGGER trg_image_sources_urls_ai; DROP TRIGGER trg_image_sources_urls_au; DROP TRIGGER trg_image_sources_urls_ad`)
+	for _, sql := range triggers {
+		mustExec(t, db.Write, strings.ReplaceAll(sql, "GROUP BY image_id, key COLLATE NOCASE", ""))
+	}
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (2, 'other', '', 'https://other.example/1')`)
+	if _, err := db.Write.Exec(`INSERT INTO image_sources (image_id, site, post_id, original) VALUES (2, 'other', '', 'https://quote.example/"q"\')
+		ON CONFLICT(image_id, site, post_id) DO UPDATE SET original = excluded.original`); err != nil {
+		t.Fatalf("a library that had the triggers without their GROUP BY: %v", err)
+	}
+	if got, want := sourceURLKeysOf(t, db, 2), []string{"other.example/1", `quote.example/"q"\`}; !slices.Equal(got, want) {
+		t.Errorf("keys = %q, want %q", got, want)
 	}
 }
 
@@ -946,5 +973,178 @@ func TestInWriteTxWaitsOutAnotherWriter(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("a write that reads first, under another connection's write lock: %v", err)
+	}
+}
+
+func TestBootstrapBackfillsTaggerRunsFromTheAutoTagsOfStampedImages(t *testing.T) {
+	d := openTestDB(t)
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, d.Write, `DROP TABLE image_tagger_runs`)
+	img := func(name string, stamp any) int64 {
+		id, _ := mustExec(t, d.Write, `INSERT INTO images (canonical_path, file_type, file_size, sha256, auto_tagged_at, ingested_at)
+			VALUES (?, 'png', 1, ?, ?, datetime('now'))`, "/g/"+name, "sha-"+name, stamp).LastInsertId()
+		return id
+	}
+	tag := func(name string) int64 {
+		id, _ := mustExec(t, d.Write, `INSERT INTO tags (name, category_id) VALUES (?, (SELECT id FROM tag_categories WHERE name = 'general'))`, name).LastInsertId()
+		return id
+	}
+	put := func(image, tagID int64, auto int, tagger any) {
+		mustExec(t, d.Write, `INSERT INTO image_tags (image_id, tag_id, is_auto, tagger_name) VALUES (?, ?, ?, ?)`, image, tagID, auto, tagger)
+	}
+	a, b, c := tag("a"), tag("b"), tag("c")
+	read := img("read.png", "2026-01-02T03:04:05Z")
+	put(read, a, 1, "wd")
+	put(read, b, 1, "wd")
+	put(read, c, 1, "joy")
+	replaced := img("replaced.png", nil)
+	put(replaced, a, 1, "wd")
+	sourced := img("sourced.png", "2026-01-02T03:04:05Z")
+	put(sourced, a, 0, "danbooru")
+	put(sourced, b, 0, nil)
+
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 2 {
+		t.Errorf("runs = %d, want the two taggers of the stamped image", n)
+	}
+	if n := countRows(t, d, "image_tagger_runs WHERE image_id = ? AND tagged_at = '2026-01-02T03:04:05Z' AND tagger_name IN ('wd', 'joy')", read); n != 2 {
+		t.Errorf("runs of the stamped image = %d, want wd and joy at its stamp", n)
+	}
+
+	mustExec(t, d.Write, `DELETE FROM image_tagger_runs`)
+	if err := Bootstrap(d); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 0 {
+		t.Errorf("a second start filled %d runs: the backfill belongs to the table's creation", n)
+	}
+	if err := BackfillTaggerRuns(d.Write); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, d, "image_tagger_runs"); n != 2 {
+		t.Errorf("runs after a loaded document = %d, want 2", n)
+	}
+}
+
+func globalChanges(t *testing.T, db *DB) []string {
+	t.Helper()
+	rows, err := db.Read.Query(`SELECT tag_id || ' ' || category || ':' || name FROM global_tag_changes ORDER BY tag_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestGlobalTagChangesAreRecorded(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	general := `(SELECT id FROM tag_categories WHERE name = 'general')`
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id) VALUES (101, 'animation', `+general+`), (102, 'video', `+general+`), (103, 'local', `+general+`)`)
+
+	step := func(label, stmt string, want ...string) {
+		t.Helper()
+		mustExec(t, db.Write, stmt)
+		if got := globalChanges(t, db); !slices.Equal(got, want) {
+			t.Errorf("%s: recorded %v, want %v", label, got, want)
+		}
+		mustExec(t, db.Write, `DELETE FROM global_tag_changes`)
+	}
+
+	step("a rule on a local tag", `INSERT INTO tags (name, category_id, is_alias, canonical_tag_id) VALUES ('loc', `+general+`, 1, 103)`)
+	step("marking", `UPDATE tags SET is_global = 1 WHERE id IN (101, 102)`, "101 general:animation", "102 general:video")
+	step("a usage count", `UPDATE tags SET usage_count = usage_count + 1 WHERE id = 101`)
+	step("an alias", `INSERT INTO tags (id, name, category_id, is_alias, canonical_tag_id) VALUES (110, 'anime', `+general+`, 1, 101)`, "101 general:animation")
+	step("an alias repointed", `UPDATE tags SET canonical_tag_id = 102 WHERE id = 110`, "101 general:animation", "102 general:video")
+	step("an alias deleted", `DELETE FROM tags WHERE id = 110`, "102 general:video")
+	step("an implication", `INSERT INTO tag_implications (parent_tag_id, implied_tag_id) VALUES (101, 102)`, "101 general:animation")
+	step("an implication removed", `DELETE FROM tag_implications WHERE parent_tag_id = 101`, "101 general:animation")
+	step("a note", `INSERT INTO tag_notes (tag_id, body) VALUES (101, 'moving pictures')`, "101 general:animation")
+	step("a rename, under the old name", `UPDATE tags SET name = 'animated' WHERE id = 101`, "101 general:animation")
+
+	removed := func(want ...string) {
+		t.Helper()
+		var got []string
+		rows, err := db.Read.Query(`SELECT tag_id || ' ' || kind || ' ' || category || ':' || name FROM global_tag_removals ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, s)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("removals = %v, want %v", got, want)
+		}
+	}
+	removed("101 alias general:anime", "101 implies general:video", "102 alias general:anime")
+
+	mustExec(t, db.Write, `INSERT INTO global_tag_applying (id) VALUES (1)`)
+	step("while another gallery's changes land", `UPDATE tags SET name = 'animation' WHERE id = 101`)
+	mustExec(t, db.Write, `DELETE FROM global_tag_applying`)
+
+	step("made local", `UPDATE tags SET is_global = 0 WHERE id = 102`, "102 general:video")
+	step("deleted", `DELETE FROM tags WHERE id = 101`, "101 general:animation")
+}
+
+const noteUpsert = `INSERT INTO tag_notes (tag_id, body, links) VALUES (101, ?, '')
+	ON CONFLICT(tag_id) DO UPDATE SET body = excluded.body, links = excluded.links`
+
+func TestANoteUpsertOnAGlobalTagWithARecordWaiting(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id, is_global) VALUES (101, 'animation', (SELECT id FROM tag_categories WHERE name = 'general'), 1)`)
+	mustExec(t, db.Write, `DELETE FROM global_tag_changes`)
+
+	for _, body := range []string{"first", "second", "third"} {
+		if _, err := db.Write.Exec(noteUpsert, body); err != nil {
+			t.Fatalf("note %q: %v", body, err)
+		}
+	}
+	if got := globalChanges(t, db); !slices.Equal(got, []string{"101 general:animation"}) {
+		t.Errorf("recorded %v, want the one record", got)
+	}
+	mustExec(t, db.Write, `UPDATE global_tag_changes SET tag_id = -tag_id`)
+	if _, err := db.Write.Exec(noteUpsert, "fourth"); err != nil {
+		t.Fatal(err)
+	}
+	if got := globalChanges(t, db); !slices.Equal(got, []string{"-101 general:animation", "101 general:animation"}) {
+		t.Errorf("with a taken record, recorded %v, want a fresh one beside it", got)
+	}
+}
+
+func TestBootstrap_ReplacesTheGlobalTagTriggersOfAnEarlierBuild(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	mustExec(t, db.Write, `DROP TRIGGER trg_tag_notes_global_au;
+		CREATE TRIGGER trg_tag_notes_global_au AFTER UPDATE OF body, links ON tag_notes
+		BEGIN
+			INSERT OR IGNORE INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
+			 WHERE t.id = NEW.tag_id AND t.is_global = 1 AND t.is_alias = 0 AND NOT EXISTS (SELECT 1 FROM global_tag_applying);
+		END`)
+	mustExec(t, db.Write, `INSERT INTO tags (id, name, category_id, is_global) VALUES (101, 'animation', (SELECT id FROM tag_categories WHERE name = 'general'), 1)`)
+
+	mustBootstrap(t, db)
+	for _, body := range []string{"first", "second"} {
+		if _, err := db.Write.Exec(noteUpsert, body); err != nil {
+			t.Fatalf("note %q after a bootstrap: %v", body, err)
+		}
 	}
 }

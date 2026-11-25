@@ -178,6 +178,9 @@ func progressiveJPEGCoefficientBytes(head []byte) int64 {
 					blocks += int(seg[7+3*c]>>4) * int(seg[7+3*c]&0x0F)
 				}
 			}
+			if h0 == 0 || v0 == 0 {
+				return 0
+			}
 			mcusX := (width + 8*h0 - 1) / (8 * h0)
 			mcusY := (height + 8*v0 - 1) / (8 * v0)
 			return int64(mcusX) * int64(mcusY) * int64(blocks) * 256

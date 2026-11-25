@@ -52,6 +52,9 @@ func TestApplyReplacedFile_ClearsTheAutoTagStamp(t *testing.T) {
 	if _, err := database.Write.Exec(`UPDATE images SET auto_tagged_at = '2026-01-01T00:00:00Z' WHERE id = ?`, rec.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Write.Exec(`INSERT INTO image_tagger_runs (image_id, tagger_name, tagged_at) VALUES (?, 'wd', '2026-01-01T00:00:00Z')`, rec.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	staged := createTestPNGFileSize(t, t.TempDir(), "new.png", 60, 60)
 	sha, sum := mustDigests(t, staged)
@@ -65,6 +68,13 @@ func TestApplyReplacedFile_ClearsTheAutoTagStamp(t *testing.T) {
 	}
 	if stamp.Valid {
 		t.Errorf("auto_tagged_at = %q after a replace, want NULL so the nightly auto-tag takes the new bytes", stamp.String)
+	}
+	var runs int
+	if err := database.Read.QueryRow(`SELECT COUNT(*) FROM image_tagger_runs WHERE image_id = ?`, rec.ID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 {
+		t.Errorf("tagger runs = %d after a replace, want none: no tagger read the new bytes", runs)
 	}
 }
 

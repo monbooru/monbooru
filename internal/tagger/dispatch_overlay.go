@@ -84,23 +84,36 @@ func SaveDispatchOverlay(dataPath, taggerName string, rules []DispatchEntry) err
 const dispatchMoved = ".dispatch-moved"
 
 // MoveDispatchOverlays copies each model folder's dispatch.json to the
-// data folder, once; the old file is left where it is. A copy that fails
-// is tried again at the next start.
+// data folder, once; the old file is left where it is. A copy or a read
+// that fails is tried again at the next start, as is a models folder with
+// no tagger folder, which an unmounted volume looks like.
 func MoveDispatchOverlays(modelPath, dataPath string) {
 	marker := filepath.Join(dataPath, dispatchMoved)
 	if _, err := os.Stat(marker); err == nil {
 		return
 	}
-	dirs, _ := os.ReadDir(modelPath)
+	dirs, err := os.ReadDir(modelPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logx.Warnf("tagger: %s: %v", modelPath, err)
+		}
+		return
+	}
+	seen := false
 	for _, d := range dirs {
 		name := d.Name()
-		if ValidateTaggerName(name) != nil {
+		if !d.IsDir() && d.Type()&os.ModeSymlink == 0 || ValidateTaggerName(name) != nil {
 			continue
 		}
+		seen = true
 		src := filepath.Join(modelPath, name, "dispatch.json")
 		data, err := os.ReadFile(src)
-		if err != nil {
+		if os.IsNotExist(err) {
 			continue
+		}
+		if err != nil {
+			logx.Warnf("tagger: %s: %v", src, err)
+			return
 		}
 		dst := OverlayPath(dataPath, name)
 		if _, err := os.Stat(dst); err == nil {
@@ -111,6 +124,9 @@ func MoveDispatchOverlays(modelPath, dataPath string) {
 			return
 		}
 		logx.Infof("tagger: mappings of %s copied to %s", name, dst)
+	}
+	if !seen {
+		return
 	}
 	if err := fsx.WriteFile(marker, nil); err != nil {
 		logx.Warnf("tagger: %s: %v", marker, err)

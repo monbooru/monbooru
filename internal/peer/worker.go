@@ -34,8 +34,9 @@ func (r Req) WorkerName() string { return cmp.Or(r.Label, contract.AppMonworker)
 func grantWorker(c *config.Config, req Req, url string) {
 	name := req.WorkerName()
 	w := config.WorkerConfig{Name: name, URL: url, Token: req.PeerToken}
-	if i := slices.IndexFunc(c.Workers, func(w config.WorkerConfig) bool { return w.Name == name }); i >= 0 {
-		c.Workers[i] = w
+	if old := FindWorker(c, name); old != nil {
+		w.OnDemand, w.GatewayToken = old.OnDemand, old.GatewayToken
+		*old = w
 		return
 	}
 	c.Workers = append(c.Workers, w)

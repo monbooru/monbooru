@@ -2,9 +2,11 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
@@ -28,6 +30,11 @@ type workerModel struct {
 type workerRow struct {
 	Name, Version, URL, Provider, ModelsDir string
 	Local, Paused, Disabled                 bool
+	// Manual is a worker added by address and token, which no pairing
+	// brought.
+	Manual bool
+	// OnDemand is a worker left alone between the jobs that name it.
+	OnDemand bool
 	// Missing is the local worker turned on with no monworker to run.
 	Missing bool
 	// Dot is the footer dot's state: ok, down or paused.
@@ -77,8 +84,11 @@ func (s *Server) workersView() workersData {
 	}
 	first := map[string]tagger.WorkerView{}
 	for _, v := range views {
-		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, ModelsDir: v.Info.ModelsDir,
+		row := workerRow{Name: v.Name, Version: v.Info.Version, URL: v.URL, Local: v.Local, Paused: v.Paused, OnDemand: v.OnDemand, ModelsDir: v.Info.ModelsDir,
 			Loaded: slices.Sorted(slices.Values(v.Info.Loaded))}
+		if wc := peer.FindWorker(cfg, v.Name); wc != nil && !v.Local {
+			row.Manual = wc.Manual
+		}
 		if v.Info.Provider != "" {
 			row.Provider = config.ExecutionProviderLabel(v.Info.Provider)
 		}
@@ -106,6 +116,8 @@ func workerState(v tagger.WorkerView) (dot, state string) {
 	switch {
 	case v.Paused:
 		return "paused", "paused"
+	case v.OnDemand:
+		return onDemandState(v)
 	case !v.Checked:
 		return "paused", "starting"
 	case !v.Up:
@@ -119,6 +131,22 @@ func workerState(v tagger.WorkerView) (dot, state string) {
 		return "ok", "standby"
 	}
 	return "ok", "idle"
+}
+
+// An on-demand worker is asleep unless a job has it: offline is kept for
+// a start that failed.
+func onDemandState(v tagger.WorkerView) (dot, state string) {
+	switch {
+	case v.Waking:
+		return "paused", "starting"
+	case v.InUse:
+		return "ok", "tagging"
+	case v.Checked && !v.Up:
+		return "down", "offline since " + v.DownSince.Local().Format("15:04")
+	case v.Seen.IsZero():
+		return "paused", "asleep"
+	}
+	return "paused", "asleep, last seen " + v.Seen.Local().Format("15:04")
 }
 
 func modelDigest(v tagger.WorkerView, name string) string {
@@ -156,6 +184,10 @@ func (s *Server) taggerLocalWorkerPost(on bool) http.HandlerFunc {
 		if !parseFormOK(w, r) {
 			return
 		}
+		if pin := s.envPinned("tagger.local_worker"); pin != "" {
+			writeFlashOOB(w, "flash-tagger", "err", "Set by "+pin+".")
+			return
+		}
 		if err := s.withConfig(func(c *config.Config) error {
 			c.Tagger.LocalWorker = on
 			return nil
@@ -186,8 +218,8 @@ func (s *Server) taggerWorkerPausePost(paused bool) http.HandlerFunc {
 	}
 }
 
-// Remove tells the worker first, so it stops offering itself, then drops
-// the pairing here even when the worker could not be reached.
+// Remove drops the pairing here, then tells the worker, so it stops
+// offering itself; one that cannot be reached is removed all the same.
 func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) {
 	if !parseFormOK(w, r) {
 		return
@@ -195,14 +227,21 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	name := r.PathValue("name")
 	var url, token string
 	s.cfgMu.RLock()
-	if wc := peer.FindWorker(s.cfg, name); wc != nil {
+	wc := peer.FindWorker(s.cfg, name)
+	// A worker added by address holds no pairing to be told the end of.
+	if wc != nil && !wc.Manual {
 		url, token = wc.URL, wc.Token
 	}
 	s.cfgMu.RUnlock()
-	notifyErr := peer.NotifyTeardown(name, url, token)
+	if wc == nil {
+		s.renderWorkers(w, false)
+		return
+	}
+	var notifyErr error
 	saveErr := s.removePairing(peer.WorkerKey(name))
 	if saveErr == nil {
 		logx.Infof("pairing: removed worker %s from %s", name, session.ClientIP(r))
+		notifyErr = peer.NotifyTeardown(name, url, token)
 	}
 	s.renderWorkers(w, false)
 	s.renderAuthTokensOOB(w, r)
@@ -217,6 +256,71 @@ func (s *Server) taggerWorkerRemovePost(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeFlashOOB(w, "flash-tagger", "", "")
 	}
+}
+
+// taggerWorkerAddPost lists a worker monbooru reaches by itself, started
+// with a token of the operator's, once it answers with that token.
+func (s *Server) taggerWorkerAddPost(w http.ResponseWriter, r *http.Request) {
+	if !parseFormOK(w, r) {
+		return
+	}
+	def := tagger.WorkerDef{
+		Name:     strings.TrimSpace(r.FormValue("name")),
+		URL:      strings.TrimRight(strings.TrimSpace(r.FormValue("url")), "/"),
+		Token:    strings.TrimSpace(r.FormValue("token")),
+		Gateway:  strings.TrimSpace(r.FormValue("gateway_token")),
+		OnDemand: r.FormValue("on_demand") == "on",
+	}
+	u, err := url.Parse(def.URL)
+	switch {
+	case !pairing.ValidApp(def.Name):
+		writeInlineFlash(w, "err", "The name takes letters, digits, - and _, 32 at most.")
+		return
+	case def.Name == tagger.LocalWorker:
+		writeInlineFlash(w, "err", "local is the worker monbooru runs itself.")
+		return
+	case err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https":
+		writeInlineFlash(w, "err", "The address must start with http:// or https://.")
+		return
+	case def.Token == "":
+		writeInlineFlash(w, "err", "A token is required: the worker's MONWORKER_TOKEN.")
+		return
+	}
+	taken := func(c *config.Config) bool { return peer.FindWorker(c, def.Name) != nil }
+	if taken(s.cfgSnapshot()) {
+		writeInlineFlash(w, "err", "A worker named "+def.Name+" is already listed.")
+		return
+	}
+	// A platform that starts the worker for this call holds it meanwhile.
+	wait := 20 * time.Second
+	if def.OnDemand {
+		wait = 150 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), wait)
+	defer cancel()
+	info, err := tagger.CurrentPool().Probe(ctx, def)
+	var se *worker.StatusError
+	switch {
+	case errors.As(err, &se) && se.Status == http.StatusUnauthorized:
+		writeInlineFlash(w, "err", "The worker at "+def.URL+" refused the token.")
+		return
+	case err != nil:
+		writeInlineFlash(w, "err", "No worker answered at "+def.URL+": "+err.Error())
+		return
+	}
+	if err := s.withConfig(func(c *config.Config) error {
+		if taken(c) {
+			return errors.New("a worker named " + def.Name + " is already listed")
+		}
+		c.Workers = append(c.Workers, config.WorkerConfig{Name: def.Name, URL: def.URL, Token: def.Token, GatewayToken: def.Gateway, Manual: true, OnDemand: def.OnDemand})
+		return nil
+	}); err != nil {
+		writeInlineFlash(w, "err", "Could not save: "+err.Error())
+		return
+	}
+	logx.Infof("settings: worker %s added at %s (monworker %s) from %s", def.Name, def.URL, info.Version, session.ClientIP(r))
+	// The taggers list and the dialogs follow the workers, so the page reloads.
+	w.Header().Set("HX-Refresh", "true")
 }
 
 func (s *Server) workerPairDecided(w http.ResponseWriter, state pairing.State, msg string) {

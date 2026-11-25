@@ -17,6 +17,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/monloader"
+	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
 	"github.com/monbooru/monbooru/internal/tagger"
@@ -278,13 +279,15 @@ func (s *Server) tagRulesPanel(w http.ResponseWriter, r *http.Request) {
 }
 
 // tagRulesAnswers asks monloader about the tag and its first aliases; state
-// is unpaired, paused, old, unreachable or live.
+// is unpaired, paused, old, rejected, unreachable or live.
 func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases []models.Tag) ([]contract.TagRules, string) {
 	switch {
 	case !s.pairedWith(monloader.App):
 		return nil, "unpaired"
 	case s.ml.Paused():
 		return nil, "paused"
+	case s.ml.Status().Conn == peer.ConnRejected:
+		return nil, "rejected"
 	case !s.ml.Usable():
 		return nil, "unreachable"
 	}
@@ -323,6 +326,8 @@ func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []c
 		switch p.Monloader {
 		case "paused":
 			note.Span = &pathBox{Parts: []pathPart{part("paused, no site lanes", "dim")}}
+		case "rejected":
+			note.Span = &pathBox{Parts: []pathPart{part("auth rejected, no site lanes", "dim")}}
 		case "unreachable":
 			note.Span = &pathBox{Parts: []pathPart{part("unreachable, no site lanes", "dim")}}
 		case "old":

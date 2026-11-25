@@ -15,7 +15,9 @@ import (
 	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/pairing"
 	"github.com/monbooru/monbooru/internal/shared/session"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 )
 
 const pairWindowLength = 10 * time.Minute
@@ -42,6 +44,7 @@ type pairWindow struct {
 	mu     sync.Mutex
 	closes time.Time
 	made   []autoPairing
+	waited map[string]bool
 }
 
 func (pw *pairWindow) open(d time.Duration) {
@@ -71,6 +74,23 @@ func (pw *pairWindow) record(req peer.Req) {
 	defer pw.mu.Unlock()
 	pw.made = slices.DeleteFunc(pw.made, func(a autoPairing) bool { return a.App == req.Paired() })
 	pw.made = append(pw.made, autoPairing{App: req.Paired(), Version: req.Version, Source: req.Source, Scopes: req.Scopes, At: time.Now()})
+}
+
+func (pw *pairWindow) approve(id string) {
+	pw.mu.Lock()
+	if pw.waited == nil {
+		pw.waited = map[string]bool{}
+	}
+	pw.waited[id] = true
+	pw.mu.Unlock()
+}
+
+func (pw *pairWindow) approved(id string) bool {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	ok := pw.waited[id]
+	delete(pw.waited, id)
+	return ok
 }
 
 func (pw *pairWindow) forget(app string) {
@@ -126,10 +146,9 @@ func forwardedHop(r *http.Request) bool {
 }
 
 // Behind a proxy every source reads as the proxy's, so a forwarded offer
-// waits on a card. A re-pair does too: the window adds a monloader, it
-// does not replace the one already paired.
-func (s *Server) windowApproves(r *http.Request, repair bool) bool {
-	if repair || s.win.closesAt().IsZero() || forwardedHop(r) {
+// waits on a card.
+func privateSource(r *http.Request) bool {
+	if forwardedHop(r) {
 		return false
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -140,21 +159,48 @@ func (s *Server) windowApproves(r *http.Request, repair bool) bool {
 	return ip != nil && (ip.IsPrivate() || ip.IsLoopback())
 }
 
-// On a desktop an offer from this machine is approved at any time: a
-// process on the same account can read the config and its tokens anyway.
-// The peer must still answer at the address monbooru will call.
-func (s *Server) autoApproves(r *http.Request, req peer.Req) bool {
-	if !companionApp(req.App) || !s.desktopLocal(r) && !s.windowApproves(r, req.Repair) {
-		return false
-	}
+// A re-pair waits on its card: the window adds a monloader, it does not
+// replace the one already paired.
+func (s *Server) windowApproves(req peer.Req) bool {
+	return req.PrivateSource && !req.Repair && !s.win.closesAt().IsZero()
+}
+
+// The peer must answer at the address monbooru will call.
+func (s *Server) reaches(ctx context.Context, req peer.Req) bool {
 	base := cmp.Or(s.peerOverrideURL(req.App), peer.CallbackURL(req.URL, req.Source))
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if base == "" || !peer.Reachable(ctx, base) {
-		logx.Infof("pairing: %s is unreachable at %q; its request waits for a click", req.App, base)
+		logx.Infof("pairing: %s is unreachable at %q; its request waits for a click", req.Paired(), base)
 		return false
 	}
 	return true
+}
+
+// On a desktop an offer from this machine is approved at any time: a
+// process on the same account can read the config and its tokens anyway.
+func (s *Server) autoApproves(r *http.Request, req peer.Req) bool {
+	if !companionApp(req.App) || !s.desktopLocal(r) && !s.windowApproves(req) {
+		return false
+	}
+	return s.reaches(r.Context(), req)
+}
+
+func (s *Server) approveWaiting(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, req := range s.pairs.ListPending() {
+		req.Repair = s.pairedWith(req.Paired())
+		if !companionApp(req.App) || !s.windowApproves(req) {
+			continue
+		}
+		wg.Go(func() {
+			if s.reaches(ctx, req) && s.pairs.SetState(req.ID, pairing.Approved) {
+				s.win.approve(req.ID)
+				logx.Infof("pairing: approved request %s from %s without a click", req.ID, req.Source)
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func (s *Server) pairWindowPost(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +210,7 @@ func (s *Server) pairWindowPost(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("open") == "1" {
 		s.win.open(pairWindowLength)
 		logx.Infof("pairing: window opened for %s from %s", pairWindowLength, session.ClientIP(r))
+		s.approveWaiting(r.Context())
 	} else {
 		s.win.close()
 		logx.Infof("pairing: window closed from %s", session.ClientIP(r))
@@ -204,7 +251,7 @@ func (n autoPairNotice) Text() string {
 	case 0:
 		return ""
 	case 1:
-		return cmp.Or(n.Items[0].Worker(), n.Items[0].App) + " paired automatically"
+		return webui.NoticeName(cmp.Or(n.Items[0].Worker(), n.Items[0].App)) + " paired automatically"
 	}
 	return fmt.Sprintf("%d apps paired automatically", len(n.Items))
 }

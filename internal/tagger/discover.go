@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/shared/worker"
@@ -24,6 +25,9 @@ type TaggerStatus struct {
 	Missing bool
 	// Differs is a tagger two workers hold with different files.
 	Differs bool
+	// OnDemand is a tagger only on-demand workers can run now: a job that
+	// names no worker leaves it out.
+	OnDemand bool
 }
 
 // DiscoverTaggers lists every tagger a worker holds, then every configured
@@ -53,6 +57,7 @@ func DiscoverTaggers(cfg *config.Config) []TaggerStatus {
 		if h != nil {
 			status.ModelFile, status.TagsFile = h.model.ModelFile, h.model.LabelFile
 			status.Differs = h.differs
+			status.OnDemand = h.usable && !h.standing
 		}
 		switch {
 		case ValidateTaggerName(name) != nil:
@@ -104,6 +109,12 @@ func SelectForGallery(cfg *config.Config, gallery, name string) ([]TaggerStatus,
 		}
 	}
 	return nil, fmt.Errorf("tagger %q is not enabled or available for gallery %q", name, gallery)
+}
+
+// WithoutOnDemand is taggers less those a job that names no worker cannot
+// reach.
+func WithoutOnDemand(taggers []TaggerStatus) []TaggerStatus {
+	return slices.DeleteFunc(slices.Clone(taggers), func(t TaggerStatus) bool { return t.OnDemand })
 }
 
 func EnabledTaggersForGallery(cfg *config.Config, gallery string) []TaggerStatus {

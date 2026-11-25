@@ -67,3 +67,23 @@ func TestReorderCategories_RefusesAListThatIsNotEveryCategoryOnce(t *testing.T) 
 		}
 	}
 }
+
+func TestDeleteCategoryWithItsTags_RefusesAGlobalTag(t *testing.T) {
+	database, svc := setupTestDB(t)
+	cat := mustCreateCategory(t, svc, "style", "#aabbcc")
+	shared := mustTag(t, svc, "animation", cat.ID)
+	mustTag(t, svc, "watercolor", cat.ID)
+	if err := svc.SetGlobal([]int64{shared.ID}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.DeleteCategoryMoveOrDelete(cat.ID, "delete_all", 0); !errors.Is(err, ErrTagGlobal) {
+		t.Fatalf("delete with its tags = %v, want ErrTagGlobal", err)
+	}
+	if n := countRows(t, database, "tags WHERE category_id = ?", cat.ID); n != 2 {
+		t.Errorf("tags left in the category = %d, want 2", n)
+	}
+	if err := svc.DeleteCategoryMoveOrDelete(cat.ID, "move", 0); err != nil {
+		t.Fatalf("moving the tags out = %v", err)
+	}
+}

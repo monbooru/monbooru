@@ -9,10 +9,12 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
@@ -62,6 +64,9 @@ func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, i
 type Result struct {
 	Skipped int
 	Tagged  map[string]int
+	// Took is set when a worker started for the job took part, whose time
+	// is what the operator pays.
+	Took time.Duration
 }
 
 // Shares names each worker's images, most first, once more than one
@@ -70,6 +75,10 @@ func (r Result) Shares() string {
 	if len(r.Tagged) < 2 {
 		return ""
 	}
+	return r.shares()
+}
+
+func (r Result) shares() string {
 	names := slices.Collect(maps.Keys(r.Tagged))
 	slices.SortFunc(names, func(a, b string) int { return cmp.Or(r.Tagged[b]-r.Tagged[a], strings.Compare(a, b)) })
 	parts := make([]string, len(names))
@@ -79,13 +88,47 @@ func (r Result) Shares() string {
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
+// Total is the images the run stored.
+func (r Result) Total() int {
+	n := 0
+	for _, c := range r.Tagged {
+		n += c
+	}
+	return n
+}
+
+// Workers names every worker's images, most first, one worker included:
+// " (gpu-box 171)".
+func (r Result) Workers() string {
+	if len(r.Tagged) == 0 {
+		return ""
+	}
+	return r.shares()
+}
+
 // RunOn is RunWithTaggers on the workers named in only, all of them
 // sharing the images; nil leaves the choice to the pool.
 func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, only []string, mgr *jobs.Manager) (Result, error) {
 	if len(taggers) == 0 {
 		return Result{}, fmt.Errorf("no tagger is enabled or available")
 	}
+	if only == nil {
+		all := taggers
+		if taggers = WithoutOnDemand(all); len(taggers) == 0 {
+			names := make([]string, len(all))
+			for i, t := range all {
+				names[i] = t.Name
+			}
+			return Result{}, fmt.Errorf("only a worker that starts on demand holds %s: name the worker for the job", strings.Join(names, ", "))
+		}
+	}
 	pool := currentPool()
+	started := time.Now()
+	if err := pool.Wake(ctx, only, func(name string, waited time.Duration) {
+		mgr.Update(0, len(ids), fmt.Sprintf("starting %s, %s", name, Spell(waited)))
+	}); err != nil {
+		return Result{}, err
+	}
 	database := h.DB
 	mangaCacheDir := gallery.MangaCacheDir(h.ThumbnailsPath)
 
@@ -154,16 +197,16 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		priority = worker.PriorityInteractive
 	}
 
-	// One image per slot of the workers that can take the job, so each
-	// worker pulls as fast as it answers and no frame waits decoded.
+	// The workers' slots set how many calls run; the images prepared at
+	// once may be more, each waiting its turn with a frame ready.
 	calls := make([][]string, len(groups))
 	for i, g := range groups {
 		calls[i] = g.models
 	}
-	parallel := min(max(1, pool.Slots(calls, only)), len(ids))
-	if n := cfg.Tagger.CPUThreads; n > 0 {
-		parallel = min(parallel, n)
-	}
+	slots, remote := pool.JobSlots(calls, only)
+	defer pool.Running(calls, only)()
+	parallel := min(prepareCount(cfg.Tagger, max(1, slots), remote), len(ids))
+	prep := make(semaphore, parallel)
 
 	// The job has one status line, so each worker writes its own slot and
 	// every update joins them all.
@@ -205,6 +248,9 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		if err := database.Read.QueryRowContext(ctx,
 			`SELECT canonical_path, file_type FROM images WHERE id = ?`, imageID,
 		).Scan(&canonPath, &fileType); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logx.Warnf("tagger: skip image %d: lookup failed: %v", imageID, err)
 			skipped.Add(1)
 			return nil
@@ -222,7 +268,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 				emitStatus(workerIdx, fmt.Sprintf("image %d: page %d/%d", imageID, i+1, len(framePaths)))
 			}
 		}
-		scores, inferred, by, err := inferFrames(ctx, pool, only, priority, groups, len(plan), imageID, framePaths, fileType, onPage)
+		scores, inferred, by, err := inferFrames(ctx, pool, only, priority, groups, len(plan), imageID, framePaths, fileType, onPage, prep)
 		if err != nil {
 			return err
 		}
@@ -234,7 +280,17 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		}
 		minHits := ResolveMinHits(cfg.Tagger.Aggregation.MinHitFraction, len(framePaths))
 		merged := mergeTaggers(taggers, plan, scores, minHits)
-		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), taggerNames); err != nil {
+		// A tagger whose every frame was refused did not read the image.
+		var ran []string
+		for i, name := range taggerNames {
+			if len(scores[i]) > 0 {
+				ran = append(ran, name)
+			}
+		}
+		if err := h.TagSvc.ApplyTaggerResults(ctx, imageID, taggerHits(merged), ran); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logx.Warnf("tagger: store results for image %d: %v", imageID, err)
 			skipped.Add(1)
 			return nil
@@ -280,6 +336,9 @@ feed:
 	wg.Wait()
 
 	res := Result{Skipped: int(skipped.Load()), Tagged: tagged}
+	if slices.ContainsFunc(only, pool.OnDemand) {
+		res.Took = time.Since(started)
+	}
 	if err := ctx.Err(); err != nil {
 		return res, err
 	}
@@ -315,42 +374,167 @@ func callGroups(taggers []TaggerStatus, plan []plannedTagger) []callGroup {
 	return groups
 }
 
-func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, groups []callGroup, nTaggers int, imageID int64, framePaths []string, fileType string, onPage func(int)) (_ [][]SparseScores, _ bool, by string, _ error) {
+// A call carries the frames of one image that are ready, up to these.
+const (
+	maxCallFrames = 8
+	maxCallBytes  = 16 << 20
+)
+
+type semaphore chan struct{}
+
+func (s semaphore) acquire(ctx context.Context) bool {
+	select {
+	case s <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (s semaphore) release() { <-s }
+
+// prepareCount is how many images a job prepares at once: the setting,
+// never under the slots in use, or by itself the slots, twice that up to
+// the cores when a paired worker takes the job, within cpu_threads.
+func prepareCount(tc config.TaggerConfig, slots int, remote bool) int {
+	if tc.PrepareParallel > 0 {
+		return max(slots, tc.PrepareParallel)
+	}
+	n := slots
+	if remote {
+		n = max(slots, min(2*slots, runtime.GOMAXPROCS(0)))
+	}
+	if tc.CPUThreads > 0 {
+		n = min(n, tc.CPUThreads)
+	}
+	return n
+}
+
+type preparedFrame struct {
+	idx    int
+	inputs [][]byte
+	err    error
+}
+
+func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, groups []callGroup, nTaggers int, imageID int64, framePaths []string, fileType string, onPage func(int), prep semaphore) (_ [][]SparseScores, _ bool, by string, _ error) {
 	inputs := make([]inputKey, len(groups))
+	largest := 1
 	for i, g := range groups {
 		inputs[i] = g.input
+		largest = max(largest, 3*g.input.size*g.input.size)
+	}
+	batch := min(max(1, maxCallBytes/largest), maxCallFrames)
+
+	// Frames are prepared ahead of the calls, in order, each under the
+	// job's limit; the queue bounds how many wait prepared.
+	pctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+	queue := make(chan chan preparedFrame, batch)
+	wg.Go(func() {
+		defer close(queue)
+		for i, fp := range framePaths {
+			slot := make(chan preparedFrame, 1)
+			select {
+			case queue <- slot:
+			case <-pctx.Done():
+				return
+			}
+			if !prep.acquire(pctx) {
+				return
+			}
+			wg.Go(func() {
+				defer prep.release()
+				frames, err := prepareFrame(fp, fileType, inputs)
+				slot <- preparedFrame{idx: i, inputs: frames, err: err}
+			})
+		}
+	})
+	wait := func(slot chan preparedFrame) (preparedFrame, bool) {
+		select {
+		case f := <-slot:
+			return f, true
+		case <-ctx.Done():
+			return preparedFrame{}, false
+		}
 	}
 
 	scores := make([][]SparseScores, nTaggers)
 	inferred := false
-	for fIdx, fp := range framePaths {
+	var held chan preparedFrame
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, false, "", err
 		}
-		if onPage != nil {
-			onPage(fIdx)
+		slot := held
+		held = nil
+		if slot == nil {
+			next, ok := <-queue
+			if !ok {
+				break
+			}
+			slot = next
 		}
-		frames, err := prepareFrame(fp, fileType, inputs)
-		if err != nil {
-			logx.Warnf("tagger: read frame failed: image %d frame %d/%d (%s): %v",
-				imageID, fIdx+1, len(framePaths), fp, err)
+		first, ok := wait(slot)
+		if !ok {
+			return nil, false, "", ctx.Err()
+		}
+		ready := []preparedFrame{first}
+	more:
+		for len(ready) < batch {
+			select {
+			case next, ok := <-queue:
+				if !ok {
+					break more
+				}
+				select {
+				case f := <-next:
+					ready = append(ready, f)
+				default:
+					held = next
+					break more
+				}
+			default:
+				break more
+			}
+		}
+		if onPage != nil {
+			onPage(first.idx)
+		}
+		ready = slices.DeleteFunc(ready, func(f preparedFrame) bool {
+			if f.err != nil {
+				logx.Warnf("tagger: read frame failed: image %d frame %d/%d (%s): %v",
+					imageID, f.idx+1, len(framePaths), framePaths[f.idx], f.err)
+			}
+			return f.err != nil
+		})
+		if len(ready) == 0 {
 			continue
 		}
 		for g, grp := range groups {
-			resp, name, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, [][]byte{frames[g]}, only)
+			frames := make([][]byte, len(ready))
+			for k, f := range ready {
+				frames[k] = f.inputs[g]
+			}
+			resp, name, err := pool.Tag(ctx, worker.TagRequest{Models: grp.models, Priority: priority, Frames: worker.FrameSpec{Size: grp.input.size}}, frames, only)
 			if err != nil {
 				return nil, false, "", err
 			}
 			by = cmp.Or(by, name)
 			for m, tIdx := range grp.taggers {
-				fr := resp.Results[m].Frames[0]
-				if fr.Err != "" {
-					logx.Warnf("tagger: inference failed: image %d via %q frame %d/%d (%s): %s",
-						imageID, grp.models[m], fIdx+1, len(framePaths), fp, fr.Err)
-					continue
+				for k, f := range ready {
+					fr := resp.Results[m].Frames[k]
+					if fr.Err != "" {
+						logx.Warnf("tagger: inference failed: image %d via %q frame %d/%d (%s): %s",
+							imageID, grp.models[m], f.idx+1, len(framePaths), framePaths[f.idx], fr.Err)
+						continue
+					}
+					inferred = true
+					scores[tIdx] = append(scores[tIdx], SparseScores{I: fr.I, S: fr.S})
 				}
-				inferred = true
-				scores[tIdx] = append(scores[tIdx], SparseScores{I: fr.I, S: fr.S})
 			}
 		}
 	}

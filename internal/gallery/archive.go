@@ -130,16 +130,18 @@ func CoverOrientation(path string) int {
 	return m.pageOrientation(0)
 }
 
-// A page is an already compressed image, so it never inflates far past the
-// archive holding it; one that does is a zip bomb, refused before the disk
-// fills. The zip reader holds an entry to its declared size.
+const pageInflateFloor = 64 << 20
+
+// A page past both twice its archive and pageInflateFloor is a zip bomb,
+// refused before the disk fills; a flat PNG page deflates forty times, hence
+// the floor. The zip reader holds an entry to its declared size.
 func (m *Manga) extractPage(n int, dst string) error {
 	rc, err := m.pageReader(n)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rc.Close() }()
-	if m.Pages[n].file.UncompressedSize64 > uint64(2*m.size) {
+	if size := m.Pages[n].file.UncompressedSize64; size > pageInflateFloor && size > uint64(2*m.size) {
 		return fmt.Errorf("page %d inflates past twice the archive's size", n+1)
 	}
 	return fsx.WriteAtomic(dst, ".page.*", func(f *os.File) error {

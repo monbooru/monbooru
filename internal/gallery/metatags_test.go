@@ -613,3 +613,36 @@ func spliceAPNGChunk(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+func TestSilentVideos_OnlyWhatTheDerivationTaggedVideoAndNotSound(t *testing.T) {
+	if !ffprobeAvailable() {
+		t.Skip("ffprobe not available")
+	}
+	database, env, galleryDir := setupSyncTest(t)
+	svc, metaCat := metaFixture(t, database)
+	ingest := func(name string, side int) int64 {
+		rec, _ := mustIngest(t, database, galleryDir, env.thumbnailsPath, createTestPNGFileSize(t, galleryDir, name, side, side), "")
+		return rec.ID
+	}
+	claim := func(id int64, source string, names ...string) {
+		ids, err := svc.GetOrCreateTagsFrom(names, metaCat, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.SyncSourceTags(id, ids, source, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	silent, sound, untagged, byHand := ingest("silent.png", 10), ingest("sound.png", 11), ingest("untagged.png", 12), ingest("hand.png", 13)
+	claim(silent, models.TagSourceMonbooru, "video")
+	claim(sound, models.TagSourceMonbooru, "video", "sound")
+	claim(byHand, "user", "video")
+
+	got, err := SilentVideos(database, []int64{silent, sound, untagged, byHand})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []int64{silent}) {
+		t.Errorf("silent = %v, want [%d]", got, silent)
+	}
+}

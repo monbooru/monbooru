@@ -30,6 +30,7 @@ import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/globaltags"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/metadata"
@@ -82,9 +83,11 @@ type Server struct {
 	configPath string
 	cfgMu      sync.RWMutex // guards cfg reads/writes and config.Save calls
 	jobs       *jobs.Manager
+	global     globalTagState
 	pairs      *peer.Store
 	pool       *tagger.Pool
 	local      *localWorker
+	syncMu     sync.Mutex // held by syncWorkers, so the last config written is the last applied
 	sessions   *session.Store
 	loginRL    *session.Backoff
 	tmpl       *template.Template
@@ -170,6 +173,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	}
 	s.peers = plugins.NewPeers(s.pluginCallbackURL, s.done)
 	s.ml = monloader.NewLink(s.monloaderLink, jobManager)
+	jobManager.OnEnd(func() { s.applyGlobalChanges(true) })
 
 	applyRelationsConfig(cfg.Relations)
 	gallery.MetaTagsEnabled.Store(cfg.Gallery.AutoMetaTags)
@@ -206,7 +210,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	tagger.MoveDispatchOverlays(cfg.Paths.ModelPath, cfg.Paths.DataPath)
 	s.pool = tagger.NewPool(filepath.Join(cfg.Paths.DataPath, "workers"))
 	s.local = newLocalWorker()
-	s.syncWorkers(cloneConfig(cfg))
+	s.syncWorkers()
 	tagger.SetPool(s.pool)
 	poolCtx, stopPool := context.WithCancel(context.Background())
 	go func() {
@@ -337,6 +341,16 @@ func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, mod
 func (s *Server) StartWatchers() {
 	s.set.StartBackground()
 	s.turnUpgradedThumbs()
+	sides := s.globalSides()
+	globaltags.Reset(sides)
+	if globaltags.Any(sides) {
+		for _, side := range sides {
+			if !globaltags.Any([]globaltags.Side{side}) {
+				s.queueGlobalPull(side.Name)
+			}
+		}
+	}
+	s.applyGlobalChanges(false)
 }
 
 func (s *Server) background(name string) library.Background {
@@ -348,7 +362,7 @@ func (s *Server) Handler() http.Handler {
 	rt := s.newRoutes()
 	s.registerRoutes(rt)
 
-	var h http.Handler = rt.mux
+	h := s.globalTagsMiddleware(rt.mux)
 	h = s.sessions.Guard(pluginMountOrigin(h), isPluginMount)
 	h = s.setupMiddleware(h)
 	h = s.sessions.Gate(h, sessionCookie, s.authEnabled, isOpenPath)
@@ -465,6 +479,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("DELETE /tags/{id}", s.deleteTagHandler)
 	rt.read("POST /tags/{id}/reject", s.rejectTagPost)
 	rt.read("POST /tags/{id}/unreject", s.unrejectTagPost)
+	rt.read("POST /tags/global", s.makeTagsGlobalPost)
+	rt.read("POST /tags/global/check", s.makeTagsGlobalCheck)
+	rt.read("POST /tags/{id}/local", s.makeTagLocalPost)
 	rt.read("PATCH /tags/{id}/category", s.changeTagCategory)
 	rt.read("GET /tags/{id}/implications", s.implicationsDialogHandler)
 	rt.read("POST /tags/{id}/implications", s.addImplicationPost)
@@ -501,6 +518,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/general/ignore", s.settingsIgnorePost)
 	rt.free("POST /settings/monloader", s.settingsMonloaderPost)
 	rt.free("POST /settings/tagger", s.settingsTaggerPost)
+	rt.free("POST /settings/tagger/jobs", s.settingsTaggerJobsPost)
 	rt.free("POST /settings/auth/password", s.settingsPasswordPost)
 	rt.free("POST /settings/auth/remove-password", s.settingsRemovePasswordPost)
 	rt.free("POST /settings/auth/tokens", s.settingsTokenCreate)
@@ -571,6 +589,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/maintenance/free-memory", s.freeMemoryPost)
 	rt.free("POST /settings/workers/local/enable", s.taggerLocalWorkerPost(true))
 	rt.free("POST /settings/workers/local/disable", s.taggerLocalWorkerPost(false))
+	rt.free("POST /settings/workers/add", s.taggerWorkerAddPost)
 	rt.free("POST /settings/workers/{name}/pause", s.taggerWorkerPausePost(true))
 	rt.free("POST /settings/workers/{name}/resume", s.taggerWorkerPausePost(false))
 	rt.free("POST /settings/workers/{name}/remove", s.taggerWorkerRemovePost)
@@ -1204,6 +1223,7 @@ func (s *Server) planMangaPage(
 	}
 	page, err := ensure(s.thumbnailsPath(), canonPath, id, n)
 	if err != nil {
+		logx.Warnf("page %d of image %s: %v", n, idStr, err)
 		http.NotFound(w, r)
 		return "", false
 	}
@@ -1345,23 +1365,25 @@ func (s *Server) withConfig(fn func(*config.Config) error) error {
 		logx.Errorf("config save: %v", err)
 		return err
 	}
-	after := cloneConfig(s.cfg)
 	s.cfgMu.Unlock()
 	// Outside the lock: stopping the local worker waits for it to exit.
-	s.syncWorkers(after)
+	s.syncWorkers()
 	return nil
 }
 
-func (s *Server) syncWorkers(cfg *config.Config) {
+func (s *Server) syncWorkers() {
 	if s.pool == nil {
 		return
 	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	cfg := s.cfgSnapshot()
 	defs := make([]tagger.WorkerDef, 0, len(cfg.Workers)+1)
 	if s.local != nil && s.local.apply(s.peers.Supervisor, cfg) {
 		defs = append(defs, s.local.def())
 	}
 	for _, w := range cfg.Workers {
-		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Paused: w.Paused})
+		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Gateway: w.GatewayToken, Paused: w.Paused, OnDemand: w.OnDemand})
 	}
 	s.pool.Set(defs)
 }

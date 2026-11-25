@@ -136,6 +136,21 @@ func TestLand_RefusesALeftOutFolderBeforeCreatingIt(t *testing.T) {
 	}
 }
 
+func TestLand_RefusesAnUnreadableRootBeforeCreatingIt(t *testing.T) {
+	cx := openTestGallery(t)
+	if err := os.Remove(cx.GalleryPath); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(cx.GalleryPath, "sub")
+	_, err := cx.Land(context.Background(), sub, "a.png", FromReader(bytes.NewReader(pngBytes(t, 40))), LandSpec{Origin: "upload"})
+	if !errors.Is(err, gallery.ErrRootUnreadable) {
+		t.Fatalf("err = %v, want ErrRootUnreadable", err)
+	}
+	if exists(cx.GalleryPath) {
+		t.Error("the gallery folder was created again")
+	}
+}
+
 func TestLand_ALandingInsideAnothersWriteKeepsBoth(t *testing.T) {
 	cx := openTestGallery(t)
 	outerBody, innerBody := pngBytes(t, 30), pngBytes(t, 31)

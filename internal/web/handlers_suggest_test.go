@@ -69,8 +69,42 @@ func TestTagSuggest_CanonicalInputQualifiesAnAmbiguousGeneralName(t *testing.T) 
 	wantIn(t, do(srv, "GET", "/internal/tags/suggest?tag=ca").Body.String(), `data-tag-name="cat"`)
 }
 
-// The NOCASE prefix range around case and accents, through the source
-// labels that read it.
+func TestSuggest_AnAliasRowWritesItsTag(t *testing.T) {
+	srv := newTestServer(t)
+	cx := srv.active()
+	id := insertTestImage(t, srv)
+	reimu := mustTag(t, cx.TagSvc, "hakurei_reimu", categoryIDByName(t, srv, "character"))
+	mustAddTag(t, cx.TagSvc, id, reimu.ID, false, nil)
+	if _, err := cx.TagSvc.CreateAlias("shrine_maiden", cx.GeneralCategoryID, reimu.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	const pick = `data-tag-name="character:hakurei_reimu"`
+	for _, path := range []string{
+		"/internal/search/suggest?q=shrine",
+		"/internal/search/suggest?q=-shrine",
+		"/internal/search/suggest?q=general:shrine",
+		"/internal/search/suggest?q=system:general:shrine",
+		"/internal/tags/suggest?tag=shrine",
+		"/internal/tags/suggest?tag=general:shrine",
+		"/internal/tags/suggest?canonical_id=shrine",
+	} {
+		body := do(srv, "GET", path).Body.String()
+		wantIn(t, body, pick)
+		wantIn(t, body, "shrine_maiden →")
+		if n := strings.Count(body, "data-tag-name="); n != 1 {
+			t.Errorf("%s: %d rows, want 1", path, n)
+		}
+	}
+	for _, path := range []string{
+		"/internal/search/suggest?q=character:hakurei_reimu+shrine",
+		"/internal/tags/suggest?name=shrine",
+	} {
+		wantNotIn(t, do(srv, "GET", path).Body.String(), "hakurei_reimu")
+	}
+	wantNotIn(t, do(srv, "GET", "/internal/search/suggest?q=hakurei").Body.String(), "→")
+}
+
 func TestLabelSuggest_CaseBoundary(t *testing.T) {
 	srv := newTestServer(t)
 	cx := srv.active()

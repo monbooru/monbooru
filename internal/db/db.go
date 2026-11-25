@@ -114,7 +114,7 @@ func Open(path string) (*DB, error) {
 		"&_pragma=synchronous(normal)" +
 		"&_pragma=cache_size(-1024)" +
 		"&_pragma=temp_store(memory)" +
-		"&_pragma=mmap_size(67108864)"
+		"&_pragma=mmap_size(0)"
 
 	rd, err := sql.Open("sqlite", dsn)
 	if err != nil {

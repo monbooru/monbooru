@@ -54,6 +54,7 @@ func buildSpec(baseURL string) map[string]any {
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
 					"rejected":     map[string]any{"type": "boolean", "description": "True when the name is rejected: every add path drops it until it is un-rejected."},
+					"global":       map[string]any{"type": "boolean", "description": "True when the tag is global, the same tag in every gallery; an alias carries its canonical's mark."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label: 'user', a booru site, 'ptr', an auto-tagger name, an import label. Empty on rows predating the column."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; most recent application to an image. Absent when never applied."},
 				}),
@@ -65,6 +66,7 @@ func buildSpec(baseURL string) map[string]any {
 					"usage_count":  map[string]any{"type": "integer"},
 					"is_alias":     map[string]any{"type": "boolean"},
 					"rejected":     map[string]any{"type": "boolean", "description": "As on TagRow."},
+					"global":       map[string]any{"type": "boolean", "description": "As on TagRow."},
 					"origin":       map[string]any{"type": "string", "description": "Creation provenance label, as on TagRow."},
 					"last_used_at": map[string]any{"type": "string", "description": "ISO 8601; absent when never applied."},
 					"note":         map[string]any{"type": "string", "description": "The operator's note on the tag, in annotation markup; empty when none. An alias has none."},
@@ -407,6 +409,7 @@ func buildSpec(baseURL string) map[string]any {
 						"413": resp("File exceeds max size", "#/components/schemas/Error"),
 						"415": resp("The file does not decode as an image", "#/components/schemas/Error"),
 						"500": resp("Ingest failure", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/images/search": map[string]any{
@@ -467,6 +470,7 @@ func buildSpec(baseURL string) map[string]any {
 						"204": map[string]any{"description": "Deleted"},
 						"404": resp("Not found", "#/components/schemas/Error"),
 						"500": resp("Delete failed server-side", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 					}),
 			},
 			"/images/{id}/enrich": map[string]any{
@@ -648,6 +652,7 @@ func buildSpec(baseURL string) map[string]any {
 						"413": resp("File exceeds max size", "#/components/schemas/Error"),
 						"415": resp("The file does not decode as an image", "#/components/schemas/Error"),
 						"500": resp("The replacement failed server-side", "#/components/schemas/Error"),
+						"503": resp("No active gallery; gallery_unavailable when the gallery folder cannot be read", "#/components/schemas/Error"),
 						"409": resp("wrong_type for an archive/video row or a non-image upload; already_exists when the uploaded bytes are another image (the pair is recorded as potential duplicates); conflict when the image's file is not this gallery's to rewrite (outside its root, or in a folder it leaves out)", "#/components/schemas/Error"),
 					},
 				},
@@ -749,6 +754,7 @@ func buildSpec(baseURL string) map[string]any {
 						queryParam("origin", "Filter by stored creation origin ('user', a booru site, 'ptr', an auto-tagger name, ...). The legacy 'alias' value narrows to alias rows. Empty (default) returns every tag."),
 						queryParam("type", "Structural filter: 'tag' (plain rows), 'alias' (alias rows), 'rejected' (rejected names). Empty (default) returns all; any other value matches nothing."),
 						queryParam("used_by", "Only tags this source applied to at least one image (an auto-tagger name, a booru site, 'user', a via label), whoever created the tag."),
+						queryParam("scope", "'global' keeps the global tags and their aliases, 'local' the others. Empty (default) returns both."),
 					},
 					map[string]any{
 						"200": resp("Paginated tag list", "#/components/schemas/PaginatedTags"),
@@ -789,6 +795,7 @@ func buildSpec(baseURL string) map[string]any {
 					map[string]any{
 						"204": map[string]any{"description": "Deleted (the four canonical rating rows are usage-stripped; the catalog row stays)"},
 						"404": resp("Tag not found", "#/components/schemas/Error"),
+						"409": resp("conflict: the tag is global; make it local first", "#/components/schemas/Error"),
 					}),
 			},
 			"/tags/aliases": map[string]any{
@@ -1428,7 +1435,7 @@ var docsTemplate = template.Must(template.New("api-docs").Parse(`<!DOCTYPE html>
  a:hover { text-decoration:underline; }
  code { font-family:inherit; }
  table { border-collapse:collapse; width:100%; margin:6px 0 10px; font-size:13px; }
- th, td { border:1px solid #2a2a2a; padding:4px 8px; text-align:left; vertical-align:top; }
+ th, td { border:1px solid #2a2a2a; padding:4px 8px; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
  th { color:#666; font-weight:normal; background:#111; }
  .muted { color:#666; font-size:12px; }
  .method { display:inline-block; padding:1px 6px; border:1px solid; font-weight:bold; margin-right:8px; font-size:12px; min-width:52px; text-align:center; }
@@ -1437,7 +1444,7 @@ var docsTemplate = template.Must(template.New("api-docs").Parse(`<!DOCTYPE html>
  .method-put    { color:#ffaa00; border-color:#ffaa00; }
  .method-patch  { color:#ffaa00; border-color:#ffaa00; }
  .method-delete { color:#cc3333; border-color:#cc3333; }
- .path { color:#c8c8c8; }
+ .path { color:#c8c8c8; overflow-wrap:anywhere; }
  ul.toc { list-style:none; padding:0; margin:8px 0 20px; }
  ul.toc li { padding:2px 0; }
  .tag { color:#ffaa00; }
