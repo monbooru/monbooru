@@ -168,6 +168,10 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			break
 		}
 		if q.DeferCount {
+			if n, ok := src.Cache.total(key); ok {
+				total = n
+				break
+			}
 			counted, deferred = false, true
 			break
 		}
@@ -268,6 +272,9 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 		switch {
 		case len(images) < limit && (len(images) > 0 || offset == 0) && !reverse:
 			total = offset + len(images)
+			if total == 0 {
+				src.Cache.setTotal(key, 0, gen)
+			}
 		case len(images) == 0:
 			// A page past the end needs the total to clamp to.
 			if total, err = exactTotal(ctx, src, q.Expr, where, args); err != nil {
@@ -364,8 +371,17 @@ func Count(ctx context.Context, src Source, q Query) (int, error) {
 	if ids, ok := src.Cache.get(q.listKey(src)); ok {
 		return len(ids), nil
 	}
+	key := q.listKey(src)
+	if n, ok := src.Cache.total(key); ok {
+		return n, nil
+	}
+	gen := src.Cache.gen()
 	where, args := exactCountWhere(src, q.Expr)
-	return exactTotal(ctx, src, q.Expr, where, args)
+	n, err := exactTotal(ctx, src, q.Expr, where, args)
+	if err == nil {
+		src.Cache.setTotal(key, n, gen)
+	}
+	return n, err
 }
 
 func scanImageRow(rows *sql.Rows) (models.Image, error) { return models.ScanImageRow(rows) }

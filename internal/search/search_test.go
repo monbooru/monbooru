@@ -3577,6 +3577,60 @@ func TestExecute_DeferCountKeepsAFastCount(t *testing.T) {
 	}
 }
 
+func TestExecute_AnEmptyDeferredSearchIsRememberedUntilAWrite(t *testing.T) {
+	database, env := setupSearchDB(t)
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "kept-zero", Expr: Parse("width:>0"), DeferCount: true}
+	if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 0 {
+		t.Fatalf("empty library: unknown=%v total=%d, want known 0", res.TotalUnknown, res.Total)
+	}
+	ingestTestImage(t, database, env, "keptzero.png")
+	if res := mustExecute(t, database, q); res.Total != 0 || len(res.Results) != 0 {
+		t.Errorf("before the cache is dropped: total=%d rows=%d, want the remembered 0", res.Total, len(res.Results))
+	}
+	src.Cache.Drop()
+	if res := mustExecute(t, database, q); len(res.Results) != 1 {
+		t.Errorf("after the drop: rows=%d, want the new image", len(res.Results))
+	}
+}
+
+func TestCount_IsRememberedUntilAWrite(t *testing.T) {
+	database, env := setupSearchDB(t)
+	for i := range 3 {
+		ingestTestImage(t, database, env, "keptcount"+strconv.Itoa(i)+".png")
+	}
+	src := testSource(database)
+	q := Query{Sort: "newest", Order: "desc", Page: 1, Limit: 2, Cached: true, Text: "kept-count", Expr: Parse("width:>0"), DeferCount: true}
+	old := adjacencyCacheMaxIDs
+	adjacencyCacheMaxIDs = 2
+	t.Cleanup(func() { adjacencyCacheMaxIDs = old })
+	count := func() int {
+		t.Helper()
+		n, err := Count(context.Background(), src, q)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		return n
+	}
+	if n := count(); n != 3 {
+		t.Fatalf("Count = %d, want 3", n)
+	}
+	ingestTestImage(t, database, env, "keptcount3.png")
+	if n := count(); n != 3 {
+		t.Errorf("before the cache is dropped: Count = %d, want the remembered 3", n)
+	}
+	if res := mustExecute(t, database, q); res.TotalUnknown || res.Total != 3 {
+		t.Errorf("the page after a count: unknown=%v total=%d, want the remembered 3", res.TotalUnknown, res.Total)
+	}
+	src.Cache.Drop()
+	if n := count(); n != 4 {
+		t.Errorf("after the drop: Count = %d, want 4", n)
+	}
+	if n, err := Count(context.Background(), src, Query{Expr: q.Expr}); err != nil || n != 4 {
+		t.Errorf("uncached query: Count = %d, %v; want 4", n, err)
+	}
+}
+
 func pageIDs(res *models.SearchResult) []int64 {
 	ids := make([]int64, len(res.Results))
 	for i, img := range res.Results {
