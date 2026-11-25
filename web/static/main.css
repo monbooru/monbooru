@@ -2415,8 +2415,11 @@ body.reader-body {
   right: 8px;
   bottom: 8px;
   z-index: 3;
+  min-width: 28px;
+  min-height: 24px;
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
+  line-height: 1;
   color: var(--fg-dim);
   background: var(--bg-surface);
   border: 1px dashed var(--border);
@@ -2467,6 +2470,7 @@ body.reader-body {
 .reader-counter { border: 1px dashed var(--border); padding: 2px 8px; }
 .reader-disabled { opacity: 0.3; padding: 2px 6px; }
 .reader-back { margin-right: 0; }
+.reader-bar .reader-hide { min-width: 24px; font-size: 15px; line-height: 18px; }
 .reader-pages { margin-right: auto; }
 .reader-zoom { margin-left: auto; min-width: 6ch; border: 0; text-align: right; }
 .reader-zoom:empty { visibility: hidden; }
@@ -2584,7 +2588,6 @@ body.reader-body {
 .viewer-volume span:nth-child(5) { height: 12px; }
 .viewer-volume span.on { background: var(--fg-dim); }
 .viewer-bar [data-viewer="mute"][aria-pressed="true"] + .viewer-volume span.on { background: var(--link); }
-#viewer-dialog .bar-handle { min-width: 28px; min-height: 24px; font-size: 15px; line-height: 1; }
 @media (max-width: 860px) {
   .viewer-bar { display: flex; flex-wrap: wrap; row-gap: 8px; padding-left: 8px; padding-right: 8px; }
   .viewer-bar-group { padding: 0; gap: 6px; }
