@@ -2583,7 +2583,7 @@ body.reader-body {
 .viewer-track.still { cursor: default; }
 .viewer-track.still .viewer-track-knob { display: none; }
 .viewer-dialog:not(.bar-hidden) .viewer-progress { display: none; }
-.viewer-volume { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; padding: 7px 2px; cursor: pointer; }
+.viewer-volume { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; padding: 7px 2px; cursor: pointer; }
 .viewer-volume span { display: block; width: 4px; background: var(--border); }
 .viewer-volume span:nth-child(1) { height: 2px; }
 .viewer-volume span:nth-child(2) { height: 4px; }
