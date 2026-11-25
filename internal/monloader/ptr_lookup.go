@@ -94,10 +94,10 @@ func LookupGroups(tagSvc func() *tags.Service, id int64, tagForm, spelling strin
 	}
 	localImplied, localImpliedBy := map[string]bool{}, map[string]bool{}
 	for _, im := range implications {
-		localImplied[tags.FormName(im.ImpliedCategoryName, im.ImpliedName)] = true
+		localImplied[contract.TagForm(im.ImpliedCategoryName, im.ImpliedName)] = true
 	}
 	for _, im := range impliedBy {
-		localImpliedBy[tags.FormName(im.ParentCategoryName, im.ParentName)] = true
+		localImpliedBy[contract.TagForm(im.ParentCategoryName, im.ParentName)] = true
 	}
 	seen := map[string]bool{tagForm: true}
 	aliases := LookupGroup{Kind: LookupAliases}

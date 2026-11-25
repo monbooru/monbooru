@@ -48,6 +48,20 @@ func TestFoldTagNameKeepsWhatItIsTold(t *testing.T) {
 	}
 }
 
+func TestTagForm(t *testing.T) {
+	cases := []struct{ category, name, want string }{
+		{"general", "solo", "solo"},
+		{"artist", "user_a", "artist:user_a"},
+		{"", "solo", ""},
+		{"artist", "", ""},
+	}
+	for _, c := range cases {
+		if got := TagForm(c.category, c.name); got != c.want {
+			t.Errorf("TagForm(%q, %q) = %q, want %q", c.category, c.name, got, c.want)
+		}
+	}
+}
+
 func TestCutTagCategory(t *testing.T) {
 	var asked []string
 	known := func(c string) bool { asked = append(asked, c); return c == "artist" }

@@ -55,16 +55,28 @@ func CutTagCategory(form string, isCategory func(string) bool) (category, name s
 	return category, rest, true
 }
 
+// TagForm spells a category and a name as the tag language does: the bare
+// name for general, "" when either is missing.
+func TagForm(category, name string) string {
+	switch {
+	case category == "" || name == "":
+		return ""
+	case category == "general":
+		return name
+	}
+	return category + ":" + name
+}
+
 // FoldTagForm folds a category:name form: the category split off as
 // CutTagCategory reads it, the name folded keeping keep and trimmed, and
 // general left bare. A form whose name folds away is "".
 func FoldTagForm(form, keep string, isCategory func(string) bool) string {
 	category, name, ok := CutTagCategory(form, isCategory)
 	name = strings.Trim(FoldTagName(name, keep), "_")
-	if !ok || name == "" || category == "general" {
+	if !ok {
 		return name
 	}
-	return category + ":" + name
+	return TagForm(category, name)
 }
 
 // NormalizeTagForm is a form as it is stored and sent.

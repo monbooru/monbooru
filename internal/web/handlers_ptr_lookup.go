@@ -11,7 +11,6 @@ import (
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/monloader"
 	"github.com/monbooru/monbooru/internal/shared/contract"
-	"github.com/monbooru/monbooru/internal/tags"
 )
 
 func (s *Server) ptrLookupSearchPost(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +173,7 @@ func (s *Server) tagPtrLookupSearch(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{"TagID": id, "Seed": !isTypeahead}
 	render := func() { s.renderTemplate(w, "partials/tag_ptr_lookup_search.html", data) }
 
-	tagForm := tags.FormName(tag.CategoryName, tag.Name)
+	tagForm := contract.TagForm(tag.CategoryName, tag.Name)
 	q := strings.TrimSpace(strings.Join(typed, ""))
 	if isTypeahead && q == "" {
 		render()
@@ -266,7 +265,7 @@ func (s *Server) tagPtrLookupPreview(w http.ResponseWriter, r *http.Request) {
 		s.renderTemplate(w, "partials/tag_ptr_lookup_result.html", data)
 		return
 	}
-	tagForm := tags.FormName(tag.CategoryName, tag.Name)
+	tagForm := contract.TagForm(tag.CategoryName, tag.Name)
 	data["TagForm"] = tagForm
 	found, err := monloader.LookupGroups(s.tagSvc, id, tagForm, spelling, info)
 	if err != nil {

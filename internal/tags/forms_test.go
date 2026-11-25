@@ -87,9 +87,6 @@ func TestNormalizeForm_ElidesTheGeneralCategory(t *testing.T) {
 	if _, ok := svc.NormalizeForm(`bad"name`); ok {
 		t.Error("a name with a quote normalized")
 	}
-	if got := FormName("general", "solo"); got != "solo" {
-		t.Errorf("FormName(general, solo) = %q", got)
-	}
 }
 
 func TestAliasForms_KeysTheFoldedSpellingToo(t *testing.T) {
