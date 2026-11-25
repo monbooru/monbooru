@@ -1576,8 +1576,8 @@ document.addEventListener('keydown', function(e) {
 
   if (e.key === 'o') {
     if (isDetailPage()) {
-      var dlA = document.querySelector('.detail-actions a[download]');
-      if (dlA) { e.preventDefault(); window.open(dlA.href, '_blank'); return; }
+      var openA = document.getElementById('detail-open');
+      if (openA) { e.preventDefault(); openA.click(); return; }
     } else {
       var foc = document.querySelector('.thumb-card.focused a');
       if (foc) { e.preventDefault(); window.location.href = foc.href; return; }

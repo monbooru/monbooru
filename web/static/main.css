@@ -1146,13 +1146,14 @@ dialog select { max-width: 100%; }
   font-size: 13px;
   line-height: 1.4;
 }
-.btn-fav {
+.btn-fav, .detail-actions .btn-sm {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   padding: 2px 0;
 }
+#detail-open { font-size: 16px; line-height: 18.2px; padding: 4px 0 0; }
 .btn-fav:hover, .btn-fav.active { color: var(--fav); background: color-mix(in srgb, var(--fav) 16%, transparent); }
 .btn-fav { position: relative; }
 .btn-fav.fav-burst::after {
@@ -2277,9 +2278,8 @@ details[open] > .relations-card-summary::before { content: "▼"; }
 @media (max-width: 600px) {
   .detail-topbar { flex-wrap: wrap; row-gap: 6px; gap: 12px; }
   .detail-nav-group { flex-basis: 100%; }
-  .detail-topbar-right { flex-basis: 100%; justify-content: flex-start; }
+  .detail-topbar-right { flex-basis: 100%; justify-content: flex-start; flex-wrap: wrap; row-gap: 6px; }
 }
-@media (max-width: 359px) { .detail-topbar-right { flex-wrap: wrap; row-gap: 6px; } }
 
 @media (max-width: 768px) {
   #sidebar {
