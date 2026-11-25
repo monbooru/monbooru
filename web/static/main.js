@@ -790,20 +790,15 @@ var viewer = (function () {
   }
   function drawTrack() {
     var v = currentVideo(), at = 0, length = 0, done = 0;
+    track.parentNode.classList.toggle('still', !v);
     if (v) {
       length = isFinite(v.duration) ? v.duration : 0;
       at = v.currentTime;
       done = length ? at / length : 0;
-    } else if (current) {
-      length = durationMs / 1000;
-      at = length - (startedAt === null ? remainingMs : remainingMs - (Date.now() - startedAt)) / 1000;
-      done = Math.floor(at / length * 20) / 20;
     }
     var pct = Math.max(0, Math.min(100, done * 100)) + '%';
     track.querySelector('.viewer-track-fill').style.width = pct;
     track.querySelector('.viewer-track-knob').style.left = pct;
-    track.classList.toggle('still', !v);
-    track.parentNode.classList.toggle('still', !v);
     track.setAttribute('aria-valuemax', String(Math.floor(length)));
     track.setAttribute('aria-valuenow', String(Math.floor(at)));
     document.getElementById('viewer-time-at').textContent = clock(at);
