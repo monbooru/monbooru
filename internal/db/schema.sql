@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS images (
     -- Mirror-canonical DCT pHash; NULL = not yet computed or nothing to hash.
     phash          INTEGER,
     ingested_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    file_created_at  INTEGER NOT NULL DEFAULT 0,
+    file_modified_at INTEGER NOT NULL DEFAULT 0,
     -- UnixNano token shared by one web-UI upload's rows; NULL otherwise.
     upload_batch   INTEGER
 );
@@ -402,6 +404,8 @@ CREATE INDEX IF NOT EXISTS idx_images_folder     ON images(folder_path);
 CREATE INDEX IF NOT EXISTS idx_images_folder_visible ON images(folder_path) WHERE is_missing = 0;
 CREATE INDEX IF NOT EXISTS idx_images_filesize_visible ON images(file_size DESC, id DESC) WHERE is_missing = 0;
 CREATE INDEX IF NOT EXISTS idx_images_ingested_visible ON images(ingested_at DESC, id DESC) WHERE is_missing = 0;
+CREATE INDEX IF NOT EXISTS idx_images_file_created_visible  ON images(file_created_at DESC, id DESC) WHERE is_missing = 0;
+CREATE INDEX IF NOT EXISTS idx_images_file_modified_visible ON images(file_modified_at DESC, id DESC) WHERE is_missing = 0;
 -- Visible-only, so mime:, type: and ai: don't fall back on idx_images_missing.
 CREATE INDEX IF NOT EXISTS idx_images_file_type_visible   ON images(file_type)   WHERE is_missing = 0;
 CREATE INDEX IF NOT EXISTS idx_images_source_type_visible ON images(source_type) WHERE is_missing = 0;

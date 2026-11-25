@@ -57,6 +57,18 @@ func Bootstrap(db *DB) error {
 		WHERE url <> '' AND upgrade_kept = 0 AND (md5_match = 'differ' OR (similarity > 0 AND md5_match = ''))`)
 	b.ensureColumn("images", "page_count", `ALTER TABLE images ADD COLUMN page_count INTEGER`)
 	b.ensureColumn("images", "last_read_page", `ALTER TABLE images ADD COLUMN last_read_page INTEGER`)
+	b.ensureColumn("images", "file_created_at", `ALTER TABLE images ADD COLUMN file_created_at INTEGER NOT NULL DEFAULT 0`)
+	b.ensureColumn("images", "file_modified_at", `ALTER TABLE images ADD COLUMN file_modified_at INTEGER NOT NULL DEFAULT 0`)
+	b.exec("create idx_images_file_created_visible", `CREATE INDEX IF NOT EXISTS idx_images_file_created_visible ON images(file_created_at DESC, id DESC) WHERE is_missing = 0`)
+	b.exec("create idx_images_file_modified_visible", `CREATE INDEX IF NOT EXISTS idx_images_file_modified_visible ON images(file_modified_at DESC, id DESC) WHERE is_missing = 0`)
+	b.exec("backfill images file_modified_at", `
+		UPDATE images SET file_modified_at = (
+			SELECT ip.mtime_unix FROM image_paths ip WHERE ip.image_id = images.id AND ip.is_canonical = 1
+		) WHERE file_modified_at = 0 AND EXISTS (
+			SELECT 1 FROM image_paths ip WHERE ip.image_id = images.id AND ip.is_canonical = 1 AND ip.mtime_unix > 0
+		)`)
+	b.exec("backfill images file_created_at", `
+		UPDATE images SET file_created_at = file_modified_at WHERE file_created_at = 0 AND file_modified_at > 0`)
 	b.exec("create idx_images_duration_visible", `CREATE INDEX IF NOT EXISTS idx_images_duration_visible ON images(duration_seconds) WHERE is_missing = 0 AND duration_seconds IS NOT NULL`)
 	// Not UNIQUE: a crafted md5 collision would abort an ingest.
 	b.exec("create idx_images_md5", `CREATE INDEX IF NOT EXISTS idx_images_md5 ON images(md5) WHERE md5 != ''`)

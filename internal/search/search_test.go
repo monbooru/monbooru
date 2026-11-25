@@ -2689,6 +2689,16 @@ func TestBuildOrder(t *testing.T) {
 		{"FilesizeAsc", "filesize", "asc", 0, []string{"file_size", "ASC"}},
 		{"Order", "order", "", 0, []string{"i.series ASC", "i.series_order IS NULL", "i.series_order ASC", "i.id ASC"}},
 		{"OrderDesc", "order", "desc", 0, []string{"i.series DESC", "i.series_order IS NULL", "i.series_order DESC", "i.id DESC"}},
+		{"Created", "created", "", 0, []string{"i.file_created_at DESC", "i.id DESC"}},
+		{"CreatedAsc", "created", "asc", 0, []string{"i.file_created_at ASC", "i.id ASC"}},
+		{"FileCreated", "file_created", "desc", 0, []string{"i.file_created_at DESC", "i.id DESC"}},
+		{"Modified", "modified", "", 0, []string{"i.file_modified_at DESC", "i.id DESC"}},
+		{"ModifiedAsc", "modified", "asc", 0, []string{"i.file_modified_at ASC", "i.id ASC"}},
+		{"FileModified", "file_modified", "desc", 0, []string{"i.file_modified_at DESC", "i.id DESC"}},
+		{"Name", "name", "", 0, []string{"i.basename_lower ASC", "i.id ASC"}},
+		{"NameDesc", "name", "desc", 0, []string{"i.basename_lower DESC", "i.id DESC"}},
+		{"Filename", "filename", "asc", 0, []string{"i.basename_lower ASC", "i.id ASC"}},
+		{"Alpha", "alpha", "", 0, []string{"i.basename_lower ASC", "i.id ASC"}},
 		{"Unknown", "unknown_sort", "", 0, []string{"ingested_at", "DESC"}},
 		{"Random", "random", "", 12345, []string{"random_key(i.id, 12345)"}},
 	} {
@@ -2704,6 +2714,9 @@ func TestBuildOrder(t *testing.T) {
 func TestDefaultOrder(t *testing.T) {
 	for sort, want := range map[string]string{
 		"order": "asc", "newest": "desc", "filesize": "desc", "random": "desc", "": "desc",
+		"created": "desc", "file_created": "desc",
+		"modified": "desc", "file_modified": "desc",
+		"name": "asc", "filename": "asc", "alpha": "asc",
 	} {
 		if got := DefaultOrder(sort); got != want {
 			t.Errorf("DefaultOrder(%q) = %q, want %q", sort, got, want)
@@ -3439,6 +3452,103 @@ func TestExecute_SortFilesize(t *testing.T) {
 	}
 }
 
+func TestExecute_SortCreated(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "c1.png")
+	ingestTestImage(t, database, cfg, "c2.png")
+	ingestTestImage(t, database, cfg, "c3.png")
+	c1 := imageIDByName(t, database, "c1.png")
+	c2 := imageIDByName(t, database, "c2.png")
+	c3 := imageIDByName(t, database, "c3.png")
+
+	mustExec(t, database.Write, `UPDATE images SET file_created_at = ? WHERE id = ?`, 1000, c1)
+	mustExec(t, database.Write, `UPDATE images SET file_created_at = ? WHERE id = ?`, 3000, c2)
+	mustExec(t, database.Write, `UPDATE images SET file_created_at = ? WHERE id = ?`, 2000, c3)
+
+	// Descending (default): c2 (3000), c3 (2000), c1 (1000)
+	resDesc := mustExecute(t, database, Query{Sort: "created", Page: 1, Limit: 40})
+	if got := resultIDs(resDesc); !slices.Equal(got, []int64{c2, c3, c1}) {
+		t.Errorf("sort=created desc got %v, want %v", got, []int64{c2, c3, c1})
+	}
+
+	// Ascending: c1 (1000), c3 (2000), c2 (3000)
+	resAsc := mustExecute(t, database, Query{Sort: "created", Order: "asc", Page: 1, Limit: 40})
+	if got := resultIDs(resAsc); !slices.Equal(got, []int64{c1, c3, c2}) {
+		t.Errorf("sort=created asc got %v, want %v", got, []int64{c1, c3, c2})
+	}
+
+	// Ties broken deterministically by ID: c1 and c3 both have 2000
+	mustExec(t, database.Write, `UPDATE images SET file_created_at = ? WHERE id = ?`, 2000, c1)
+	// For desc: (2000, c3) > (2000, c1) because c3 > c1
+	resTiesDesc := mustExecute(t, database, Query{Sort: "file_created", Order: "desc", Page: 1, Limit: 40})
+	if got := resultIDs(resTiesDesc); !slices.Equal(got, []int64{c2, c3, c1}) {
+		t.Errorf("sort=file_created ties desc got %v, want %v", got, []int64{c2, c3, c1})
+	}
+	// For asc: (2000, c1) < (2000, c3)
+	resTiesAsc := mustExecute(t, database, Query{Sort: "created", Order: "asc", Page: 1, Limit: 40})
+	if got := resultIDs(resTiesAsc); !slices.Equal(got, []int64{c1, c3, c2}) {
+		t.Errorf("sort=created ties asc got %v, want %v", got, []int64{c1, c3, c2})
+	}
+}
+
+func TestExecute_SortModified(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "m1.png")
+	ingestTestImage(t, database, cfg, "m2.png")
+	ingestTestImage(t, database, cfg, "m3.png")
+	m1 := imageIDByName(t, database, "m1.png")
+	m2 := imageIDByName(t, database, "m2.png")
+	m3 := imageIDByName(t, database, "m3.png")
+
+	mustExec(t, database.Write, `UPDATE images SET file_modified_at = ? WHERE id = ?`, 100, m1)
+	mustExec(t, database.Write, `UPDATE images SET file_modified_at = ? WHERE id = ?`, 300, m2)
+	mustExec(t, database.Write, `UPDATE images SET file_modified_at = ? WHERE id = ?`, 200, m3)
+
+	// Descending (default): m2 (300), m3 (200), m1 (100)
+	resDesc := mustExecute(t, database, Query{Sort: "modified", Page: 1, Limit: 40})
+	if got := resultIDs(resDesc); !slices.Equal(got, []int64{m2, m3, m1}) {
+		t.Errorf("sort=modified desc got %v, want %v", got, []int64{m2, m3, m1})
+	}
+
+	// Ascending: m1 (100), m3 (200), m2 (300)
+	resAsc := mustExecute(t, database, Query{Sort: "file_modified", Order: "asc", Page: 1, Limit: 40})
+	if got := resultIDs(resAsc); !slices.Equal(got, []int64{m1, m3, m2}) {
+		t.Errorf("sort=file_modified asc got %v, want %v", got, []int64{m1, m3, m2})
+	}
+}
+
+func TestExecute_SortName(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "Beta.png")
+	ingestTestImage(t, database, cfg, "alpha.png")
+	ingestTestImage(t, database, cfg, "CHARLIE.png")
+	beta := imageIDByName(t, database, "Beta.png")
+	alpha := imageIDByName(t, database, "alpha.png")
+	charlie := imageIDByName(t, database, "CHARLIE.png")
+
+	// Ascending (default for name): alpha, Beta, CHARLIE (case-insensitive)
+	resAsc := mustExecute(t, database, Query{Sort: "name", Page: 1, Limit: 40})
+	if got := resultIDs(resAsc); !slices.Equal(got, []int64{alpha, beta, charlie}) {
+		t.Errorf("sort=name asc got %v, want %v", got, []int64{alpha, beta, charlie})
+	}
+
+	// Descending: CHARLIE, Beta, alpha
+	resDesc := mustExecute(t, database, Query{Sort: "name", Order: "desc", Page: 1, Limit: 40})
+	if got := resultIDs(resDesc); !slices.Equal(got, []int64{charlie, beta, alpha}) {
+		t.Errorf("sort=name desc got %v, want %v", got, []int64{charlie, beta, alpha})
+	}
+
+	// Alias filename & alpha
+	resAlpha := mustExecute(t, database, Query{Sort: "alpha", Page: 1, Limit: 40})
+	if got := resultIDs(resAlpha); !slices.Equal(got, []int64{alpha, beta, charlie}) {
+		t.Errorf("sort=alpha asc got %v, want %v", got, []int64{alpha, beta, charlie})
+	}
+	resFilename := mustExecute(t, database, Query{Sort: "filename", Order: "desc", Page: 1, Limit: 40})
+	if got := resultIDs(resFilename); !slices.Equal(got, []int64{charlie, beta, alpha}) {
+		t.Errorf("sort=filename desc got %v, want %v", got, []int64{charlie, beta, alpha})
+	}
+}
+
 func TestExecute_SortRandom(t *testing.T) {
 	database, cfg := setupSearchDB(t)
 	ingestTestImage(t, database, cfg, "r1.png")
@@ -3844,6 +3954,54 @@ func TestExecuteAdjacent_Newest(t *testing.T) {
 		t.Fatalf("setup Execute: err=%v len=%d", err, len(result.Results))
 	}
 	assertAdjacencyChain(t, database, Query{Sort: "newest", Order: "desc"}, resultIDs(result))
+}
+
+func TestExecuteAdjacent_Created(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "adj_c1.png")
+	ingestTestImage(t, database, cfg, "adj_c2.png")
+	ingestTestImage(t, database, cfg, "adj_c3.png")
+
+	for _, order := range []string{"desc", "asc"} {
+		q := Query{Sort: "created", Order: order, Page: 1, Limit: 40}
+		result, err := Execute(context.Background(), testSource(database), q)
+		if err != nil || len(result.Results) != 3 {
+			t.Fatalf("setup Execute: err=%v len=%d", err, len(result.Results))
+		}
+		assertAdjacencyChain(t, database, Query{Sort: "created", Order: order}, resultIDs(result))
+	}
+}
+
+func TestExecuteAdjacent_Modified(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "adj_m1.png")
+	ingestTestImage(t, database, cfg, "adj_m2.png")
+	ingestTestImage(t, database, cfg, "adj_m3.png")
+
+	for _, order := range []string{"desc", "asc"} {
+		q := Query{Sort: "modified", Order: order, Page: 1, Limit: 40}
+		result, err := Execute(context.Background(), testSource(database), q)
+		if err != nil || len(result.Results) != 3 {
+			t.Fatalf("setup Execute: err=%v len=%d", err, len(result.Results))
+		}
+		assertAdjacencyChain(t, database, Query{Sort: "modified", Order: order}, resultIDs(result))
+	}
+}
+
+func TestExecuteAdjacent_Name(t *testing.T) {
+	database, cfg := setupSearchDB(t)
+	ingestTestImage(t, database, cfg, "adj_Beta.png")
+	ingestTestImage(t, database, cfg, "adj_alpha.png")
+	ingestTestImage(t, database, cfg, "adj_CHARLIE.png")
+
+	for _, order := range []string{"asc", "desc"} {
+		q := Query{Sort: "name", Order: order, Page: 1, Limit: 40}
+		result, err := Execute(context.Background(), testSource(database), q)
+		if err != nil || len(result.Results) != 3 {
+			t.Fatalf("setup Execute: err=%v len=%d", err, len(result.Results))
+		}
+		assertAdjacencyChain(t, database, Query{Sort: "name", Order: order}, resultIDs(result))
+	}
 }
 
 func TestExecuteAdjacent_Order(t *testing.T) {

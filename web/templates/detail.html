@@ -12,7 +12,10 @@
       {{template "partials/search_input.html" .BackQuery}}
       <span class="search-controls">
         <select name="sort" id="search-sort" aria-label="Sort">
-          <option value="newest"   {{if eq .BackSort "newest"}}selected{{end}}>Date added</option>
+          <option value="newest"   {{if or (eq .BackSort "newest") (eq .BackSort "")}}selected{{end}}>Date added</option>
+          <option value="created"  {{if or (eq .BackSort "created") (eq .BackSort "file_created")}}selected{{end}}>File creation date</option>
+          <option value="modified" {{if or (eq .BackSort "modified") (eq .BackSort "file_modified")}}selected{{end}}>File modified date</option>
+          <option value="name"     {{if or (eq .BackSort "name") (eq .BackSort "filename") (eq .BackSort "alpha")}}selected{{end}}>File name</option>
           <option value="filesize" {{if eq .BackSort "filesize"}}selected{{end}}>File size</option>
           <option value="order"    {{if eq .BackSort "order"}}selected{{end}}>Collection order</option>
         </select>

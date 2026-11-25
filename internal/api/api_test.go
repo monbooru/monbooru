@@ -2184,6 +2184,30 @@ func TestSearchImages_WithSort(t *testing.T) {
 			t.Errorf("random expected 2 results, got %d", len(got))
 		}
 	})
+	t.Run("name asc puts sort1 first", func(t *testing.T) {
+		got := get(t, "name", "asc")
+		first := got[0].(map[string]any)["canonical_path"].(string)
+		if !strings.HasSuffix(first, "sort1.png") {
+			t.Errorf("name asc first = %q, want …/sort1.png", first)
+		}
+	})
+	t.Run("name desc puts sort2 first", func(t *testing.T) {
+		got := get(t, "name", "desc")
+		first := got[0].(map[string]any)["canonical_path"].(string)
+		if !strings.HasSuffix(first, "sort2.png") {
+			t.Errorf("name desc first = %q, want …/sort2.png", first)
+		}
+	})
+	t.Run("created and modified sorts succeed", func(t *testing.T) {
+		gotCreated := get(t, "created", "")
+		if len(gotCreated) != 2 {
+			t.Errorf("created expected 2 results, got %d", len(gotCreated))
+		}
+		gotModified := get(t, "modified", "")
+		if len(gotModified) != 2 {
+			t.Errorf("modified expected 2 results, got %d", len(gotModified))
+		}
+	})
 }
 
 func TestSearchImages_SimilaritySortRanksByOverlap(t *testing.T) {

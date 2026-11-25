@@ -399,6 +399,23 @@ func TestBootstrapMangaColumns(t *testing.T) {
 	}
 }
 
+func TestBootstrapFileTimestamps(t *testing.T) {
+	db := openTestDB(t)
+	mustBootstrap(t, db)
+	for _, col := range []string{"file_created_at", "file_modified_at"} {
+		n := countRows(t, db, "pragma_table_info('images') WHERE name = ?", col)
+		if n != 1 {
+			t.Errorf("images.%s missing after Bootstrap", col)
+		}
+	}
+	for _, idx := range []string{"idx_images_file_created_visible", "idx_images_file_modified_visible"} {
+		idxN := countRows(t, db, "sqlite_master WHERE type='index' AND name=?", idx)
+		if idxN != 1 {
+			t.Errorf("%s not registered after Bootstrap", idx)
+		}
+	}
+}
+
 func TestShrinkMemory(t *testing.T) {
 	db := openTestDB(t)
 	mustBootstrap(t, db)

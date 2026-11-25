@@ -210,8 +210,8 @@ func repointCanonical(tx *sql.Tx, id int64, newPath, newFolder, dropOldPath stri
 		return fmt.Errorf("check the new path's owner: %w", err)
 	}
 	if _, err := tx.Exec(
-		`UPDATE images SET canonical_path = ?, folder_path = ? WHERE id = ?`,
-		newPath, newFolder, id,
+		`UPDATE images SET canonical_path = ?, folder_path = ?, file_modified_at = CASE WHEN ? > 0 THEN ? ELSE file_modified_at END WHERE id = ?`,
+		newPath, newFolder, mtime, mtime, id,
 	); err != nil {
 		return fmt.Errorf("point row at the new path: %w", err)
 	}

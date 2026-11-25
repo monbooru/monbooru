@@ -244,12 +244,17 @@ func ingestWithHash(h Handle, path, hash, sum, origin string) (*models.Image, in
 		}
 	}
 	var imgID int64
+	mtimeUnix := fi.ModTime().Unix()
+	btimeUnix := FileBirthTime(fi, path).Unix()
+	if btimeUnix <= 0 {
+		btimeUnix = mtimeUnix
+	}
 	insertErr := tx.QueryRow(
-		`INSERT INTO images (sha256, md5, canonical_path, folder_path, file_type, width, height, file_size, source_type, origin, page_count, series, duration_seconds)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO images (sha256, md5, canonical_path, folder_path, file_type, width, height, file_size, source_type, origin, page_count, series, duration_seconds, file_created_at, file_modified_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(sha256) DO NOTHING
 		 RETURNING id`,
-		hash, sum, path, folderPath, fileType, facts.width, facts.height, fi.Size(), facts.sourceType, origin, facts.pageCount, prefilledSeries, facts.durationSec,
+		hash, sum, path, folderPath, fileType, facts.width, facts.height, fi.Size(), facts.sourceType, origin, facts.pageCount, prefilledSeries, facts.durationSec, btimeUnix, mtimeUnix,
 	).Scan(&imgID)
 
 	if insertErr == sql.ErrNoRows {

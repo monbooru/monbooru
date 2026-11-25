@@ -494,6 +494,13 @@ func reconcileExistingSHA(database *db.DB, bound *Boundary, fi syncFileInfo, row
 		); wErr != nil {
 			logx.Warnf("sync: persist mtime for %q: %v", fi.path, wErr)
 		}
+		if row.canonicalPath == fi.path {
+			if _, wErr := database.Write.Exec(
+				`UPDATE images SET file_modified_at = ? WHERE id = ?`, fi.mtime, row.id,
+			); wErr != nil {
+				logx.Warnf("sync: persist file_modified_at for %d: %v", row.id, wErr)
+			}
+		}
 	}
 
 	if row.canonicalPath == fi.path {
@@ -731,8 +738,9 @@ func applyInPlaceEdit(h Handle, path, newSHA, newMD5 string, newMtime, newMtimeN
 			// keeps matching the duration: filter. A placeholder read keeps
 			// its auto-tag stamp: its bytes did not change.
 			`UPDATE images SET sha256 = ?, md5 = ?, file_size = ?, file_type = ?, width = ?, height = ?, page_count = ?, duration_seconds = ?, source_type = ?, phash = NULL,
+			        file_modified_at = ?,
 			        auto_tagged_at = CASE WHEN sha256 = ? THEN auto_tagged_at END WHERE id = ?`,
-			newSHA, newMD5, newSize, fileType, facts.width, facts.height, facts.pageCount, facts.durationSec, facts.sourceType, newSHA, imageID,
+			newSHA, newMD5, newSize, fileType, facts.width, facts.height, facts.pageCount, facts.durationSec, facts.sourceType, newMtime, newSHA, imageID,
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}

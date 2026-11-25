@@ -65,6 +65,14 @@ func sortIndexHint(expr Expr, sort string, hasMissingFilter, ceilingRewrote bool
 			return " INDEXED BY idx_images_ingested_rating_visible"
 		}
 		return " INDEXED BY idx_images_ingested_visible"
+	case "created", "file_created":
+		if !ceilingRewrote {
+			return " INDEXED BY idx_images_file_created_visible"
+		}
+	case "modified", "file_modified":
+		if !ceilingRewrote {
+			return " INDEXED BY idx_images_file_modified_visible"
+		}
 	}
 	return ""
 }

@@ -344,7 +344,7 @@ func exactTotal(ctx context.Context, src Source, expr Expr, where string, args [
 // by a position only its own legs walk.
 func CursorPaging(q Query) bool {
 	switch q.Sort {
-	case "", "newest", "filesize":
+	case "", "newest", "filesize", "created", "file_created", "modified", "file_modified", "name", "filename", "alpha":
 		return true
 	case "order":
 		return q.OrderCollection == ""
@@ -550,18 +550,21 @@ type keyCursor struct {
 }
 
 type cursorRow struct {
-	id          int64
-	ingestedAt  string
-	fileSize    int64
-	series      string
-	seriesOrder sql.NullInt64
+	id             int64
+	ingestedAt     string
+	fileSize       int64
+	series         string
+	seriesOrder    sql.NullInt64
+	fileCreatedAt  int64
+	fileModifiedAt int64
+	basenameLower  string
 }
 
 func readCursorRow(ctx context.Context, database *db.DB, id int64) (cursorRow, error) {
 	r := cursorRow{id: id}
 	err := database.Read.QueryRowContext(ctx,
-		`SELECT ingested_at, file_size, series, series_order FROM images WHERE id = ?`, id,
-	).Scan(&r.ingestedAt, &r.fileSize, &r.series, &r.seriesOrder)
+		`SELECT ingested_at, file_size, series, series_order, file_created_at, file_modified_at, basename_lower FROM images WHERE id = ?`, id,
+	).Scan(&r.ingestedAt, &r.fileSize, &r.series, &r.seriesOrder, &r.fileCreatedAt, &r.fileModifiedAt, &r.basenameLower)
 	return r, err
 }
 
@@ -588,14 +591,24 @@ func (r cursorRow) cursor(sort, order string, seed int64) (keyCursor, bool) {
 	case "filesize":
 		c.keyCol = "i.file_size"
 		keyVal = r.fileSize
+	case "created", "file_created":
+		c.keyCol = "i.file_created_at"
+		keyVal = r.fileCreatedAt
+	case "modified", "file_modified":
+		c.keyCol = "i.file_modified_at"
+		keyVal = r.fileModifiedAt
+	case "name", "filename", "alpha":
+		c.keyCol = "i.basename_lower"
+		keyVal = r.basenameLower
 	default: // "newest"
 		c.keyCol = "i.ingested_at"
 		keyVal = r.ingestedAt
 	}
 
+	effectiveOrder := cmp.Or(order, DefaultOrder(sort))
 	// Row values, not the equivalent OR: only `(A, id) < (?, ?)`
 	// seeks the (A, id) index.
-	if order == "asc" || sort == "random" {
+	if effectiveOrder == "asc" || sort == "random" {
 		c.prevCmp = fmt.Sprintf("(%s, i.id) < (?, ?)", c.keyCol)
 		c.nextCmp = fmt.Sprintf("(%s, i.id) > (?, ?)", c.keyCol)
 		c.prevSort = fmt.Sprintf("ORDER BY %s DESC, i.id DESC", c.keyCol)
@@ -766,7 +779,10 @@ func ExecuteAdjacent(ctx context.Context, src Source, q Query, currentID int64) 
 		bucketLo = (currentID / randomAdjacencyBucketSize) * randomAdjacencyBucketSize
 		bucketHi = bucketLo + randomAdjacencyBucketSize - 1
 		bucketed = true
-	case (q.Sort == "" || q.Sort == "newest" || q.Sort == "filesize") &&
+	case (q.Sort == "" || q.Sort == "newest" || q.Sort == "filesize" ||
+		q.Sort == "created" || q.Sort == "file_created" ||
+		q.Sort == "modified" || q.Sort == "file_modified" ||
+		q.Sort == "name" || q.Sort == "filename" || q.Sort == "alpha") &&
 		expensiveAdjacencyTags(q.Expr):
 		bucketLo = (currentID / andAdjacencyBucketSize) * andAdjacencyBucketSize
 		bucketHi = bucketLo + andAdjacencyBucketSize - 1
@@ -1228,13 +1244,15 @@ func PinnedCollectionName(expr Expr) string {
 	return ""
 }
 
-// Collection order reads forwards, 1..N; every other sort leads with the
+// Collection order reads forwards, 1..N; alphabetical reads A..Z; every other sort leads with the
 // newest or largest.
 func DefaultOrder(sort string) string {
-	if sort == "order" {
+	switch sort {
+	case "order", "name", "filename", "alpha":
 		return "asc"
+	default:
+		return "desc"
 	}
-	return "desc"
 }
 
 func buildOrder(sort, order string, randomSeed int64) string {
@@ -1254,6 +1272,15 @@ func buildOrder(sort, order string, randomSeed int64) string {
 			return fmt.Sprintf("ORDER BY random_key(i.id, %d), i.id", randomSeed)
 		}
 		return "ORDER BY RANDOM(), i.id"
+	case "created", "file_created":
+		dir := sqlDir(order, "DESC")
+		return "ORDER BY i.file_created_at " + dir + ", i.id " + dir
+	case "modified", "file_modified":
+		dir := sqlDir(order, "DESC")
+		return "ORDER BY i.file_modified_at " + dir + ", i.id " + dir
+	case "name", "filename", "alpha":
+		dir := sqlDir(order, "ASC")
+		return "ORDER BY i.basename_lower " + dir + ", i.id " + dir
 	default: // "newest"
 		dir := sqlDir(order, "DESC")
 		return "ORDER BY i.ingested_at " + dir + ", i.id " + dir

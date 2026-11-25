@@ -263,12 +263,14 @@ function cycleRatingCeiling(delta) {
   return false;
 }
 
-// Collection order forces asc: a descending pick carried over would
-// render the collection backwards.
+// Collection and alphabetical orders default to asc; time and size sorts default to desc.
 function applySortChange(sortEl) {
-  if (sortEl.value === 'order') {
+  if (sortEl.value === 'order' || sortEl.value === 'name') {
     var orderEl = document.querySelector('#search-form select[name="order"]');
     if (orderEl) orderEl.value = 'asc';
+  } else if (sortEl.value === 'newest' || sortEl.value === 'created' || sortEl.value === 'modified' || sortEl.value === 'filesize') {
+    var orderEl = document.querySelector('#search-form select[name="order"]');
+    if (orderEl) orderEl.value = 'desc';
   }
   // A seed belongs to the random sort; left on the form it rides into the
   // pushed URL and into Save search.
@@ -282,7 +284,7 @@ function applySortChange(sortEl) {
 function cycleSort() {
   var sortEl = document.getElementById('search-sort');
   if (!sortEl) return false;
-  var order = ['newest', 'filesize', 'order', 'random'];
+  var order = ['newest', 'created', 'modified', 'name', 'filesize', 'order', 'random'];
   var i = order.indexOf(sortEl.value);
   var next = order[(i + 1) % order.length];
   if (next === 'random') {
