@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,25 @@ func TestTagSuggest_TargetParam(t *testing.T) {
 	body := w.Body.String()
 	wantIn(t, body, "sword")
 	wantNotIn(t, body, "shield")
+}
+
+func TestTagsFieldsAskTheTagSuggestRoute(t *testing.T) {
+	srv := newTestServer(t)
+	for _, page := range []string{"/", "/tags"} {
+		w := do(srv, "GET", page)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s = %d", page, w.Code)
+		}
+		fields := regexp.MustCompile(`<input[^>]*data-multi-tags="1"[^>]*>`).FindAllString(w.Body.String(), -1)
+		if len(fields) == 0 {
+			t.Fatalf("%s renders no tags field", page)
+		}
+		for _, f := range fields {
+			if !strings.Contains(f, `hx-get="`+tagSuggestRoute+`"`) {
+				t.Errorf("%s: a tags field asks elsewhere: %s", page, f)
+			}
+		}
+	}
 }
 
 func TestTagSuggest_AnEmptyWordListsNothing(t *testing.T) {
