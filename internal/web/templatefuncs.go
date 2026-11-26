@@ -41,6 +41,7 @@ func templateFuncs() template.FuncMap {
 			}
 			return r
 		},
+		"tagSuggestRoute": func() string { return tagSuggestRoute },
 		// The data for a "webui/tags_input", suggesting from this gallery.
 		"tagsInput": func(pairs ...any) map[string]any {
 			m := map[string]any{"Route": tagSuggestRoute}

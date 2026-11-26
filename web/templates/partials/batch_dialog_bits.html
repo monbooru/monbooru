@@ -50,7 +50,7 @@
       <div class="series-input-wrap">
         <input type="text" name="{{.Name}}" id="{{.InputID}}"
                placeholder="tag name, category:name, or ID" {{if .Required}}required {{end}}autocomplete="off"
-               hx-get="/internal/tags/suggest"
+               hx-get="{{tagSuggestRoute}}"
                hx-trigger="input changed delay:200ms"
                hx-target="#{{.SuggestID}}"
                hx-include="this"
