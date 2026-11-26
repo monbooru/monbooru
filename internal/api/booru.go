@@ -515,6 +515,7 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 
 	byCategory := map[int][]string{}
 	var all []string
+	seen := map[string]bool{}
 	rating := -1
 	for _, t := range imageTags {
 		if t.Category == "rating" {
@@ -522,6 +523,12 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 			rating = max(rating, contract.RatingRank(t.Name))
 			continue
 		}
+		// Danbooru's names are unique: a name in two categories is listed
+		// once.
+		if seen[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
 		c := booruCategories[t.Category]
 		byCategory[c] = append(byCategory[c], t.Name)
 		all = append(all, t.Name)
