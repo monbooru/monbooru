@@ -150,7 +150,7 @@ func (s *Server) settingsTaggerPost(w http.ResponseWriter, r *http.Request) {
 	// fail a job's calls in flight; the lane stays held until it is back.
 	next := s.cfgSnapshot()
 	_ = set(next)
-	if newProvider != s.executionProvider() || s.local != nil && s.local.restartsOn(next) {
+	if newProvider != s.executionProvider() || s.local.restartsOn(next) {
 		res, err := s.jobs.Reserve()
 		if err != nil {
 			writeInlineFlash(w, "err", "A job is running; try again when it finishes.")

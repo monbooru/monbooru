@@ -599,10 +599,8 @@ func ratingRankExpr(imageIDCol string) string {
 }
 
 // sourceURLKeys selects (image_id, key) for the url and each original line
-// of rows, a table or subquery with image_id, url and original; search's
-// sourceURLKey is its Go twin. The url is split as the first line. Newlines
-// become U+E000 before json_quote, which leaves that character alone, so
-// the split never meets an escape.
+// of rows, which has image_id, url and original. Newlines become U+E000
+// before json_quote, which leaves it alone, so the split never meets an escape.
 func sourceURLKeys(rows string) string {
 	return `SELECT image_id, CASE
 			WHEN u LIKE 'https://www.%' THEN substr(u, 13)

@@ -49,7 +49,7 @@ func allDispatchRules(dataPath, taggerName string) []DispatchEntry {
 // DefaultDispatchRules are a tagger's dispatch_default.json, as its worker
 // sends them.
 func DefaultDispatchRules(taggerName string) []DispatchEntry {
-	h, ok := currentPool().heldModel(taggerName)
+	h, ok := CurrentPool().heldModel(taggerName)
 	if !ok {
 		return nil
 	}

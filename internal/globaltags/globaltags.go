@@ -245,7 +245,7 @@ func Check(sides []Side, from string, ids []int64, merge bool) (*Report, error) 
 }
 
 // MakeGlobal records ids in the source until it ends without error, so a
-// run stopped part way is run again by Resume.
+// run stopped part way can be run again.
 func MakeGlobal(ctx context.Context, sides []Side, from string, ids []int64, merge bool) (rep *Report, skipped []Skip, err error) {
 	if skipped, err = Push(ctx, sides); err != nil {
 		return nil, skipped, err

@@ -187,8 +187,7 @@ func (n *FolderNode) ChildrenPage(offset, limit int) []FolderNode {
 }
 
 // SearchFolders finds the folders whose path holds q, any case, those
-// starting with it first, in path order, at most limit. A walk of the
-// cached tree: no query per keystroke.
+// starting with it first, in path order, at most limit.
 func SearchFolders(tree []FolderNode, q string, limit int) []*FolderNode {
 	needle := strings.ToLower(strings.TrimSpace(q))
 	root := FindFolder(tree, "")

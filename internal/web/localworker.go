@@ -133,15 +133,14 @@ func (w *localWorker) start(sup *plugins.Supervisor) {
 
 // A monworker has no call that unloads its models: restarting it is the
 // way to drop them.
-func (w *localWorker) restart(sup *plugins.Supervisor) bool {
+func (w *localWorker) restart(sup *plugins.Supervisor) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.env == nil {
-		return false
+		return
 	}
 	sup.Stop(localWorkerName)
 	w.start(sup)
-	return true
 }
 
 func listening(addr string, within time.Duration) bool {
@@ -156,7 +155,6 @@ func listening(addr string, within time.Duration) bool {
 	return false
 }
 
-// restartsOn is whether applying cfg would restart the running worker.
 func (w *localWorker) restartsOn(cfg *config.Config) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()

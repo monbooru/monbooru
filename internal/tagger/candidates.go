@@ -12,7 +12,7 @@ type plannedTagger struct {
 }
 
 func planTagger(dataPath string, t TaggerStatus, catIDs map[string]int64, generalCatID int64, inferredCats map[string]int64) (plannedTagger, error) {
-	h, ok := currentPool().heldModel(t.Name)
+	h, ok := CurrentPool().heldModel(t.Name)
 	if !ok {
 		return plannedTagger{}, fmt.Errorf("no worker holds tagger %q", t.Name)
 	}

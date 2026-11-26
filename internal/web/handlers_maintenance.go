@@ -597,9 +597,7 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	debug.FreeOSMemory()
-	if s.local != nil {
-		s.local.restart(s.peers.Supervisor)
-	}
+	s.local.restart(s.peers.Supervisor)
 	_, worker = s.localWorkerRSS()
 	after := desktop.ProcStatus("self", "VmRSS") + worker.Total
 	if before > 0 && after > 0 && before > after {

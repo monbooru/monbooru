@@ -73,7 +73,7 @@ func padAndResize(src image.Image, size int, fill [3]uint8) *image.RGBA {
 		dst.Pix[i+3] = 0xFF
 	}
 	// Over composites a (half-)transparent pixel onto the fill, as WD14's
-	// reference does onto white; buildTensor ignores alpha.
+	// reference does onto white.
 	draw.Draw(dst, scaled.Bounds().Add(image.Pt(offX, offY)), scaled, image.Point{}, draw.Over)
 	return dst
 }

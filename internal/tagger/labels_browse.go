@@ -18,7 +18,7 @@ type LabelView struct {
 // The single_general inferred-category lift needs a job's database, so
 // those labels show their static routing.
 func BrowseLabels(dataPath, taggerName string, catIDs map[string]int64) ([]LabelView, error) {
-	h, ok := currentPool().heldModel(taggerName)
+	h, ok := CurrentPool().heldModel(taggerName)
 	if !ok {
 		return nil, fmt.Errorf("no worker holds tagger %q", taggerName)
 	}

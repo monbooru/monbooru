@@ -171,17 +171,16 @@ func (s *Server) pairedPeerCount() int {
 	return n
 }
 
-// pendingCounts splits the requests waiting by where they wait: a
-// worker's under Auto-Tagger, any other under Plugins.
-func (s *Server) pendingCounts() (plugins, workers int) {
+// pendingCounts counts the requests waiting under Plugins: a worker's
+// waits under Auto-Tagger.
+func (s *Server) pendingCounts() int {
+	n := 0
 	for _, req := range s.pairs.ListPending() {
-		if req.App == contract.AppMonworker {
-			workers++
-		} else {
-			plugins++
+		if req.App != contract.AppMonworker {
+			n++
 		}
 	}
-	return plugins, workers
+	return n
 }
 
 // The answers carry the nav notice and the settings count too, so a
@@ -189,7 +188,7 @@ func (s *Server) pendingCounts() (plugins, workers int) {
 func (s *Server) pairViewData() map[string]any {
 	n := s.pairNotice()
 	n.OOB = true
-	plugins, _ := s.pendingCounts()
+	plugins := s.pendingCounts()
 	data := map[string]any{
 		"Pending":        s.pendingOffers(),
 		"Paired":         s.pairedKey(),

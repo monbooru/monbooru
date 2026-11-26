@@ -41,7 +41,7 @@ func TestDiscoverTaggers_AModelItsWorkerCannotRun(t *testing.T) {
 	f.Mu.Lock()
 	f.Models[1].Ready, f.Models[1].Reason = false, "no inference profile: bad layout; add a tagger.json"
 	f.Mu.Unlock()
-	currentPool().Refresh(context.Background())
+	CurrentPool().Refresh(context.Background())
 	for _, s := range DiscoverTaggers(&config.Config{}) {
 		if s.Name == "broken" && (s.Available || !s.Malformed) {
 			t.Errorf("broken = %+v, want malformed", s)
@@ -51,7 +51,7 @@ func TestDiscoverTaggers_AModelItsWorkerCannotRun(t *testing.T) {
 	f.Mu.Lock()
 	f.Token = "changed"
 	f.Mu.Unlock()
-	currentPool().Refresh(context.Background())
+	CurrentPool().Refresh(context.Background())
 	for _, s := range DiscoverTaggers(&config.Config{}) {
 		if s.Name == "wd" && (s.Available || s.Missing || s.Reason != "the workers that hold it are off") {
 			t.Errorf("wd with its worker down = %+v", s)
@@ -60,7 +60,7 @@ func TestDiscoverTaggers_AModelItsWorkerCannotRun(t *testing.T) {
 }
 
 func TestTheReasonWithNoWorkerIsNoWorker(t *testing.T) {
-	prev := currentPool()
+	prev := CurrentPool()
 	SetPool(NewPool(""))
 	t.Cleanup(func() { SetPool(prev) })
 	cfg := &config.Config{Tagger: config.TaggerConfig{Taggers: []config.TaggerInstance{{Name: "wd", Enabled: true}}}}

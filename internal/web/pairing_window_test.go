@@ -172,7 +172,6 @@ func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
 	if srv.pairedWith("monloader") || len(srv.win.list()) != 0 {
 		t.Fatalf("revoke left paired=%v trace=%+v", srv.pairedWith("monloader"), srv.win.list())
 	}
-
 	wantIn(t, rr.Body.String(), `id="plugin-pairing" hx-get=`)
 	wantNotIn(t, rr.Body.String(), "Paired automatically")
 }

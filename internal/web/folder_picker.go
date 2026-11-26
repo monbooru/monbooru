@@ -38,9 +38,9 @@ var folderPickerKinds = map[string]webui.FolderPicker{
 
 var errFolderGone = errors.New("folder not found")
 
-// The field for kind. It reads no tree: the panel's own requests do, once
-// opened, as the sidebar reads none while its section is closed, and a page
-// render after every upload would otherwise rebuild it.
+// It reads no tree: the panel's own requests do once it is opened, as the
+// sidebar reads none while its section is closed, and a render after every
+// upload would otherwise rebuild it.
 func (s *Server) folderPicker(kind string) webui.FolderPicker {
 	p := folderPickerKinds[kind]
 	p.Listed = true
@@ -53,8 +53,7 @@ func (s *Server) folderPicker(kind string) webui.FolderPicker {
 	return p
 }
 
-// The picker for the request's kind and the active gallery's tree; false
-// once answered.
+// false once the request is answered.
 func (s *Server) folderPickerTree(w http.ResponseWriter, r *http.Request) (webui.FolderPicker, []gallery.FolderNode, bool) {
 	p, ok := folderPickerKinds[r.URL.Query().Get("kind")]
 	if !ok {
@@ -74,8 +73,8 @@ func (s *Server) folderPickerTree(w http.ResponseWriter, r *http.Request) (webui
 	return p, tree, true
 }
 
-// A page of the panel; a path no visible image sits under answers no rows,
-// as the folder can go away between the render and the click.
+// A path no visible image sits under answers no rows, as the folder can go
+// away between the render and the click.
 func (s *Server) folderPickerLevel(w http.ResponseWriter, r *http.Request) {
 	p, tree, ok := s.folderPickerTree(w, r)
 	if !ok {

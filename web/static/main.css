@@ -2489,7 +2489,7 @@ body.reader-body {
   .reader-bar > * { white-space: nowrap; }
   .reader-bar a, .reader-bar button { padding: 2px 4px; }
   .reader-bar .reader-first, .reader-bar .reader-last { display: none; }
-  .reader-pages, .reader-extract { margin: 0; }
+  .reader-pages { margin: 0; }
   .reader-bar .reader-zoom { display: none; }
 }
 @media (pointer: coarse) {

@@ -370,10 +370,10 @@ func pageStart(ids []int64, q Query, page, limit int) int {
 // list's length once a fan has filled it, a fast count whose tally the
 // page did not wait for, else the exact COUNT.
 func Count(ctx context.Context, src Source, q Query) (int, error) {
-	if ids, ok := src.Cache.get(q.listKey(src)); ok {
+	key := q.listKey(src)
+	if ids, ok := src.Cache.get(key); ok {
 		return len(ids), nil
 	}
-	key := q.listKey(src)
 	if n, ok := src.Cache.total(key); ok {
 		return n, nil
 	}
