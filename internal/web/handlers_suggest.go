@@ -19,6 +19,8 @@ import (
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
+const tagSuggestRoute = "/internal/tags/suggest"
+
 func tagSuggestItems(ts []models.Tag) []webui.SuggestItem {
 	items := make([]webui.SuggestItem, len(ts))
 	for i, t := range ts {

@@ -112,7 +112,7 @@
     <input type="hidden" name="scope" id="batch-tag-scope">
     <div class="field" style="position:relative">
       <label>Tags (space-separated, <code>category:name</code> for non-general)</label>
-      {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "tags" "InputID" "batch-tag-input" "SuggestID" "batch-tag-suggest" "Placeholder" "Add tags..." "Class" "upload-wide-input" "ValsKey" "tag"}}
+      {{template "webui/tags_input" tagsInput "Name" "tags" "InputID" "batch-tag-input" "SuggestID" "batch-tag-suggest" "Placeholder" "Add tags..." "Class" "upload-wide-input" "ValsKey" "tag"}}
     </div>
     <div id="batch-tag-flash"></div>
     {{template "dialog_actions" dict "ID" "batch-tag-dialog" "Submit" "Apply"}}
@@ -152,7 +152,7 @@
     <div class="field" onchange="updateBatchStripRow()">
       <label><input type="radio" name="mode" value="specific" checked> Tags by name</label>
       <div class="field" style="position:relative; margin: 4px 0 8px 22px" id="batch-strip-specific-row">
-        {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "tags" "InputID" "batch-strip-input" "SuggestID" "batch-strip-suggest" "Placeholder" "Tags to remove (space-separated, category:name)" "Class" "upload-wide-input" "ValsKey" "tag"}}
+        {{template "webui/tags_input" tagsInput "Name" "tags" "InputID" "batch-strip-input" "SuggestID" "batch-strip-suggest" "Placeholder" "Tags to remove (space-separated, category:name)" "Class" "upload-wide-input" "ValsKey" "tag"}}
       </div>
       {{if .SourceLabelCounts}}
       <label><input type="radio" name="mode" value="source-specific"> Tags from one source</label>

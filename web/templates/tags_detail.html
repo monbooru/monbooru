@@ -235,7 +235,7 @@
       <form class="add-tag-form" hx-post="/tags/{{.Tag.ID}}/implied-by"
             hx-target="#implied-by-add-flash" hx-swap="innerHTML">
         <div class="add-tag-input-wrap">
-          {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tags..." "Required" true "ValsKey" "q"}}
+          {{template "webui/tags_input" tagsInput "Name" "parent_id" "InputID" "implied-by-add-input" "SuggestID" "implied-by-add-suggest" "Placeholder" "Implied by tags..." "Required" true "ValsKey" "q"}}
         </div>
         <button type="submit" class="btn-sm">Add</button>
       </form>

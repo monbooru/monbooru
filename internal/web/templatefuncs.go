@@ -41,6 +41,15 @@ func templateFuncs() template.FuncMap {
 			}
 			return r
 		},
+		// The data for a "webui/tags_input", suggesting from this gallery.
+		"tagsInput": func(pairs ...any) map[string]any {
+			m := map[string]any{"Route": tagSuggestRoute}
+			for i := 0; i+1 < len(pairs); i += 2 {
+				k, _ := pairs[i].(string)
+				m[k] = pairs[i+1]
+			}
+			return m
+		},
 		"catDefault": tags.DefaultCategoryColor,
 		// template.URL, or html/template would re-escape each % and
 		// double-encode the link.

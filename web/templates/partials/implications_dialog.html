@@ -26,7 +26,7 @@
       hx-target="#implication-add-flash"
       hx-on::after-request="handleImplicationAdded(event)">
   <div class="add-tag-input-wrap">
-    {{template "webui/tags_input" dict "Route" "/internal/tags/suggest" "Name" "implied_id" "InputID" "implication-add-input" "SuggestID" "implication-add-suggest" "Placeholder" "Imply tags..." "Required" true "ValsKey" "q"}}
+    {{template "webui/tags_input" tagsInput "Name" "implied_id" "InputID" "implication-add-input" "SuggestID" "implication-add-suggest" "Placeholder" "Imply tags..." "Required" true "ValsKey" "q"}}
   </div>
   <button type="submit" class="btn-sm">Add</button>
 </form>
