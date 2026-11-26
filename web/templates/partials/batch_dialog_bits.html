@@ -41,7 +41,7 @@
                hx-trigger="input changed delay:200ms"
                hx-target="#{{.SuggestID}}"
                hx-vals='js:{prefix: document.getElementById("{{.InputID}}").value}'
-               onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
+               onkeydown="handleSuggestKey(event, '{{.SuggestID}}')">
         <div id="{{.SuggestID}}" class="suggest-dropdown series-suggest-dropdown"></div>
       </div>
 {{end}}
@@ -54,7 +54,7 @@
                hx-trigger="input changed delay:200ms"
                hx-target="#{{.SuggestID}}"
                hx-include="this"
-               onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
+               onkeydown="handleSuggestKey(event, '{{.SuggestID}}')">
         <div id="{{.SuggestID}}" class="suggest-dropdown tag-suggest-dropdown"></div>
       </div>
 {{end}}

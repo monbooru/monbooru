@@ -35,8 +35,8 @@ func (NotExpr) exprNode()    {}
 func (TagExpr) exprNode()    {}
 func (FilterExpr) exprNode() {}
 
-// Parse binds NOT tighter than AND, and AND tighter than OR. A query it
-// can't fully read still parses as best it can; Unreadable says what it skipped.
+// Parse binds NOT tighter than AND, and AND tighter than OR, and skips
+// what it cannot read.
 func Parse(query string) Expr {
 	expr, _ := parse(query)
 	return expr
@@ -194,7 +194,6 @@ func (p *parser) problem(msg string) {
 	}
 }
 
-// startsOperand reports whether the next token can begin an operand.
 func (p *parser) startsOperand() bool {
 	t := p.peek()
 	return t != nil && t.kind != tokOR && t.kind != tokAND && t.kind != tokClose

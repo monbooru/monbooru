@@ -62,7 +62,6 @@ func TestFolderPickerInTheMoveDialogsAndSettings(t *testing.T) {
 			for _, s := range tc.want {
 				wantIn(t, w.Body.String(), s)
 			}
-			// A template names folders the tokens build, so no hint says it is new.
 			wantNotIn(t, w.Body.String(), "Not in the gallery yet")
 		})
 	}
@@ -98,7 +97,6 @@ func TestFolderPickerListsTheActiveGallery(t *testing.T) {
 		{"no suggestion the ceiling hides", "/suggest?kind=upload&folder=nsfw", [][2]string{ceiling}, http.StatusOK,
 			nil, []string{`data-folder-suggest`}},
 		{"an unknown kind", "/level?kind=nope&path=", nil, http.StatusNotFound, nil, nil},
-		// Every field lists the same tree, and suggests from its own name.
 		{"the batch move's level", "/level?kind=batch-place&path=art", nil, http.StatusOK, []string{`data-folder-pick="art/sky"`}, nil},
 		{"the image move's level", "/level?kind=place-image&path=", nil, http.StatusOK, []string{`data-folder-pick="safe"`}, nil},
 		{"the default folder's suggestions", "/suggest?kind=default-upload&default_upload_folder=sk", nil, http.StatusOK,

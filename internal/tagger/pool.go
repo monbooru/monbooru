@@ -56,18 +56,16 @@ type poolWorker struct {
 	up        bool
 	checked   bool
 	downSince time.Time
-	err       string
 	inUse     int
-	// format is the frame format its calls use, chosen at each look.
-	format string
+	format    string
 	// waking is a job starting an on-demand worker.
 	waking bool
 }
 
 func (w *poolWorker) slots() int { return max(1, w.cache.Info.Slots) }
 
-// Pool is every worker monbooru knows, the local one first. A call goes to
-// one that holds its models; nothing waits for a worker that is down.
+// Pool is every worker monbooru knows, the local one first; a call goes to
+// one that holds its models and never waits for one that is down.
 type Pool struct {
 	mu      sync.Mutex
 	free    *sync.Cond
@@ -76,16 +74,12 @@ type Pool struct {
 	// interactive counts the calls of a person waiting, which pass the
 	// batch ones to a free slot.
 	interactive int
-	// waiting counts the calls waiting for a slot.
-	waiting    int
-	httpClient *http.Client
-	// far reports a worker address a slow link may sit before: its frames
-	// go compressed.
-	far       func(ctx context.Context, rawURL string) bool
-	retryWait time.Duration
-	// changed wakes Run when Set brings a worker it has not looked at.
-	changed chan struct{}
-	job     *jobCalls
+	waiting     int
+	httpClient  *http.Client
+	far         func(ctx context.Context, rawURL string) bool
+	retryWait   time.Duration
+	changed     chan struct{}
+	job         *jobCalls
 }
 
 type jobCalls struct {
@@ -133,13 +127,11 @@ func SetPool(p *Pool) {
 	poolMu.Unlock()
 }
 
-func currentPool() *Pool {
+func CurrentPool() *Pool {
 	poolMu.RLock()
 	defer poolMu.RUnlock()
 	return activePool
 }
-
-func CurrentPool() *Pool { return currentPool() }
 
 func (p *Pool) cachePath(name string) string {
 	if p.dir == "" {
@@ -230,7 +222,7 @@ func (p *Pool) Forget(name string) {
 	}
 }
 
-// Refresh asks every worker that is not paused what it holds; one that
+// Refresh asks every worker not paused or on demand what it holds; one that
 // does not answer is down until the next refresh.
 func (p *Pool) Refresh(ctx context.Context) { p.refresh(ctx, false) }
 
@@ -239,9 +231,8 @@ func (p *Pool) Refresh(ctx context.Context) { p.refresh(ctx, false) }
 // its state for the next Refresh to settle.
 func (p *Pool) Glance(ctx context.Context) { p.refresh(ctx, true) }
 
-// Peek reads again what the workers that are up say of themselves, for a
-// block that polls: their state and the models loaded now. What they hold
-// waits for the next Refresh, and one that does not answer keeps its state.
+// Peek reads again only the state and loaded models of the workers that are
+// up, for a block that polls; one that does not answer keeps its state.
 func (p *Pool) Peek(ctx context.Context) {
 	p.mu.Lock()
 	var ws []*poolWorker
@@ -308,13 +299,13 @@ func (p *Pool) refreshOne(ctx context.Context, w *poolWorker, glance bool, timeo
 			w.downSince = time.Now()
 			logx.Infof("tagger: worker %s is down: %v", w.def.Name, err)
 		}
-		w.up, w.err = false, err.Error()
+		w.up = false
 		return err
 	}
 	if !w.up && !w.downSince.IsZero() {
 		logx.Infof("tagger: worker %s is up", w.def.Name)
 	}
-	w.up, w.err, w.downSince = true, "", time.Time{}
+	w.up, w.downSince = true, time.Time{}
 	w.format, w.client.Format = format, format
 	w.cache = next
 	p.free.Broadcast()
@@ -332,8 +323,8 @@ var (
 )
 
 // Wake starts the on-demand workers among names and reads what they hold,
-// calling tick each second with the one it waits on. A worker that does
-// not answer in time, or refuses the token, fails the job that named it.
+// calling tick each second with the one it waits on; one that does not answer
+// in time or refuses the token is an error.
 func (p *Pool) Wake(ctx context.Context, names []string, tick func(name string, waited time.Duration)) error {
 	p.mu.Lock()
 	var ws []*poolWorker
@@ -448,7 +439,6 @@ type WorkerView struct {
 	Standby   bool
 	InUse     bool
 	DownSince time.Time
-	Err       string
 	Info      worker.Info
 	Models    []worker.Model
 	Seen      time.Time
@@ -463,21 +453,18 @@ func (p *Pool) Workers() []WorkerView {
 		out = append(out, WorkerView{
 			Name: w.def.Name, URL: w.def.URL, Local: w.def.Local, Paused: w.def.Paused, OnDemand: w.def.OnDemand, Waking: w.waking,
 			Up: w.up, Checked: w.checked, Standby: w.def.Local && remoteUp, InUse: w.inUse > 0,
-			DownSince: w.downSince, Err: w.err, Info: w.cache.Info, Models: slices.Clone(w.cache.Models), Seen: w.cache.Seen,
+			DownSince: w.downSince, Info: w.cache.Info, Models: slices.Clone(w.cache.Models), Seen: w.cache.Seen,
 		})
 	}
 	return out
 }
 
-// heldModel is a model as the pool sees it: the worker whose copy counts
-// (the first that lists it), whether a worker that holds that copy can run
-// it now, whether one of those is not on demand and so takes the calls of a
-// job that names no worker (standing), and whether another worker's copy
-// differs.
+// heldModel is the first worker's copy of a model: usable when a worker
+// holding that copy can run it now, standing when one of those is not on
+// demand, differs when another worker's copy does not match.
 type heldModel struct {
 	model    worker.Model
 	labels   worker.Labels
-	owner    string
 	usable   bool
 	standing bool
 	differs  bool
@@ -493,7 +480,7 @@ func (p *Pool) held() ([]string, map[string]*heldModel) {
 		for _, m := range w.cache.Models {
 			h, ok := out[m.Name]
 			if !ok {
-				h = &heldModel{model: m, labels: w.cache.Labels[m.Name], owner: w.def.Name}
+				h = &heldModel{model: m, labels: w.cache.Labels[m.Name]}
 				out[m.Name] = h
 				order = append(order, m.Name)
 			} else if m.Digest != h.model.Digest {
@@ -550,8 +537,8 @@ func (p *Pool) Catalog() []worker.CatalogEntry {
 	return out
 }
 
-// JobWorker is a worker a job can be given to now: up, not paused, with
-// the models it can run.
+// JobWorker is a worker a job can be given to now, up or started on demand
+// and not paused, with the models it can run.
 type JobWorker struct {
 	Name, Provider string
 	Local          bool
@@ -625,10 +612,9 @@ func (p *Pool) HasWorker() bool {
 
 var errNoWorker = errors.New("no worker")
 
-// eligible lists the workers a call for models may go to, in order: those
-// up and holding each model as the pool's copy. Once a remote worker
-// qualifies the local one stands by, unless the job names its workers in
-// only. Caller holds p.mu.
+// eligible lists the runnable workers holding the pool's copy of every model;
+// the local one stands by once a remote one qualifies, unless only names the
+// workers. Caller holds p.mu.
 func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []string) []*poolWorker {
 	_, held := p.held()
 	var local, remote []*poolWorker
@@ -663,9 +649,9 @@ func (p *Pool) eligible(models []string, skip map[*poolWorker]bool, only []strin
 	return local
 }
 
-// Slots is how many calls the workers that may take a job's calls run at
-// once, each call carrying one group of models; 0 when none may. A non-nil
-// only keeps the workers it names.
+// Slots is how many calls, one per group of models, the workers that may
+// take a job's calls run at once, a non-nil only keeping the workers it
+// names; 0 when none may.
 func (p *Pool) Slots(groups [][]string, only []string) int {
 	n, _ := p.JobSlots(groups, only)
 	return n
@@ -703,12 +689,9 @@ func (p *Pool) takers(groups [][]string, only []string) []*poolWorker {
 	return out
 }
 
-// Tag runs frames through models on a worker that holds them all, waiting
-// for a free slot, and names the worker that answered; a non-nil only keeps
-// the workers it names. A call that fails in transport is tried again on
-// that worker after 250 ms, 500 ms and 1 s, then goes to another worker,
-// three at most, and that worker is down until its next refresh; one that
-// timed out goes to another at once, and a worker's refusal is final.
+// Tag runs frames through models on the workers that hold them, waiting for
+// a free slot, and names the worker that answered; a call lost in transport
+// is retried on its worker, then on others, three workers at most.
 func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, only []string) (worker.TagResponse, string, error) {
 	if parts := p.split(req.Models, only); len(parts) > 1 {
 		return p.tagParts(ctx, req, frames, only, parts)
@@ -755,7 +738,7 @@ func (p *Pool) Tag(ctx context.Context, req worker.TagRequest, frames [][]byte, 
 
 // split cuts models no worker holds together into parts that each one
 // does, the worker holding the most of what is left taking its share
-// first; nil when one worker holds them all or one holds none.
+// first; nil when one worker holds them all or a model has no holder.
 func (p *Pool) split(models, only []string) [][]string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -824,7 +807,7 @@ func (p *Pool) markDown(w *poolWorker, err error) {
 		logx.Warnf("tagger: worker %s is down: %v", w.def.Name, err)
 		w.downSince = time.Now()
 	}
-	w.up, w.checked, w.err = false, true, err.Error()
+	w.up, w.checked = false, true
 	p.free.Broadcast()
 }
 
@@ -869,10 +852,9 @@ func (p *Pool) acquire(ctx context.Context, models []string, interactive bool, s
 	}
 }
 
-// Load is where the calls stand now: those ready and waiting for a slot,
-// and the slots free on the workers the running job's calls may go to; with
-// no job running, on the workers that take calls by themselves, the local
-// one only when no paired worker is up.
+// Load is where the calls stand: how many wait for a slot, and the slots
+// free on the workers the running job may use or, with no job, on those that
+// take calls by themselves.
 type Load struct {
 	Busy    bool
 	Waiting int
@@ -947,7 +929,7 @@ func (p *Pool) reading() bool {
 // WorkersDescribed is whether every worker has said once what it holds,
 // now or in a run before: until then a tagger it holds reads as missing.
 func WorkersDescribed() bool {
-	p := currentPool()
+	p := CurrentPool()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.workers) == 0 {

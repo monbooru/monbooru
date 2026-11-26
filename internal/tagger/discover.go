@@ -33,7 +33,7 @@ type TaggerStatus struct {
 // DiscoverTaggers lists every tagger a worker holds, then every configured
 // one no worker holds.
 func DiscoverTaggers(cfg *config.Config) []TaggerStatus {
-	p := currentPool()
+	p := CurrentPool()
 	p.mu.Lock()
 	order, held := p.held()
 	p.mu.Unlock()

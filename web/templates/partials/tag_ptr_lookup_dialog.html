@@ -25,7 +25,7 @@
                  hx-sync="closest form:abort"
                  hx-on::before-request="if (suggestDisarmed(this)) event.preventDefault()"
                  oninput="delete this.dataset.suggestStale"
-                 onkeydown="handleSuggestKey(event, 'ptr-lookup-suggest', 'ptr-lookup-as')">
+                 onkeydown="handleSuggestKey(event, 'ptr-lookup-suggest')">
           <div id="ptr-lookup-suggest" class="suggest-dropdown tag-suggest-dropdown"></div>
         </div>
         <button type="submit" class="peer-accent">look up</button>

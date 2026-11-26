@@ -69,7 +69,6 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 		URL:       body.URL,
 		PeerToken: body.PeerToken, Version: body.Version, Buttons: body.Buttons,
 	}
-	// A worker's token carries no scope and its offer no button.
 	if body.App == contract.AppMonworker {
 		if req.WorkerName() == tagger.LocalWorker {
 			pairRefuse(w, &pairing.Refusal{Status: http.StatusBadRequest, Code: pairing.CodeInvalidRequest, Msg: "the name local is the local worker's; set MONWORKER_NAME"})

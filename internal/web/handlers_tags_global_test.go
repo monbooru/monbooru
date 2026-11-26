@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -232,20 +231,20 @@ func TestTheCheckSaysWhatEachGalleryGetsAndTheListingShowsTheMark(t *testing.T) 
 		t.Fatal("the check wrote something")
 	}
 
-	page := getPage(t, srv, "/tags")
+	page := mustGetBody(t, srv, "/tags")
 	if !strings.Contains(page, `id="btn-batch-global"`) || strings.Contains(page, `>global</span>`) {
 		t.Error("before: the page lacks the button or already shows a global tag")
 	}
 	postForm(t, srv, "/tags/global", form)
 	settleJobs(t, srv)
-	page = getPage(t, srv, "/tags?scope=global")
+	page = mustGetBody(t, srv, "/tags?scope=global")
 	if n := strings.Count(page, `>global</span>`); n != 2 {
 		t.Errorf("scope=global shows %d global rows, want 2", n)
 	}
-	if page := getPage(t, srv, "/tags?scope=local"); strings.Contains(page, `>global</span>`) {
+	if page := mustGetBody(t, srv, "/tags?scope=local"); strings.Contains(page, `>global</span>`) {
 		t.Error("scope=local shows a global tag")
 	}
-	detail := getPage(t, srv, "/tags/"+strconv.FormatInt(id, 10))
+	detail := mustGetBody(t, srv, "/tags/"+strconv.FormatInt(id, 10))
 	for _, want := range []string{`id="btn-detail-local"`, "global, shared with second"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("the tag page lacks %q", want)
@@ -258,7 +257,7 @@ func TestTheTagsPagerKeepsTheScope(t *testing.T) {
 	for i := range tagListingPageSize + 1 {
 		tagNamed(t, first, "tag"+strconv.Itoa(i))
 	}
-	next := regexp.MustCompile(`href="([^"]*page=2)"`).FindStringSubmatch(getPage(t, srv, "/tags?scope=local"))
+	next := regexp.MustCompile(`href="([^"]*page=2)"`).FindStringSubmatch(mustGetBody(t, srv, "/tags?scope=local"))
 	if next == nil {
 		t.Fatal("no link to page 2")
 	}
@@ -271,23 +270,13 @@ func TestASingleGalleryShowsNoGlobalControls(t *testing.T) {
 	srv := newTestServer(t)
 	id := tagNamed(t, srv.active(), "animation")
 	for _, path := range []string{"/tags", "/tags/" + strconv.FormatInt(id, 10)} {
-		page := getPage(t, srv, path)
+		page := mustGetBody(t, srv, path)
 		for _, absent := range []string{`id="btn-batch-global"`, `id="btn-detail-global"`, `id="make-global-dialog"`, `>Scope<`} {
 			if strings.Contains(page, absent) {
 				t.Errorf("%s shows %q with one gallery", path, absent)
 			}
 		}
 	}
-}
-
-func getPage(t *testing.T, srv *Server, path string) string {
-	t.Helper()
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET %s = %d", path, w.Code)
-	}
-	return w.Body.String()
 }
 
 func TestARefusedTagIsNamedWithoutStartingAJobByItself(t *testing.T) {

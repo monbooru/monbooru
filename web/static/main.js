@@ -178,9 +178,9 @@ function navDetailArrow(direction, noun) {
   return false;
 }
 
-// A pinch-zoomed page is left alone, since there the finger pans.
 var readerZoom = null;
 
+// A pinch-zoomed page is left alone, since there the finger pans.
 function onSwipe(el, prev, next) {
   var x0 = null, y0 = 0, t0 = 0;
   el.addEventListener('pointerdown', function (e) {
@@ -204,7 +204,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (media) onSwipe(media, function () { navDetailArrow('prev', 'image'); }, function () { navDetailArrow('next', 'image'); });
   var stage = document.querySelector('.reader-stage');
   if (stage) {
-    readerZoom = zoomer(stage, { label: document.getElementById('reader-zoom'), swipe: true });
+    readerZoom = zoomer(stage, { label: document.getElementById('reader-zoom') });
     readerZoom.attach(stage.querySelector('.reader-img'));
     var follow = function (sel) {
       return function () { var a = stage.querySelector(sel); if (a && readerZoom.atFit()) window.location.href = a.href; };
@@ -425,7 +425,6 @@ function zoomer(stage, opts) {
   }
   function reset() { scale = 1; tx = 0; ty = 0; apply(); }
   function zoomAt(cx, cy, factor) {
-    if (!img) return;
     var ns = clamp(scale * factor, minScale(), 4);
     var k = ns / scale;
     tx = cx - k * (cx - tx);
@@ -463,7 +462,6 @@ function zoomer(stage, opts) {
     if (!points[e.pointerId]) return;
     delete points[e.pointerId];
     if (pinch) {
-      // The finger still down goes on panning.
       pinch = null;
       var rest = Object.values(points);
       if (rest.length === 1) { startPan(rest[0].x, rest[0].y); pressed = true; pressMoved = true; }
@@ -505,13 +503,12 @@ function zoomer(stage, opts) {
     pressMoved = false;
     px0 = e.clientX; py0 = e.clientY;
     // Where a swipe turns the page, a finger at fit is left to it.
-    if (!opts.swipe || e.pointerType !== 'touch' || !atFit()) startPan(e.clientX, e.clientY);
+    if (e.pointerType !== 'touch' || !atFit()) startPan(e.clientX, e.clientY);
   });
   stage.addEventListener('pointermove', function (e) {
     if (!points[e.pointerId]) return;
     points[e.pointerId] = { x: e.clientX, y: e.clientY };
     if (pinch) {
-      // Zooms around the point between the fingers, which also pans.
       var now = pinchOf();
       var c = fromCenter(now.x, now.y);
       tx += now.x - pinch.x;
@@ -1011,7 +1008,6 @@ var viewer = (function () {
     var stage = dlg.querySelector('.viewer-stage');
     zoom = zoomer(stage, {
       label: document.getElementById('viewer-zoom'),
-      swipe: true,
       onChange: zoomChanged,
       onOutside: function (e) {
         // A disabled side strip lets its press through to the stage.
@@ -1111,7 +1107,7 @@ var viewer = (function () {
   }
 
   return {
-    // The image link: modifier and middle clicks keep its own navigation.
+    // Modifier and middle clicks keep the link's own navigation.
     click: function (e) {
       if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) return true;
       var btn = document.getElementById('viewer-btn');

@@ -11,7 +11,7 @@ import (
 )
 
 type Counts struct {
-	Tags, Aliases, Merged, Implications, Removed, Notes int
+	Tags, Aliases, Merged, Implications, Notes int
 }
 
 func (c Counts) Any() bool { return c != Counts{} }
@@ -46,8 +46,6 @@ func count(ops []op) Counts {
 			c.Merged++
 		case opImply:
 			c.Implications++
-		case opUnalias, opUnimply:
-			c.Removed++
 		case opNote:
 			c.Notes++
 		}

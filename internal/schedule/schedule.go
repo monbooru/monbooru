@@ -505,9 +505,6 @@ func (s *Scheduler) removeOrphans(r *jobs.Reservation, cx *library.Gallery) erro
 	return nil
 }
 
-// A stamped image was tagged before, so tags the operator stripped since
-// stay stripped. Without ffmpeg the tagger skips the types only it frames
-// and leaves them unstamped, so they are left out rather than retried nightly.
 // autotagGroup is the images that lack a run of the same taggers.
 type autotagGroup struct {
 	taggers []string
@@ -522,6 +519,8 @@ type autotagGroup struct {
 func autotagBacklog(d *db.DB, ffmpeg bool, taggers []string, limit int, after int64) (_ []autotagGroup, last int64, _ error) {
 	q := `SELECT id FROM images i WHERE is_missing = 0
 		AND NOT EXISTS (SELECT 1 FROM image_tagger_runs r WHERE r.image_id = i.id AND r.tagger_name = ?)`
+	// Without ffmpeg the tagger skips the types only it frames and records
+	// no run, so they are left out rather than retried nightly.
 	if !ffmpeg {
 		var skip []string
 		for _, ft := range models.FileTypes {

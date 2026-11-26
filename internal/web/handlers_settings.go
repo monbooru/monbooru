@@ -120,7 +120,7 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Stats:              s.gatherStats(),
 		ExecutionProviders: config.ExecutionProviders,
 		Workers:            workers,
-		LocalRunning:       s.local != nil && s.local.running(),
+		LocalRunning:       s.local.running(),
 		TaggerProvider:     s.taggerProvider(cfg),
 		InstallTargets:     s.installTargets(cfg, workers),
 		CPUCount:           runtime.NumCPU(),

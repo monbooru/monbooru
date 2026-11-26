@@ -27,7 +27,7 @@ const profileSchemaVersion = 1
 // document, and the fields its folder's own tagger.json sets; ok is false
 // for a model no worker describes.
 func ProfileExport(name string) (doc []byte, sidecar []string, ok bool) {
-	h, found := currentPool().heldModel(name)
+	h, found := CurrentPool().heldModel(name)
 	if !found || len(h.model.Profile) == 0 {
 		return nil, nil, false
 	}
@@ -44,7 +44,7 @@ func ProfileExport(name string) (doc []byte, sidecar []string, ok bool) {
 // EmittedCategories is informational: a mapping can still route a label
 // into any category.
 func EmittedCategories(name string) []string {
-	h, ok := currentPool().heldModel(name)
+	h, ok := CurrentPool().heldModel(name)
 	if !ok {
 		return nil
 	}

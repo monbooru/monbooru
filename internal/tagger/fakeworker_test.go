@@ -17,7 +17,6 @@ type fakeModel struct {
 	name     string
 	size     int
 	labels   []worker.Label
-	scheme   string
 	mappings []worker.Mapping
 }
 
@@ -25,7 +24,7 @@ func newFake(t *testing.T, models ...fakeModel) *worker.Fake {
 	t.Helper()
 	f := &worker.Fake{Token: "tok", Info: worker.Info{Name: "fake", Slots: 2}, Labels: map[string]worker.Labels{}}
 	for _, m := range models {
-		scheme := cmp.Or(m.scheme, "wd14_numeric")
+		scheme := "wd14_numeric"
 
 		etag := fmt.Sprintf("%q", t.Name()+"/"+m.name)
 		f.Models = append(f.Models, worker.Model{
@@ -50,7 +49,7 @@ func usePool(t *testing.T, dir string, defs ...WorkerDef) *Pool {
 	p := NewPool(dir)
 	p.Set(defs)
 	p.Refresh(context.Background())
-	prev := currentPool()
+	prev := CurrentPool()
 	SetPool(p)
 	t.Cleanup(func() { SetPool(prev) })
 	return p

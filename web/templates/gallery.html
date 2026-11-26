@@ -621,10 +621,9 @@ function autotagWorkerTicks() {
   try { return JSON.parse(localStorage.getItem('monbooru_autotag_workers')) || {}; } catch (e) { return {}; }
 }
 
-// A worker that holds none of the taggers the job runs cannot be ticked.
-// The local one, left out at first, is ticked while a tagger the job runs
-// is held by no other ticked worker, as the pool would send those calls
-// there, and unticked again once it is, unless it was clicked.
+// The local worker, left out at first, is ticked while a tagger the job
+// runs is held by no other ticked worker, since the pool would send those
+// calls there; unticked once one is, unless it was clicked.
 function updateAutotagWorkers() {
   var form = document.getElementById('batch-autotag-form');
   if (!form) return;
@@ -703,7 +702,7 @@ function confirmBatchTag() {
 }
 
 // fav:true in front of a top-level OR would only join its first side, so
-// the query goes in a group, as the sidebar + button does.
+// the query goes in a group.
 function toggleFavFilter() {
   var si = document.getElementById('search-input');
   if (!si) return;

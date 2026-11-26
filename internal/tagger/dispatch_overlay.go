@@ -83,10 +83,10 @@ func SaveDispatchOverlay(dataPath, taggerName string, rules []DispatchEntry) err
 // mappings were copied there, so a mapping reset since is not copied back.
 const dispatchMoved = ".dispatch-moved"
 
-// MoveDispatchOverlays copies each model folder's dispatch.json to the
-// data folder, once; the old file is left where it is. A copy or a read
-// that fails is tried again at the next start, as is a models folder with
-// no tagger folder, which an unmounted volume looks like.
+// MoveDispatchOverlays copies each model folder's dispatch.json to the data
+// folder once, leaving the old file; a failed read or copy, or a models
+// folder with no tagger folder (as an unmounted volume looks), waits for the
+// next start.
 func MoveDispatchOverlays(modelPath, dataPath string) {
 	marker := filepath.Join(dataPath, dispatchMoved)
 	if _, err := os.Stat(marker); err == nil {

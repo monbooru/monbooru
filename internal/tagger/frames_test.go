@@ -94,7 +94,6 @@ func TestRGB8DropsAlphaRowByRow(t *testing.T) {
 
 func TestPadAndResize_WhiteSquare_AlphaForced(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
-
 	dst := padAndResize(src, 8, white)
 	for i := 0; i+3 < len(dst.Pix); i += 4 {
 		if dst.Pix[i] != 0xff || dst.Pix[i+1] != 0xff || dst.Pix[i+2] != 0xff || dst.Pix[i+3] != 0xff {
@@ -187,10 +186,8 @@ func TestPadAndResize_TakesTheFillItIsGiven(t *testing.T) {
 	}
 	dst := padAndResize(src, 64, [3]uint8{10, 20, 30})
 
-	off := dst.Stride*0 + 0
-	if dst.Pix[off] != 10 || dst.Pix[off+1] != 20 || dst.Pix[off+2] != 30 {
-		t.Errorf("override fill = (%d,%d,%d), want (10,20,30)",
-			dst.Pix[off], dst.Pix[off+1], dst.Pix[off+2])
+	if p := dst.Pix[0:3]; p[0] != 10 || p[1] != 20 || p[2] != 30 {
+		t.Errorf("override fill = %v, want (10,20,30)", p)
 	}
 }
 

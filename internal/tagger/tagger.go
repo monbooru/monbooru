@@ -1,4 +1,4 @@
-// Package tagger runs ONNX models over images and turns what they emit
+// Package tagger sends images to the workers' models and turns their scores
 // into tags.
 package tagger
 
@@ -36,7 +36,7 @@ func reasonFrom(taggers []TaggerStatus) string {
 	if len(enabledIn(taggers, nil)) > 0 {
 		return ""
 	}
-	if !currentPool().HasWorker() {
+	if !CurrentPool().HasWorker() {
 		return "no worker"
 	}
 	if len(taggers) == 0 {
@@ -52,21 +52,19 @@ func reasonFrom(taggers []TaggerStatus) string {
 
 func AvailableTaggers(cfg *config.Config) []TaggerStatus { return DiscoverTaggers(cfg) }
 
-// RunWithTaggers takes only enabled, available taggers and returns how many
-// ids were left untagged; a handle with no thumbnails path extracts pages
-// under the system temp directory.
+// RunWithTaggers takes only enabled, available taggers; a handle with no
+// thumbnails path extracts pages under the system temp directory.
 func RunWithTaggers(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int64, taggers []TaggerStatus, mgr *jobs.Manager) (Result, error) {
 	return RunOn(ctx, h, cfg, ids, taggers, nil, mgr)
 }
 
-// Result is what a run left: the ids skipped, and the images each worker
-// tagged, an image counting for the worker that answered its first call.
+// Result is what a run left: the ids skipped, each worker's images (an image
+// counts for the worker that answered its first call), and, when a worker
+// started for the job took part, the time the operator pays.
 type Result struct {
 	Skipped int
 	Tagged  map[string]int
-	// Took is set when a worker started for the job took part, whose time
-	// is what the operator pays.
-	Took time.Duration
+	Took    time.Duration
 }
 
 // Shares names each worker's images, most first, once more than one
@@ -122,7 +120,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 			return Result{}, fmt.Errorf("only a worker that starts on demand holds %s: name the worker for the job", strings.Join(names, ", "))
 		}
 	}
-	pool := currentPool()
+	pool := CurrentPool()
 	started := time.Now()
 	if err := pool.Wake(ctx, only, func(name string, waited time.Duration) {
 		mgr.Update(0, len(ids), fmt.Sprintf("starting %s, %s", name, Spell(waited)))
@@ -147,7 +145,7 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 	// meta) is filed there.
 	inferredCats := map[string]int64{}
 	hasSingleGeneral := slices.ContainsFunc(taggers, func(t TaggerStatus) bool {
-		h, ok := currentPool().heldModel(t.Name)
+		h, ok := CurrentPool().heldModel(t.Name)
 		return ok && h.labels.CategoryScheme == "single_general"
 	})
 	if hasSingleGeneral && generalCatID != 0 {
@@ -301,8 +299,8 @@ func RunOn(ctx context.Context, h gallery.Handle, cfg *config.Config, ids []int6
 		return nil
 	}
 
-	// Each worker prepares an image's frames and waits on the backend, so
-	// at most parallel images sit decoded or extracted at once.
+	// Each worker prepares an image's frames and waits on its calls, so at
+	// most parallel images sit decoded or extracted at once.
 	runCtx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	queue := make(chan int64)
@@ -349,11 +347,7 @@ feed:
 	return res, nil
 }
 
-// inferFrames runs every frame through every tagger, one call per frame
-// and input, and reports whether any frame was inferred and which worker
-// answered the first call. A frame that fails to read or that a model
-// refuses is logged and left out.
-// callGroup is one call per frame: the taggers that take the same input.
+// callGroup is the taggers that take the same input, and so share each call.
 type callGroup struct {
 	input   inputKey
 	models  []string
@@ -393,9 +387,6 @@ func (s semaphore) acquire(ctx context.Context) bool {
 
 func (s semaphore) release() { <-s }
 
-// prepareCount is how many images a job prepares at once: the setting,
-// never under the slots in use, or by itself the slots, twice that up to
-// the cores when a paired worker takes the job, within cpu_threads.
 func prepareCount(tc config.TaggerConfig, slots int, remote bool) int {
 	if tc.PrepareParallel > 0 {
 		return max(slots, tc.PrepareParallel)
@@ -416,6 +407,9 @@ type preparedFrame struct {
 	err    error
 }
 
+// inferFrames reports whether any frame was inferred and which worker
+// answered the first call; a frame that fails to read or that a model
+// refuses is logged and left out.
 func inferFrames(ctx context.Context, pool *Pool, only []string, priority string, groups []callGroup, nTaggers int, imageID int64, framePaths []string, fileType string, onPage func(int), prep semaphore) (_ [][]SparseScores, _ bool, by string, _ error) {
 	inputs := make([]inputKey, len(groups))
 	largest := 1

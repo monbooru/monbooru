@@ -40,8 +40,7 @@ type workerRow struct {
 	// Dot is the footer dot's state: ok, down or paused.
 	Dot, State string
 	Models     []workerModel
-	// Loaded names the models the worker has loaded now.
-	Loaded []string
+	Loaded     []string
 }
 
 type workersData struct {
@@ -67,7 +66,7 @@ func (d workersData) None() bool {
 
 func (s *Server) workersView() workersData {
 	cfg := s.cfgSnapshot()
-	d := workersData{LocalFound: s.local != nil && s.local.path != "", LocalPin: cfg.EnvPinned("tagger.local_worker")}
+	d := workersData{LocalFound: s.local.path != "", LocalPin: cfg.EnvPinned("tagger.local_worker")}
 	if u, err := url.Parse(cfg.Server.BaseURL); err == nil && u.Host != "" && !desktop.IsLoopbackAddr(u.Host) {
 		d.MonbooruURL = cfg.Server.BaseURL
 	}

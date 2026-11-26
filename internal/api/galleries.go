@@ -46,13 +46,10 @@ func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.
 	return tree, true
 }
 
-// FolderOf is one folder of a listing; the web UI's folder picker reads
-// its rows the same way.
 func FolderOf(n *gallery.FolderNode) contract.Folder {
 	return contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
 }
 
-// The subfolders of path, a page at a time, read off the cached tree.
 func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	tree, ok := h.folderTree(w, r)
 	if !ok {

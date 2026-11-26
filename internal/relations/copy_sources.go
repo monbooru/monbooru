@@ -56,7 +56,7 @@ func sourcesToCopy(q db.Querier, groupID int64) ([]SourceToCopy, error) {
 	return out, nil
 }
 
-// SourcesToCopy is what CopySourcesFromDuplicatesToOriginal would add.
+// SourcesToCopy is what a copy to the group's original would add.
 func (s *Service) SourcesToCopy(groupID int64) ([]SourceToCopy, error) {
 	return sourcesToCopy(s.db.Read, groupID)
 }
@@ -72,7 +72,6 @@ func (s *Service) GroupsWithSourcesToCopy(groupIDs []int64) (map[int64]bool, err
 	return out, err
 }
 
-// The whole row comes along, with the post's pulled notes.
 func (s *Service) CopySourcesFromDuplicatesToOriginal(groupID int64) (int, error) {
 	var added int
 	err := s.inWriteTx(func(tx *sql.Tx) error {

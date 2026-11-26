@@ -214,7 +214,7 @@ func (s *Server) makeTagsGlobalCheck(w http.ResponseWriter, r *http.Request) {
 	for _, g := range rep.Galleries {
 		data.Changes = data.Changes || g.Any()
 	}
-	data.ComesAlong, data.MoreAlong = rep.ComesAlong, 0
+	data.ComesAlong = rep.ComesAlong
 	if len(rep.ComesAlong) > globalCheckListed {
 		data.ComesAlong, data.MoreAlong = rep.ComesAlong[:globalCheckListed], len(rep.ComesAlong)-globalCheckListed
 	}

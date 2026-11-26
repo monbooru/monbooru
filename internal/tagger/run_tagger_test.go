@@ -39,13 +39,12 @@ func setupStoreResultsDB(t *testing.T) *db.DB {
 }
 
 type callRecorder struct {
-	fake   *worker.Fake
-	mu     sync.Mutex
-	failOn int
-	calls  int
-	frames int
-	models [][]string
-
+	fake     *worker.Fake
+	mu       sync.Mutex
+	failOn   int
+	calls    int
+	frames   int
+	models   [][]string
 	pageDirs string
 	dirs     []int
 }
@@ -89,8 +88,8 @@ func recordWorker(t *testing.T, rec *callRecorder, slots int, sizes map[string]i
 	rec.fake.Mu.Unlock()
 	srv := httptest.NewServer(rec)
 	t.Cleanup(srv.Close)
-	currentPool().Set([]WorkerDef{{Name: "fake", URL: srv.URL, Token: "tok"}})
-	currentPool().Refresh(context.Background())
+	CurrentPool().Set([]WorkerDef{{Name: "fake", URL: srv.URL, Token: "tok"}})
+	CurrentPool().Refresh(context.Background())
 	var out []TaggerStatus
 	for _, name := range slices.Sorted(maps.Keys(sizes)) {
 		out = append(out, TaggerStatus{TaggerInstance: config.TaggerInstance{Name: name, Enabled: true, ConfidenceThreshold: 0.35}})
