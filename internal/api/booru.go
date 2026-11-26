@@ -815,7 +815,6 @@ var booruRewrites = map[string]booruRewrite{
 	"filesize": {"size", nil},
 	"source":   {"sourceurl", nil},
 	"ratio":    {"ratio", booruRatio},
-	"status":   {"id", booruStatus},
 	"age":      {"date", func(v string) string { return booruAgeAt(v, time.Now()) }},
 	// A user's favorites on Danbooru; a gallery keeps one set, whoever is
 	// named. monbooru keeps no time a post was favorited, so ordfav lists
@@ -936,6 +935,8 @@ func (q *booruQuery) term(tok string, vocab booruVocabulary) string {
 			q.sort, q.order = "random", "desc"
 		}
 		return ""
+	case "status":
+		return booruStatus(val, neg)
 	}
 	out := body
 	rw, rewritten := booruRewrites[key]
@@ -1025,13 +1026,23 @@ func booruID(v string) string {
 
 // monbooru deletes a post outright and has no moderation queue, so every
 // post is active and any other status finds none, as an unknown one does
-// on Danbooru.
-func booruStatus(v string) string {
-	switch strings.ToLower(v) {
-	case "active", "any", "all":
-		return ""
+// on Danbooru. A list naming one that every post has is every post, and
+// its negation none.
+func booruStatus(val string, neg bool) string {
+	none := "id:" + booruNone
+	for _, v := range strings.Split(val, ",") {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "active", "any", "all":
+			if neg {
+				return none
+			}
+			return ""
+		}
 	}
-	return booruNone
+	if neg {
+		return "-" + none
+	}
+	return none
 }
 
 // Danbooru's age: is how long before now a post was made, so each bound
