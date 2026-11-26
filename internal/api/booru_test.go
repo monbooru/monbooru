@@ -874,6 +874,30 @@ func TestBooruDuration(t *testing.T) {
 	}
 }
 
+func TestBooruPostListsANameOnce(t *testing.T) {
+	cases := []struct {
+		name    string
+		tags    []imageTagJSON
+		all     string
+		general string
+		count   int
+	}{
+		{"in two categories", []imageTagJSON{{Name: "cat", Category: "general"}, {Name: "cat", Category: "species"}, {Name: "sky", Category: "general"}},
+			"cat sky", "cat sky", 2},
+		{"in an artist's and another", []imageTagJSON{{Name: "user_a", Category: "artist"}, {Name: "user_a", Category: "general"}},
+			"user_a", "", 1},
+		{"once each", []imageTagJSON{{Name: "cat", Category: "general"}, {Name: "dog", Category: "species"}},
+			"cat dog", "cat dog", 2},
+	}
+	for _, tc := range cases {
+		p := booruPostOf("http://a.example", models.Image{ID: 1, FileType: models.FileTypePNG}, tc.tags, false)
+		if p.TagString != tc.all || p.TagStringGeneral != tc.general || p.TagCount != tc.count {
+			t.Errorf("%s: tag_string %q, general %q, count %d; want %q, %q, %d",
+				tc.name, p.TagString, p.TagStringGeneral, p.TagCount, tc.all, tc.general, tc.count)
+		}
+	}
+}
+
 func TestBooruVariants(t *testing.T) {
 	post := func(w, h int, ext string, large bool) booruPost {
 		p := booruPost{ImageWidth: w, ImageHeight: h, FileExt: ext, HasLarge: large,
