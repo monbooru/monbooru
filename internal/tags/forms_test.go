@@ -73,6 +73,37 @@ func TestSplitForm(t *testing.T) {
 	}
 }
 
+func TestSuggestTyped(t *testing.T) {
+	database, svc := setupTestDB(t)
+	mustTag(t, svc, "user_a", categoryIDOf(t, svc, "artist"))
+	mustTag(t, svc, "user_b", generalCategoryID(t, svc))
+	cases := []struct {
+		typed, category string
+		want            []string
+	}{
+		{"user", "", []string{"user_a", "user_b"}},
+		{"Artist:us", "artist", []string{"user_a"}},
+		{"nier:au", "", nil},
+	}
+	for _, c := range cases {
+		ts, category, err := svc.SuggestTyped(c.typed, 10)
+		var got []string
+		for _, tag := range ts {
+			got = append(got, tag.Name)
+		}
+		slices.Sort(got)
+		if err != nil || category != c.category || !slices.Equal(got, c.want) {
+			t.Errorf("SuggestTyped(%q) = %q, %q, %v; want %q, %q", c.typed, got, category, err, c.want, c.category)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ts, _, err := svc.SuggestTyped("artist:us", 10); err == nil {
+		t.Errorf("a failed category read gave %v, want the error", ts)
+	}
+}
+
 func TestNormalizeForm_ElidesTheGeneralCategory(t *testing.T) {
 	_, svc := setupTestDB(t)
 	for form, want := range map[string]string{
