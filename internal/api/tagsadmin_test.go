@@ -506,6 +506,7 @@ func TestSuggestTags(t *testing.T) {
 		{"another category spelled out", "q=user", []row{{"artist:user_a", "artist", ""}}},
 		{"a typed category narrows to it", "q=artist:us", []row{{"artist:user_a", "artist", ""}}},
 		{"a typed category with no match", "q=artist:blue", nil},
+		{"a bare category lists its tags", "q=artist:", []row{{"artist:user_a", "artist", ""}}},
 		{"a prefix naming no category stays in the name", "q=nier:a", []row{{"nier:automata", "general", ""}}},
 		{"an alias finds its tag", "q=sky_", []row{{"blue_sky", "general", "sky_blue"}}},
 		{"the limit caps the list", "q=blue&limit=1", []row{{"blue_eyes", "general", ""}}},
