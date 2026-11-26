@@ -133,6 +133,10 @@ func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := s.active().DeleteImages(context.Background(), []int64{id}, library.DeleteOptions{}, nil)
+	if errors.Is(err, gallery.ErrRootUnreadable) {
+		flashHeaderErr(w, http.StatusServiceUnavailable, "Delete unavailable: gallery path is unreadable.")
+		return
+	}
 	if err != nil {
 		logx.Errorf("delete image %d: %v", id, err)
 		flashHeaderErr(w, http.StatusInternalServerError, "Delete failed; check server log.")

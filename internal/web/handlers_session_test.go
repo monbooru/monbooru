@@ -283,6 +283,42 @@ func TestSessionDecideDuplicate_UniqueTagsHeaderFollowsTheCopy(t *testing.T) {
 	}
 }
 
+func TestSessionDecideDuplicate_UniqueSourcesHeader(t *testing.T) {
+	cases := []struct {
+		name   string
+		source func(t *testing.T, srv *Server, original, dup int64)
+		want   string
+	}{
+		{"no sources", func(*testing.T, *Server, int64, int64) {}, "0"},
+		{"the duplicate has one", func(t *testing.T, srv *Server, _, dup int64) {
+			mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, dup)
+		}, "1"},
+		{"the original has it already", func(t *testing.T, srv *Server, original, dup int64) {
+			for _, id := range []int64{original, dup} {
+				mustExec(t, srv.db().Write, `INSERT INTO image_sources (image_id, site, post_id, url) VALUES (?, 'site_b', '7', 'https://b.example/7')`, id)
+			}
+		}, "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			original := insertBareImage(t, srv, "/tmp/src_o.png", "png", "sha_src_o")
+			dup := insertBareImage(t, srv, "/tmp/src_d.png", "png", "sha_src_d")
+			tc.source(t, srv, original, dup)
+			queueRow(t, srv.db(), original, dup, 3)
+
+			w := postForm(t, srv, "/relations/session/decide", url.Values{
+				"a": {strconv.FormatInt(min(original, dup), 10)}, "b": {strconv.FormatInt(max(original, dup), 10)},
+				"left": {strconv.FormatInt(original, 10)}, "type": {"duplicate"},
+			})
+			mustCode(t, w, http.StatusNoContent)
+			if got := w.Header().Get("X-Relations-Duplicate-HasUniqueSources"); got != tc.want {
+				t.Errorf("HasUniqueSources = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMarkedWalkerDeleteOne_RefusesTheOriginal(t *testing.T) {
 	srv := newTestServer(t)
 	original := insertBareImage(t, srv, "/tmp/walker_o.png", "png", "sha_walker_o")

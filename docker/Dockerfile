@@ -1,5 +1,5 @@
 # monbooru and ffmpeg on the monworker image, which tags on CPU.
-ARG MONWORKER_VERSION=1.0.1
+ARG MONWORKER_VERSION=1.0.3
 
 FROM golang:1.27.4-trixie AS build
 WORKDIR /src
@@ -44,7 +44,6 @@ COPY --from=build  /monbooru                         /usr/local/bin/monbooru
 
 ENV MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455 \
     MONBOORU_CONTAINER=1 \
-    MONBOORU_TAGGER_LOCAL_WORKER=true \
     HOME=/home/monbooru
 
 EXPOSE 8455

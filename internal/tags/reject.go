@@ -69,6 +69,9 @@ func (s *Service) rejectTx(tx *sql.Tx, id int64, isAlias bool, catID int64) erro
 	if s.ratingCatID != 0 && catID == s.ratingCatID {
 		return ErrRejectRating
 	}
+	if err := refuseGlobalTx(tx, id); err != nil {
+		return err
+	}
 	if err := stripTagsTx(tx, []int64{id}); err != nil {
 		return err
 	}

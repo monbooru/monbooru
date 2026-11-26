@@ -95,17 +95,6 @@ type SparseScores struct {
 	S []float32
 }
 
-func sparseScores(dense []float32) SparseScores {
-	var out SparseScores
-	for i, s := range dense {
-		if s >= scoreFloor {
-			out.I = append(out.I, int32(i))
-			out.S = append(out.S, s)
-		}
-	}
-	return out
-}
-
 // AggregateInferenceScores returns the survivors in no particular order.
 func AggregateInferenceScores(perFrame []SparseScores, labels []CandidateLabel, opts AggregateOpts) []AggregatedCandidate {
 	type accum struct {

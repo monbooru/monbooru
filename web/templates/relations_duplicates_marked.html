@@ -41,7 +41,12 @@
           {{if .HasTagsToCopy}}
           <button type="button" class="btn-link-accent btn-copy-tags-preview"
                   hx-get="/relations/dup-group/{{.GroupID}}/copy-tags/preview" hx-target="#copy-tags-preview-body"
-                  onclick="openCopyTagsPreview()">[copy tags]</button>
+                  onclick="openCopyPreview('copy-tags')">[copy tags]</button>
+          {{end}}
+          {{if .HasSourcesToCopy}}
+          <button type="button" class="btn-link-accent btn-copy-sources-preview"
+                  hx-get="/relations/dup-group/{{.GroupID}}/copy-sources/preview" hx-target="#copy-sources-preview-body"
+                  onclick="openCopyPreview('copy-sources')">[copy sources]</button>
           {{end}}
           {{if not .OriginalMissing}}
           <form hx-post="/relations/duplicates/marked/delete-one" hx-target="#flash-walker-marked" hx-swap="innerHTML"
@@ -67,11 +72,16 @@
   <div id="copy-tags-preview-body" class="copy-tags-preview-body">Loading...</div>
 </dialog>
 
+<dialog id="copy-sources-preview-dialog">
+  <h4 class="dlg-title">Copy sources to original{{template "webui/dialog_x"}}</h4>
+  <div id="copy-sources-preview-body" class="copy-tags-preview-body">Loading...</div>
+</dialog>
+
 <script>
 // Runs before htmx's own click listener, so the reset precedes the swap.
-function openCopyTagsPreview() {
-  document.getElementById('copy-tags-preview-body').innerHTML = 'Loading...';
-  document.getElementById('copy-tags-preview-dialog').showModal();
+function openCopyPreview(kind) {
+  document.getElementById(kind + '-preview-body').innerHTML = 'Loading...';
+  document.getElementById(kind + '-preview-dialog').showModal();
 }
 </script>
 

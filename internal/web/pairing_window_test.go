@@ -1,10 +1,13 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,6 +124,16 @@ func TestPairWindowWaitsForAClickWhenThePeerIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestAnUnreachableWorkerIsLoggedUnderItsName(t *testing.T) {
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","label":"gpu-box","url":"http://127.0.0.1:1","peer_token":"sek"}`)
+	wantIn(t, buf.String(), "pairing: monworker:gpu-box is unreachable at")
+}
+
 func TestPairWindowButtonOpensAndClosesIt(t *testing.T) {
 	srv := newTestServer(t)
 	wantIn(t, do(srv, "GET", "/settings").Body.String(), "Accept pairings for 10 minutes")
@@ -137,7 +150,7 @@ func TestPairWindowButtonOpensAndClosesIt(t *testing.T) {
 	if !srv.win.closesAt().IsZero() {
 		t.Fatal("Close left the window open")
 	}
-	wantIn(t, body, "Approves monloader and workers without a click.")
+	wantIn(t, body, "Approves monloader and workers automatically.")
 }
 
 func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
@@ -148,7 +161,7 @@ func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
 	pairStatus(t, srv, id)
 
 	page := do(srv, "GET", "/settings").Body.String()
-	wantIn(t, page, "<th>Paired without a click</th>")
+	wantIn(t, page, "<th>Paired automatically</th>")
 	wantIn(t, page, `<td data-label="Source">127.0.0.1</td>`)
 	wantIn(t, page, `<td data-label="Scopes">read write</td>`)
 	wantIn(t, page, `hx-post="/settings/plugins/monloader/remove"`)
@@ -161,7 +174,7 @@ func TestPairedWithoutAClickIsListedWithRevoke(t *testing.T) {
 	}
 
 	wantIn(t, rr.Body.String(), `id="plugin-pairing" hx-get=`)
-	wantNotIn(t, rr.Body.String(), "Paired without a click")
+	wantNotIn(t, rr.Body.String(), "Paired automatically")
 }
 
 func TestAClickedPairingLeavesTheTrace(t *testing.T) {
@@ -183,7 +196,7 @@ func TestAClickedPairingLeavesTheTrace(t *testing.T) {
 	}
 }
 
-func TestNavSaysAppsPairedWithoutAClickUntilSettingsIsOpened(t *testing.T) {
+func TestNavSaysAppsPairedAutomaticallyUntilSettingsIsOpened(t *testing.T) {
 	p := healthPeer(t)
 	srv := newTestServer(t)
 	srv.win.open(pairWindowLength)
@@ -193,17 +206,29 @@ func TestNavSaysAppsPairedWithoutAClickUntilSettingsIsOpened(t *testing.T) {
 	pairStatus(t, srv, id)
 	poll := do(srv, "GET", "/internal/job/status").Body.String()
 	wantIn(t, poll, `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hx-swap-oob="true"`)
-	wantIn(t, poll, "[! 1 app paired without a click]")
+	wantIn(t, poll, "[! monloader paired automatically]")
 	key := srv.pairNotice().Key() + srv.autoPairNotice().Key()
 	wantNotIn(t, do(srv, "GET", "/internal/job/status?pair="+url.QueryEscape(key)).Body.String(), `id="auto-pair-notice"`)
 
 	id, _ = offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","url":"`+p.URL+`","peer_token":"w"}`)
 	pairStatus(t, srv, id)
-	wantIn(t, do(srv, "GET", "/").Body.String(), "[! 2 apps paired without a click]")
+	wantIn(t, do(srv, "GET", "/").Body.String(), "[! 2 apps paired automatically]")
 
 	page := do(srv, "GET", "/settings").Body.String()
 	wantIn(t, page, `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
-	wantIn(t, page, "Paired without a click")
+	wantIn(t, page, "Paired automatically")
+	wantIn(t, do(srv, "GET", "/").Body.String(), `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
+}
+
+func TestThePanelPollMarksTheAutomaticPairingsSeen(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	id, _ := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monloader","url":"`+p.URL+`","peer_token":"sek"}`)
+	pairStatus(t, srv, id)
+	wantIn(t, do(srv, "GET", "/").Body.String(), "[! monloader paired automatically]")
+
+	wantIn(t, do(srv, "GET", "/internal/plugins/pairing?paired=").Body.String(), "<th>Paired automatically</th>")
 	wantIn(t, do(srv, "GET", "/").Body.String(), `<a id="auto-pair-notice" class="pair-notice" href="/settings#plugins" hidden></a>`)
 }
 
@@ -301,4 +326,64 @@ func pairedKey(app string) string {
 		return peer.WorkerKey(app)
 	}
 	return app
+}
+
+func TestAWorkerPairedAutomaticallyIsNamedAndLeadsToItsBlock(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.win.open(pairWindowLength)
+	id, _ := offerFrom(t, srv, "127.0.0.1:50000", `{"app":"monworker","label":"gpu-box","url":"`+p.URL+`","peer_token":"w"}`)
+	pairStatus(t, srv, id)
+	body := do(srv, "GET", "/").Body.String()
+	wantIn(t, body, "[! gpu-box paired automatically]")
+	wantIn(t, body, `<a id="auto-pair-notice" class="pair-notice" href="/settings#tagger"`)
+}
+
+func TestOpeningTheWindowApprovesWhatAlreadyWaits(t *testing.T) {
+	p := healthPeer(t)
+	srv := newTestServer(t)
+	srv.cfg.Plugins = append(srv.cfg.Plugins, config.PluginConfig{Name: "monedit", APIURL: p.URL})
+	offer := func(app, label, at, remote string, headers ...[2]string) string {
+		id, st := offerFrom(t, srv, remote, `{"app":"`+app+`","label":"`+label+`","url":"`+at+`","peer_token":"sek","version":"1.15.0"}`, headers...)
+		if st != pairing.Pending {
+			t.Fatalf("%s %s: state = %q with the window closed, want pending", app, label, st)
+		}
+		return id
+	}
+	pairPeer(srv, "monworker:old")
+	monloader := offer("monloader", "", p.URL, "127.0.0.1:50000")
+	worker := offer("monworker", "nas", p.URL, "127.0.0.1:50001")
+	waits := map[string]string{
+		"a plugin":           offer("monedit", "", p.URL, "127.0.0.1:50000"),
+		"a forwarded worker": offer("monworker", "attic", p.URL, "127.0.0.1:50000", [2]string{"X-Forwarded-For", "192.168.1.9"}),
+		"a public worker":    offer("monworker", "far", p.URL, "203.0.113.5:50000"),
+		"an unreachable one": offer("monworker", "ghost", "http://127.0.0.1:1", "127.0.0.1:50000"),
+		"a re-pair":          offer("monworker", "old", p.URL, "127.0.0.1:50000"),
+	}
+
+	postForm(t, srv, "/settings/plugins/pair/window", url.Values{"open": {"1"}})
+
+	for name, id := range waits {
+		if got, _ := srv.pairs.Get(id); got.State != pairing.Pending {
+			t.Errorf("%s: state = %q, want still pending on its card", name, got.State)
+		}
+	}
+	for app, id := range map[string]string{"monloader": monloader, "monworker:nas": worker} {
+		if got, _ := srv.pairs.Get(id); got.State != pairing.Approved {
+			t.Fatalf("%s: state = %q, want approved when the window opened", app, got.State)
+		}
+		if _, out := pairStatus(t, srv, id); len(out["token"]) != 32 || !srv.pairedWith(app) {
+			t.Fatalf("%s: claim = %v, want its token", app, out)
+		}
+	}
+	if made := srv.win.list(); len(made) != 2 {
+		t.Errorf("trace = %+v, want monloader and nas listed as paired automatically", made)
+	}
+}
+
+func TestTheAutoPairNoticeCutsALongWorkerName(t *testing.T) {
+	n := autoPairNotice{Items: []autoPairing{{App: "monworker:workstation-with-a-very-long-nam"}}}
+	if got, want := n.Text(), "workstation-w... paired automatically"; got != want {
+		t.Fatalf("Text() = %q, want %q", got, want)
+	}
 }

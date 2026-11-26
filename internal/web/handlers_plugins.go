@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -146,6 +145,20 @@ func (s *Server) pairedTokenInfo(app string) (string, []string) {
 	return "", nil
 }
 
+// pairedKey changes with any paired token, a re-pair's new one included.
+func (s *Server) pairedKey() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	var ids []string
+	for _, t := range s.cfg.Auth.Tokens {
+		if t.Paired != "" {
+			ids = append(ids, t.ID)
+		}
+	}
+	slices.Sort(ids)
+	return strings.Join(ids, ".")
+}
+
 func (s *Server) pairedPeerCount() int {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
@@ -158,17 +171,32 @@ func (s *Server) pairedPeerCount() int {
 	return n
 }
 
+// pendingCounts splits the requests waiting by where they wait: a
+// worker's under Auto-Tagger, any other under Plugins.
+func (s *Server) pendingCounts() (plugins, workers int) {
+	for _, req := range s.pairs.ListPending() {
+		if req.App == contract.AppMonworker {
+			workers++
+		} else {
+			plugins++
+		}
+	}
+	return plugins, workers
+}
+
 // The answers carry the nav notice and the settings count too, so a
 // decision clears them at once rather than on the next job-status poll.
 func (s *Server) pairViewData() map[string]any {
 	n := s.pairNotice()
 	n.OOB = true
+	plugins, _ := s.pendingCounts()
 	data := map[string]any{
-		"Pending":    s.pendingOffers(),
-		"Paired":     s.pairedPeerCount(),
-		"Notice":     n,
-		"PairKey":    n.Key(),
-		"AutoPaired": s.win.list(),
+		"Pending":        s.pendingOffers(),
+		"Paired":         s.pairedKey(),
+		"Notice":         n,
+		"PluginsPending": plugins,
+		"PairKey":        n.Key(),
+		"AutoPaired":     s.win.list(),
 	}
 	if closes := s.win.closesAt(); !closes.IsZero() {
 		data["WindowSecs"] = int(time.Until(closes).Round(time.Second).Seconds())
@@ -227,12 +255,12 @@ func (s *Server) pendingOffers() []pendingOffer {
 
 func (s *Server) pluginPairingFragment(w http.ResponseWriter, r *http.Request) {
 	data := s.pairViewData()
-	count, _ := data["Paired"].(int)
 	if r.URL.Query().Get("pair") == data["PairKey"] {
 		delete(data, "Notice")
 	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", data)
-	if was := r.URL.Query().Get("paired"); was != "" && was != strconv.Itoa(count) {
+	s.win.markSeen()
+	if r.URL.Query().Has("paired") && r.URL.Query().Get("paired") != data["Paired"] {
 		s.renderPluginRows(w, r, true)
 		s.renderAuthTokensOOB(w, r)
 	}

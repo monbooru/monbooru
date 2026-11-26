@@ -24,11 +24,13 @@ type mountStats struct {
 	UsedPct   int
 }
 
-type taggerCacheStats struct {
-	Loaded     bool
-	Provider   string
-	InUse      bool
-	Sessions   []string
+// workerStats is one worker as the Stats block shows it; the memory is
+// the local worker's only, the one process monbooru can read.
+type workerStats struct {
+	Name, Provider, State string
+	// Up is a worker answering, whose mode and models are worth a row.
+	Up         bool
+	Loaded     []string
 	WorkerPID  int
 	WorkerRSS  int64
 	WorkerAnon int64
@@ -40,7 +42,7 @@ type statsData struct {
 	Galleries  []galleryDBStats
 	Mounts     []mountStats
 	FSWarnings []string
-	Tagger     taggerCacheStats
+	Tagger     taggerStats
 }
 
 // Cheap by design: no directory walks.
@@ -122,38 +124,63 @@ func (s *Server) gatherStats() statsData {
 	return out
 }
 
-func gatherTaggerStats(s *Server) taggerCacheStats {
-	st := tagger.Status()
-	out := taggerCacheStats{
-		Loaded:   st.Loaded,
-		Provider: st.Provider,
-		InUse:    st.InUse,
-		Sessions: st.Sessions,
-	}
-	// The models live in the worker's inference child, so its memory
-	// counts with the worker's.
-	if pid := s.peers.PID(localWorkerName); pid > 0 {
-		out.WorkerPID = pid
-		for _, p := range append([]int{pid}, procChildren(pid)...) {
-			if r, ok := desktop.ProcRSS(p); ok {
-				out.WorkerRSS += int64(r.Total)
-				out.WorkerAnon += int64(r.Anon)
-				out.WorkerFile += int64(r.File)
-			}
-		}
-	}
-	return out
+// taggerStats is the Stats block: each worker, and while calls run, which
+// side they wait on.
+type taggerStats struct {
+	Workers []workerStats
+	Load    tagger.Load
 }
 
+func gatherTaggerStats(s *Server) taggerStats {
+	rows := s.workersView().Rows
+	out := make([]workerStats, 0, len(rows))
+	for _, r := range rows {
+		st := workerStats{Name: r.Name, Provider: r.Provider, State: r.State, Up: r.Dot == "ok", Loaded: r.Loaded}
+		if r.Local && !r.Disabled {
+			var rss desktop.RSS
+			st.WorkerPID, rss = s.localWorkerRSS()
+			st.WorkerRSS, st.WorkerAnon, st.WorkerFile = int64(rss.Total), int64(rss.Anon), int64(rss.File)
+		}
+		out = append(out, st)
+	}
+	return taggerStats{Workers: out, Load: tagger.CurrentPool().Load()}
+}
+
+// The models live in the worker's inference child, so its memory counts
+// with the worker's.
+func (s *Server) localWorkerRSS() (pid int, rss desktop.RSS) {
+	pid = s.peers.PID(localWorkerName)
+	if pid <= 0 {
+		return 0, rss
+	}
+	for _, p := range append([]int{pid}, procChildren(pid)...) {
+		if r, ok := desktop.ProcRSS(p); ok {
+			rss.Total += r.Total
+			rss.Anon += r.Anon
+			rss.File += r.File
+		}
+	}
+	return pid, rss
+}
+
+// procChildren reads every thread's list: a child is listed under the
+// thread that forked it, and Go forks from any of them.
 func procChildren(pid int) []int {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(pid) + "/children")
+	dir := "/proc/" + strconv.Itoa(pid) + "/task"
+	tasks, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []int
-	for _, f := range strings.Fields(string(data)) {
-		if n, err := strconv.Atoi(f); err == nil {
-			out = append(out, n)
+	for _, task := range tasks {
+		data, err := os.ReadFile(dir + "/" + task.Name() + "/children")
+		if err != nil {
+			continue
+		}
+		for _, f := range strings.Fields(string(data)) {
+			if n, err := strconv.Atoi(f); err == nil {
+				out = append(out, n)
+			}
 		}
 	}
 	return out

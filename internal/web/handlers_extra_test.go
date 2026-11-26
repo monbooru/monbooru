@@ -374,22 +374,6 @@ func TestMoveImage_FlashEscapesFolderName(t *testing.T) {
 	wantIn(t, trig.Flash.Text, "&lt;b&gt;")
 }
 
-func TestFoldersSuggest_CaseInsensitivePrefix(t *testing.T) {
-	srv := newTestServer(t)
-	cx := srv.active()
-	mustMkdirAll(t, filepath.Join(cx.GalleryPath, "Characters"), 0o755)
-	seedImage(t, srv, "Characters/f.png", 9, 9)
-	for _, prefix := range []string{"ch", "Ch", "CHAR"} {
-		w := do(srv, "GET", "/internal/folders/suggest?prefix="+prefix)
-		if w.Code != http.StatusOK {
-			t.Fatalf("folders suggest prefix=%s: %d", prefix, w.Code)
-		}
-		if !strings.Contains(w.Body.String(), "Characters") {
-			t.Errorf("prefix=%s should surface Characters folder, got %s", prefix, w.Body.String())
-		}
-	}
-}
-
 func TestSourceSuggest_CaseInsensitivePrefix(t *testing.T) {
 	srv := newTestServer(t)
 	id := seedImage(t, srv, "src.png", 7, 7)
@@ -407,34 +391,6 @@ func TestSourceSuggest_CaseInsensitivePrefix(t *testing.T) {
 			t.Errorf("prefix=%s should surface Pixiv source, got %s", prefix, w.Body.String())
 		}
 	}
-}
-
-func TestFoldersSuggest_PrefixFilter(t *testing.T) {
-	srv := newTestServer(t)
-	cx := srv.active()
-
-	for i, folder := range []string{"2024/jan", "2024/feb", "2025/mar"} {
-		sub := filepath.Join(cx.GalleryPath, folder)
-		mustMkdirAll(t, sub, 0o755)
-		name := strings.ReplaceAll(folder, "/", "_") + ".png"
-		p := filepath.Join(sub, name)
-		img := image.NewRGBA(image.Rect(0, 0, 12+i*3, 12+i))
-		for px := 0; px < len(img.Pix); px += 4 {
-			img.Pix[px] = byte(i * 50)
-		}
-		f, _ := os.Create(p)
-		_ = png.Encode(f, img)
-		_ = f.Close()
-		if _, _, err := gallery.Ingest(cx.Handle, p, ""); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	body := mustGetBody(t, srv, "/internal/folders/suggest?prefix=2024")
-	if !strings.Contains(body, "2024/jan") || !strings.Contains(body, "2024/feb") {
-		t.Errorf("expected both 2024 folders in response, got %s", body)
-	}
-	wantNotIn(t, body, "2025/mar")
 }
 
 func TestSidebarFolderLink_SinglePercentEncoded(t *testing.T) {

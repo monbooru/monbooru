@@ -146,7 +146,7 @@
           <li><kbd>Home</kbd><kbd>End</kbd><span>First / last visible</span></li>
           <li><kbd>F</kbd><span>Toggle favorites filter</span></li>
           <li><kbd>R</kbd><span>Random sort</span></li>
-          <li data-when="#slideshow-btn"><kbd>w</kbd><span>Slideshow</span></li>
+          <li data-when="#viewer-btn"><kbd>v</kbd><span>View, play as a slideshow</span></li>
           <li><kbd>O</kbd><span>Cycle sort</span></li>
           <li><kbd>D</kbd><span>Flip direction</span></li>
           <li data-when="#thumb-size-ramp"><kbd>-</kbd><kbd>=</kbd><span>Thumbnail size</span></li>
@@ -181,9 +181,8 @@
         <ul>
           <li><kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>h</kbd><kbd>l</kbd><kbd>j</kbd><kbd>k</kbd><span>Previous / next</span></li>
           <li data-when=".coll-nav-keyed .coll-step"><kbd>[</kbd><kbd>]</kbd><span>Previous / next in collection</span></li>
-          <li data-when="#slideshow-btn"><kbd>w</kbd><span>Slideshow from here</span></li>
           <li><kbd>Esc</kbd><kbd>Backspace</kbd><span>Back to gallery</span></li>
-          <li><kbd>o</kbd><span>Open in tab</span></li>
+          <li data-when="#detail-open"><kbd>o</kbd><span>Open in a new tab</span></li>
           <li data-when=".detail-actions a[download]"><kbd>d</kbd><span>Download</span></li>
           <li data-when=".tag-mode-toggle"><kbd>B</kbd><span>Group tags by...</span></li>
           <li><kbd>a</kbd><span>Focus tag input</span></li>
@@ -206,31 +205,27 @@
           <li data-when=".btn-manga-action.btn-pages"><kbd>P</kbd><span>See all pages</span></li>
           <li data-when=".btn-manga-action.btn-generate-collection"><kbd>C</kbd><span>Generate collection</span></li>
           <li data-when=".plugin-card .plugin-btn, #plugin-batch-bar.visible .plugin-btn"><kbd>x</kbd><kbd>1-9</kbd><span>Run Nth plugin</span></li>
-          <li data-when=".detail-img-link"><kbd>v</kbd><span>Open image viewer</span></li>
+          <li data-when="#viewer-btn"><kbd>v</kbd><span>View, play the search from here</span></li>
         </ul>
       </section>
-      <section data-surface="lightbox">
-        <h4>Image viewer</h4>
+      <section data-surface="viewer">
+        <h4>Viewer</h4>
         <ul>
-          <li><kbd>Wheel</kbd><span>Zoom toward cursor</span></li>
-          <li><kbd>Drag</kbd><span>Pan</span></li>
-          <li><kbd>Double click</kbd><span>Toggle fit / 1:1</span></li>
-          <li><kbd>+</kbd><kbd>-</kbd><span>Zoom in / out</span></li>
-          <li><kbd>0</kbd><kbd>1</kbd><span>Fit / 1:1</span></li>
-          <li><kbd>Esc</kbd><kbd>Click outside</kbd><span>Close</span></li>
-        </ul>
-      </section>
-      <section data-surface="slideshow">
-        <h4>Slideshow</h4>
-        <ul>
-          <li><kbd>Space</kbd><span>Play / pause</span></li>
           <li><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Previous / next</span></li>
           <li><kbd>Home</kbd><kbd>End</kbd><span>First / last</span></li>
+          <li><kbd>Wheel</kbd><kbd>+</kbd><kbd>-</kbd><span>Zoom</span></li>
+          <li><kbd>Drag</kbd><span>Pan</span></li>
+          <li><kbd>0</kbd><kbd>1</kbd><kbd>Double click</kbd><span>Fit / 1:1</span></li>
+          <li><kbd>s</kbd><span>Start / stop the slideshow</span></li>
+          <li><kbd>Space</kbd><span>Play / pause the video, or the slideshow on an image</span></li>
           <li><kbd>r</kbd><span>Restart video</span></li>
+          <li><kbd>Shift</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Back / forward 10 s in a video</span></li>
           <li><kbd>l</kbd><span>Loop videos</span></li>
           <li><kbd>m</kbd><span>Sound on / off</span></li>
+          <li><kbd>&uarr;</kbd><kbd>&darr;</kbd><span>Volume</span></li>
           <li><kbd>f</kbd><span>Fullscreen</span></li>
-          <li><kbd>Esc</kbd><span>Exit slideshow</span></li>
+          <li><kbd>b</kbd><span>Show / hide the bar</span></li>
+          <li><kbd>Esc</kbd><kbd>Click outside</kbd><span>Close</span></li>
         </ul>
       </section>
       <section data-surface="tags">
@@ -287,7 +282,10 @@
           <li><kbd>P</kbd><span>See all pages</span></li>
           <li><kbd>o</kbd><span>Open page in new tab</span></li>
           <li><kbd>e</kbd><span>Extract page as image</span></li>
-          <li><kbd>v</kbd><span>Zoom page in viewer</span></li>
+          <li><kbd>Wheel</kbd><kbd>+</kbd><kbd>-</kbd><span>Zoom</span></li>
+          <li><kbd>Drag</kbd><span>Pan</span></li>
+          <li><kbd>0</kbd><kbd>1</kbd><kbd>Double click</kbd><span>Fit / 1:1</span></li>
+          <li><kbd>b</kbd><span>Show / hide the bar</span></li>
           <li><kbd>Esc</kbd><kbd>Backspace</kbd><span>Back</span></li>
         </ul>
       </section>
@@ -330,7 +328,6 @@
       {{template "dialog_actions" dict "ID" "page-jump-dialog" "Submit" "Go"}}
     </form>
   </dialog>
-  {{template "partials/image_lightbox.html" .}}
   {{with .Galleries}}{{if gt (len .) 1}}
   <dialog id="gallery-switch-dialog">
     <p class="dlg-title">Switch gallery{{template "webui/dialog_x"}}</p>

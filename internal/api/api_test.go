@@ -1380,6 +1380,37 @@ func TestEnrichImage_SimilarityMatchSkipsHashCheck(t *testing.T) {
 	mustCode(t, w, http.StatusConflict)
 }
 
+func TestEnrichImage_RefreshesASourceCopiedFromADuplicate(t *testing.T) {
+	env := newTestEnv(t)
+	orig := env.createTestImage(t, "copy_orig.png", 20, 20)
+	dup := env.createTestImage(t, "copy_dup.png", 12, 12)
+	svc := relations.New(env.database, tags.New(env.database, nil), nil)
+	if err := svc.AddDuplicateOf(orig, dup); err != nil {
+		t.Fatal(err)
+	}
+	var gid int64
+	if err := env.database.Read.QueryRow(`SELECT group_id FROM dup_group_members WHERE image_id = ?`, orig).Scan(&gid); err != nil {
+		t.Fatal(err)
+	}
+
+	dupMD5 := strings.Repeat("d", 32)
+	mustExec(t, env.database.Write, `INSERT INTO image_sources (image_id, site, post_id, url, md5) VALUES (?, 'site_b', '7', 'https://b.example/7', ?)`, dup, dupMD5)
+	if added, err := svc.CopySourcesFromDuplicatesToOriginal(gid); err != nil || added != 1 {
+		t.Fatalf("copy = %d, %v", added, err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"tags": []string{"1girl"}, "source": "site_b", "post_id": "7", "url": "https://b.example/7",
+		"source_md5": dupMD5, "verify": true,
+	})
+	w := doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/enrich", orig), body)
+	mustCode(t, w, http.StatusOK)
+	wantIn(t, w.Body.String(), `"verified":false`)
+	if n := countRows(t, env.database, "image_tags it JOIN tags t ON t.id = it.tag_id WHERE it.image_id = ? AND t.name = '1girl'", orig); n != 1 {
+		t.Errorf("the refresh's tag landed %d times, want once", n)
+	}
+}
+
 func TestEnrichImage_ReportsTagWarnings(t *testing.T) {
 	env := newTestEnv(t)
 	id := env.createTestImage(t, "enrich_warn.png", 12, 12)
@@ -1734,6 +1765,30 @@ func TestDeleteImage_SaysHowManyChangedFilesItKept(t *testing.T) {
 	}
 	if _, err := os.Stat(imgPath); err != nil {
 		t.Errorf("the file written over since was removed: %v", err)
+	}
+}
+
+func TestImageWrites_AnUnreadableGalleryIs503(t *testing.T) {
+	env := newTestEnv(t)
+	id := env.createTestImage(t, "kept.png", 10, 10)
+	if err := os.Rename(env.galleryDir, env.galleryDir+".away"); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, w := range map[string]*httptest.ResponseRecorder{
+		"delete":  env.do("DELETE", fmt.Sprintf("/api/v1/images/%d", id)),
+		"create":  env.postUpload(t, "new.png", pngFileBytes(t, 12, 12), nil),
+		"replace": env.postReplace(t, id, "better.png", pngFileBytes(t, 20, 20), nil),
+	} {
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), `"gallery_unavailable"`) {
+			t.Errorf("%s = %d %s, want 503 gallery_unavailable", name, w.Code, w.Body.String())
+		}
+	}
+	if n := countRows(t, env.database, "images WHERE id = ?", id); n != 1 {
+		t.Errorf("the row went (n=%d)", n)
+	}
+	if _, err := os.Stat(env.galleryDir); !os.IsNotExist(err) {
+		t.Errorf("the gallery folder was created again (err=%v)", err)
 	}
 }
 

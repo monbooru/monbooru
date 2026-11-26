@@ -1,7 +1,11 @@
 package jobs
 
 import (
+	"bytes"
+	"log"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -380,5 +384,17 @@ func mustStart(t *testing.T, m *Manager, jobType string) {
 	t.Helper()
 	if err := m.Start(jobType); err != nil {
 		t.Fatalf("Start(%q): %v", jobType, err)
+	}
+}
+
+func TestAFailedJobIsLogged(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	m := NewManager()
+	mustStart(t, m, "autotag")
+	m.Fail("worker local: worker answered 500: no provider")
+	if got := buf.String(); !strings.Contains(got, "WARN jobs: autotag failed: worker local: worker answered 500: no provider") {
+		t.Errorf("log = %q", got)
 	}
 }

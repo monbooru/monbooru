@@ -226,6 +226,64 @@ func TestDeleteImages_FilesGoneRefusesAnUnreadableOrEmptyRoot(t *testing.T) {
 	}
 }
 
+func TestDeleteImages_RefusesAnUnreadableRoot(t *testing.T) {
+	cx := openTestGallery(t)
+	id := seedRow(t, cx, "ai/a.png", []byte("png-bytes"), false)
+	away := cx.GalleryPath + ".away"
+	if err := os.Rename(cx.GalleryPath, away); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := cx.DeleteImages(context.Background(), []int64{id}, DeleteOptions{}, nil)
+	if !errors.Is(err, gallery.ErrRootUnreadable) {
+		t.Fatalf("err = %v, want ErrRootUnreadable", err)
+	}
+	if len(res.Deleted) != 0 {
+		t.Errorf("deleted %+v", res.Deleted)
+	}
+	if n := countRows(t, cx.DB, "images WHERE id = ?", id); n != 1 {
+		t.Errorf("the row went (n=%d)", n)
+	}
+	if !exists(filepath.Join(away, "ai", "a.png")) {
+		t.Error("the file went")
+	}
+}
+
+func TestDeleteImages_AnEmptyRootStillDeletesRowsWhoseFileIsGone(t *testing.T) {
+	cx := openTestGallery(t)
+	id := seedRow(t, cx, "gone.png", nil, true)
+
+	if res := mustDelete(t, cx, []int64{id}, DeleteOptions{}); len(res.Deleted) != 1 {
+		t.Errorf("deleted %+v, want the one row", res.Deleted)
+	}
+}
+
+func TestDeleteCopies_RefusesAnUnreadableRoot(t *testing.T) {
+	cx := openTestGallery(t)
+	body := []byte("original")
+	id := seedRow(t, cx, "original.png", body, false)
+	copyPath := filepath.Join(cx.GalleryPath, "copy.png")
+	addAlias(t, cx, id, copyPath, body)
+	var pathID int64
+	if err := cx.DB.Read.QueryRow(`SELECT id FROM image_paths WHERE path = ?`, copyPath).Scan(&pathID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(cx.GalleryPath, cx.GalleryPath+".away"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := cx.DeleteCopies(context.Background(), []int64{pathID}, nil)
+	if !errors.Is(err, gallery.ErrRootUnreadable) {
+		t.Fatalf("err = %v, want ErrRootUnreadable", err)
+	}
+	if res.Removed != 0 {
+		t.Errorf("result = %+v, want nothing removed", res)
+	}
+	if n := countRows(t, cx.DB, "image_paths WHERE id = ?", pathID); n != 1 {
+		t.Errorf("the copy's row went (n=%d)", n)
+	}
+}
+
 func TestDeleteImages_ContinuePastFailureSkipsTheImageThatFails(t *testing.T) {
 	for _, carryOn := range []bool{false, true} {
 		t.Run(fmt.Sprint(carryOn), func(t *testing.T) {

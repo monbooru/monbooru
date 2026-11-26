@@ -179,9 +179,12 @@ function navDetailArrow(direction, noun) {
 }
 
 // A pinch-zoomed page is left alone, since there the finger pans.
+var readerZoom = null;
+
 function onSwipe(el, prev, next) {
   var x0 = null, y0 = 0, t0 = 0;
   el.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch' && !e.isPrimary) x0 = null;
     if (e.pointerType !== 'touch' || !e.isPrimary || e.target.closest('video[controls]')) return;
     x0 = e.clientX; y0 = e.clientY; t0 = e.timeStamp;
   });
@@ -201,8 +204,10 @@ document.addEventListener('DOMContentLoaded', function () {
   if (media) onSwipe(media, function () { navDetailArrow('prev', 'image'); }, function () { navDetailArrow('next', 'image'); });
   var stage = document.querySelector('.reader-stage');
   if (stage) {
+    readerZoom = zoomer(stage, { label: document.getElementById('reader-zoom'), swipe: true });
+    readerZoom.attach(stage.querySelector('.reader-img'));
     var follow = function (sel) {
-      return function () { var a = stage.querySelector(sel); if (a) window.location.href = a.href; };
+      return function () { var a = stage.querySelector(sel); if (a && readerZoom.atFit()) window.location.href = a.href; };
     };
     onSwipe(stage, follow('a.reader-side-prev'), follow('a.reader-side-next'));
   }
@@ -331,8 +336,7 @@ function activeSurfaces() {
   if (isSettingsPage())   s.push('settings');
   if (document.getElementById('pages-grid-page')) s.push('pages');
   if (document.getElementById('relations-session-page')) s.push('relations');
-  if (document.querySelector('.detail-img-link')) s.push('lightbox');
-  if (document.getElementById('slideshow-btn')) s.push('slideshow');
+  if (document.getElementById('viewer-btn')) s.push('viewer');
   return s;
 }
 
@@ -367,57 +371,23 @@ function handlePagesGridKey(e) {
   return false;
 }
 
-var lightbox = (function () {
-  var dlg = null, img = null, stage = null, zoomLbl = null, openLink = null;
+function zoomer(stage, opts) {
+  var img = null;
   var scale = 1, tx = 0, ty = 0;
-  var panning = false, px0 = 0, py0 = 0, tx0 = 0, ty0 = 0;
-  // Past 4px (16 squared) a press is a pan, and its release must not
-  // close the viewer.
+  var pressed = false, panning = false, px0 = 0, py0 = 0, tx0 = 0, ty0 = 0;
+  // Past 4px (16 squared) a press is a pan, and its release is not a click.
   var pressMoved = false;
   // Fingers on the stage by pointer id, and the last spread of a pinch.
   var points = {}, pinch = null;
-  var bound = false;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-  // scale multiplies the CSS fit, so 1:1 is read back off the painted box
-  // rather than assumed to be 1.
-  function oneToOneScale() {
-    if (!img || !img.naturalWidth) return 0;
-    var r = contentRect();
-    if (!r || !r.width) return 0;
-    return img.naturalWidth * scale / r.width;
-  }
-  // 1:1 on an image smaller than the stage sits below 0.5, and the floor
-  // must not rule it out.
-  function minScale() {
-    var one = oneToOneScale();
-    return one > 0 ? Math.min(0.5, one) : 0.5;
-  }
-  function apply() {
-    if (!img) return;
-    img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
-    if (!zoomLbl) return;
-    // Against the image's own pixels, not the fit: on a small image the
-    // fit is already an upscale.
-    var one = oneToOneScale();
-    zoomLbl.textContent = Math.round((one > 0 ? scale / one : scale) * 100) + '%';
-  }
-  function reset() { scale = 1; tx = 0; ty = 0; apply(); }
-  function zoomAt(cx, cy, factor) {
-    var ns = clamp(scale * factor, minScale(), 4);
-    var k = ns / scale;
-    tx = cx - k * (cx - tx);
-    ty = cy - k * (cy - ty);
-    scale = ns;
-    apply();
-  }
+  function naturalSize() { return img ? { w: img.naturalWidth || img.videoWidth || 0, h: img.naturalHeight || img.videoHeight || 0 } : { w: 0, h: 0 }; }
   // object-fit: contain letterboxes the image inside the element, so the
   // painted rect is computed; the letterbox is not "on the image".
   function contentRect() {
-    if (!img) return null;
     var r = img.getBoundingClientRect();
     if (!r.width || !r.height) return null;
-    var iw = img.naturalWidth, ih = img.naturalHeight;
+    var n = naturalSize(), iw = n.w, ih = n.h;
     if (!iw || !ih) return r;
     var ia = iw / ih, ba = r.width / r.height;
     var w, h;
@@ -426,6 +396,42 @@ var lightbox = (function () {
     var left = r.left + (r.width - w) / 2;
     var top = r.top + (r.height - h) / 2;
     return { left: left, top: top, right: left + w, bottom: top + h, width: w, height: h };
+  }
+  // scale multiplies the CSS fit, so 1:1 is read back off the painted box
+  // rather than assumed to be 1.
+  function oneToOneScale() {
+    var n = naturalSize();
+    if (!n.w) return 0;
+    var r = contentRect();
+    if (!r || !r.width) return 0;
+    return n.w * scale / r.width;
+  }
+  // 1:1 on an image smaller than the stage sits below 0.5, and the floor
+  // must not rule it out.
+  function minScale() {
+    var one = oneToOneScale();
+    return one > 0 ? Math.min(0.5, one) : 0.5;
+  }
+  function atFit() { return Math.abs(scale - 1) < 0.01; }
+  function apply() {
+    if (img) img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+    if (opts.label) {
+      // Against the image's own pixels, not the fit: on a small image the
+      // fit is already an upscale.
+      var one = oneToOneScale();
+      opts.label.textContent = img ? Math.round((one > 0 ? scale / one : scale) * 100) + '%' : '';
+    }
+    if (opts.onChange) opts.onChange();
+  }
+  function reset() { scale = 1; tx = 0; ty = 0; apply(); }
+  function zoomAt(cx, cy, factor) {
+    if (!img) return;
+    var ns = clamp(scale * factor, minScale(), 4);
+    var k = ns / scale;
+    tx = cx - k * (cx - tx);
+    ty = cy - k * (cy - ty);
+    scale = ns;
+    apply();
   }
   function oneToOne() {
     var one = oneToOneScale();
@@ -436,20 +442,15 @@ var lightbox = (function () {
     scale = ns;
     apply();
   }
-  function onWheel(e) {
-    e.preventDefault();
-    if (!e.deltaY) return;
+  function fromCenter(x, y) {
     var sr = stage.getBoundingClientRect();
-    var cx = e.clientX - (sr.left + sr.width / 2);
-    var cy = e.clientY - (sr.top + sr.height / 2);
-    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
-    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-    zoomAt(cx, cy, Math.exp(-dy * 0.0018));
+    return { x: x - (sr.left + sr.width / 2), y: y - (sr.top + sr.height / 2) };
   }
   function startPan(x, y) {
     panning = true;
     px0 = x; py0 = y;
     tx0 = tx; ty0 = ty;
+    stage.classList.add('grabbing');
   }
   function pinchOf() {
     var p = Object.values(points);
@@ -458,163 +459,200 @@ var lightbox = (function () {
       dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
     };
   }
-  function onPointerDown(e) {
-    if (e.button !== 0) return;
-    stage.setPointerCapture(e.pointerId);
-    points[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (Object.keys(points).length === 2) {
-      // A pinch is never a tap, so its release must not close the viewer.
-      pinch = pinchOf();
-      panning = false;
-      pressMoved = true;
-      return;
-    }
-    pressMoved = false;
-    startPan(e.clientX, e.clientY);
-    stage.classList.add('grabbing');
-  }
-  function onPointerMove(e) {
-    if (points[e.pointerId]) points[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (pinch) {
-      // Zooms around the point between the fingers, which also pans.
-      var now = pinchOf();
-      var sr = stage.getBoundingClientRect();
-      tx += now.x - pinch.x;
-      ty += now.y - pinch.y;
-      zoomAt(now.x - (sr.left + sr.width / 2), now.y - (sr.top + sr.height / 2), now.dist / pinch.dist);
-      pinch = now;
-      return;
-    }
-    if (!panning) return;
-    if (!pressMoved) {
-      var dx = e.clientX - px0, dy = e.clientY - py0;
-      if (dx * dx + dy * dy > 16) pressMoved = true;
-    }
-    tx = tx0 + (e.clientX - px0);
-    ty = ty0 + (e.clientY - py0);
-    apply();
-  }
   function onPointerEnd(e) {
+    if (!points[e.pointerId]) return;
     delete points[e.pointerId];
     if (pinch) {
       // The finger still down goes on panning.
       pinch = null;
       var rest = Object.values(points);
-      if (rest.length === 1) startPan(rest[0].x, rest[0].y);
-      else stage.classList.remove('grabbing');
+      if (rest.length === 1) { startPan(rest[0].x, rest[0].y); pressed = true; pressMoved = true; }
+      else { panning = false; stage.classList.remove('grabbing'); }
       return;
     }
-    if (!panning) return;
+    if (!pressed) return;
+    pressed = false;
     panning = false;
-    stage.releasePointerCapture(e.pointerId);
     stage.classList.remove('grabbing');
-    // Only a release off the image closes: the first click of a dblclick
-    // on it must not.
-    if (pressMoved || !img) return;
+    // Only a release off the image counts as outside: the first click of
+    // a dblclick on it must not.
+    if (pressMoved || !opts.onOutside || e.type === 'pointercancel') return;
     var r = contentRect();
-    if (!r || !r.width || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
-      dlg.close();
+    if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) opts.onOutside(e);
+  }
+  stage.addEventListener('wheel', function (e) {
+    if (!img) return;
+    e.preventDefault();
+    if (!e.deltaY) return;
+    var c = fromCenter(e.clientX, e.clientY);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomAt(c.x, c.y, Math.exp(-dy * 0.0018));
+  }, { passive: false });
+  stage.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 || !img) return;
+    var side = e.target.closest('.reader-side');
+    if (e.target.closest('a, button') && !(side && e.pointerType === 'touch')) return;
+    if (!side) stage.setPointerCapture(e.pointerId);
+    points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (Object.keys(points).length === 2) {
+      pinch = pinchOf();
+      pressed = false;
+      panning = false;
+      return;
     }
-  }
-  function onDblClick() {
-    if (Math.abs(scale - 1) < 0.01) oneToOne();
-    else reset();
-  }
-  function ensure() {
-    if (dlg) return true;
-    dlg = document.getElementById('image-lightbox');
-    if (!dlg) return false;
-    img = document.getElementById('lightbox-img');
-    stage = document.getElementById('lightbox-stage');
-    zoomLbl = document.getElementById('lightbox-zoom');
-    openLink = document.getElementById('lightbox-open');
-    if (!bound && stage) {
-      stage.addEventListener('wheel', onWheel, { passive: false });
-      stage.addEventListener('pointerdown', onPointerDown);
-      stage.addEventListener('pointermove', onPointerMove);
-      stage.addEventListener('pointerup', onPointerEnd);
-      stage.addEventListener('pointercancel', onPointerEnd);
-      stage.addEventListener('dblclick', onDblClick);
-      // The readout needs the natural size, which only arrives after
-      // open() sets the src.
-      img.addEventListener('load', apply);
-      dlg.addEventListener('close', reset);
-      var closeBtn = document.getElementById('lightbox-close');
-      if (closeBtn) closeBtn.addEventListener('click', function () { dlg.close(); });
-      bound = true;
+    pressed = true;
+    pressMoved = false;
+    px0 = e.clientX; py0 = e.clientY;
+    // Where a swipe turns the page, a finger at fit is left to it.
+    if (!opts.swipe || e.pointerType !== 'touch' || !atFit()) startPan(e.clientX, e.clientY);
+  });
+  stage.addEventListener('pointermove', function (e) {
+    if (!points[e.pointerId]) return;
+    points[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (pinch) {
+      // Zooms around the point between the fingers, which also pans.
+      var now = pinchOf();
+      var c = fromCenter(now.x, now.y);
+      tx += now.x - pinch.x;
+      ty += now.y - pinch.y;
+      zoomAt(c.x, c.y, now.dist / pinch.dist);
+      pinch = now;
+      return;
     }
-    return true;
-  }
+    if (!pressed) return;
+    var dx = e.clientX - px0, dy = e.clientY - py0;
+    if (dx * dx + dy * dy > 16) pressMoved = true;
+    if (!panning) return;
+    tx = tx0 + dx;
+    ty = ty0 + dy;
+    apply();
+  });
+  stage.addEventListener('pointerup', onPointerEnd);
+  stage.addEventListener('pointercancel', onPointerEnd);
+  stage.addEventListener('dblclick', function (e) {
+    if (!img || e.target.closest('a, button')) return;
+    if (atFit()) oneToOne(); else reset();
+  });
   return {
-    open: function (e, src) {
-      // Modifier and middle clicks keep the link's own navigation: a
-      // truthy return leaves the default alone.
-      if (e && (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey)) return true;
-      if (!ensure()) return true;
-      if (e && e.preventDefault) e.preventDefault();
-      img.src = src;
-      if (openLink) openLink.href = src;
+    atFit: atFit,
+    fit: function () { if (img) reset(); },
+    oneToOne: function () { if (img) oneToOne(); },
+    attach: function (el) {
+      if (img) img.style.transform = '';
+      // The readout needs the natural size, which a src set just now has not brought yet.
+      if (el) el.addEventListener(el.tagName === 'VIDEO' ? 'loadedmetadata' : 'load', apply, { once: true });
+      img = el;
       points = {};
       pinch = null;
+      pressed = false;
       reset();
-      if (!dlg.open) dlg.showModal();
-      return false;
     },
     handleKey: function (e) {
-      if (!dlg || !dlg.open || chorded(e)) return false;
-      var t = e.target.tagName.toLowerCase();
-      if (t === 'input' || t === 'textarea' || e.target.isContentEditable) return false;
+      if (!img) return false;
       switch (e.key) {
-        case '+': case '=':
-          e.preventDefault(); zoomAt(0, 0, 1.2); return true;
-        case '-':
-          e.preventDefault(); zoomAt(0, 0, 1 / 1.2); return true;
-        case '0':
-          e.preventDefault(); reset(); return true;
-        case '1':
-          e.preventDefault(); oneToOne(); return true;
+        case '+': case '=': zoomAt(0, 0, 1.2); break;
+        case '-': zoomAt(0, 0, 1 / 1.2); break;
+        case '0': reset(); break;
+        case '1': oneToOne(); break;
+        default: return false;
       }
-      return false;
+      e.preventDefault();
+      return true;
     },
   };
-})();
+}
 
-var slideshow = (function () {
-  var durations = [2, 3, 5, 10, 15, 30];
-  var dlg = null, slots = [], message = null, position = null, durationSelect = null, documentBound = false;
-  var ids = [], videos = new Set();
+function barHidden() {
+  try { return localStorage.getItem('monbooru_bar_hidden') === '1'; } catch (e) { return false; }
+}
+function toggleBar(host) {
+  var hidden = host.classList.toggle('bar-hidden');
+  try { localStorage.setItem('monbooru_bar_hidden', hidden ? '1' : '0'); } catch (e) {}
+}
+
+var viewer = (function () {
+  var durations = [2, 3, 5, 10, 15, 30], opacities = [100, 95, 90, 80, 70, 60, 50];
+  var dlg = null, slots = [], message = null, position = null, menu = null, menuPress = false, progress = null, track = null, openLink = null, zoom = null, documentBound = false;
+  var ids = [], videos = new Set(), silent = new Set();
   var index = -1, current = null, visibleSlot = 0, prepared = null;
-  var playing = true, muted = true, looping = false;
+  var playing = true, muted = true, looping = false, volume = 5;
   var durationMs = 5000, remainingMs = 0, startedAt = null;
   var displayEpoch = 0, preloadEpoch = 0;
-  var autoTimer = null, skipTimer = null;
+  var autoTimer = null, skipTimer = null, progressTimer = null;
   var leavingFullscreen = false, restacks = 0;
-  var detailStart = 0, detailBack = '';
+  var detailStart = 0, detailBack = '', runEpoch = 0, afterShow = null, stalled = false;
   var actions = {
     first: function () { go(-ids.length); },
     previous: function () { go(-1); },
     next: function () { go(1); },
     last: function () { go(ids.length); },
-    play: function () { if (playing) pause(); else resume(); },
+    show: function () { if (button('show').disabled) return; if (playing) pause(); else resume(); },
+    play: function () { var v = currentVideo(); if (!v) return; if (v.paused) playOrWait(v); else v.pause(); },
+    space: function () { actions[currentVideo() ? 'play' : 'show'](); },
     restart: restart,
     loop: toggleLoop,
     mute: toggleMuted,
+    louder: function () { setVolume(volume + 1); if (muted) toggleMuted(); },
+    quieter: function () { setVolume(volume - 1); },
     fullscreen: toggleFullscreen,
+    bar: function () { closeMenu(); toggleBar(dlg); },
+    menu: function () { if (menu.hidden) openMenu(); else closeMenu(); },
     exit: function () { dlg.close(); },
   };
-  var keys = { ' ': 'play', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen' };
+  var keys = { ' ': 'space', s: 'show', ArrowLeft: 'previous', ArrowRight: 'next', Home: 'first', End: 'last', r: 'restart', l: 'loop', m: 'mute', f: 'fullscreen', b: 'bar', ArrowUp: 'louder', ArrowDown: 'quieter' };
 
   function readDuration() {
     var seconds = 5;
     try { seconds = parseInt(localStorage.getItem('monbooru_slideshow_duration') || '5', 10); } catch (e) {}
     return durations.indexOf(seconds) >= 0 ? seconds : 5;
   }
+  function readVolume() {
+    var level = 5;
+    try { level = parseInt(localStorage.getItem('monbooru_viewer_volume') || '5', 10); } catch (e) {}
+    return level >= 1 && level <= 5 ? level : 5;
+  }
+  function setVolume(level) {
+    volume = Math.max(1, Math.min(5, level));
+    try { localStorage.setItem('monbooru_viewer_volume', String(volume)); } catch (e) {}
+    var v = currentVideo();
+    if (v) v.volume = volume / 5;
+    var meter = document.getElementById('viewer-volume');
+    Array.from(meter.children).forEach(function (block, i) { block.classList.toggle('on', i < volume); });
+    meter.setAttribute('aria-valuenow', String(volume));
+  }
+  function readOpacity() {
+    var percent = 95;
+    try { percent = parseInt(localStorage.getItem('monbooru_viewer_opacity') || '95', 10); } catch (e) {}
+    return opacities.indexOf(percent) >= 0 ? percent : 95;
+  }
+  function press(ramp, attr, value) {
+    ramp.querySelectorAll('[data-' + attr + ']').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset[attr] === String(value))); });
+  }
+  function setOpacity(percent) {
+    press(document.getElementById('viewer-opacity'), 'opacity', percent);
+    dlg.style.setProperty('--viewer-opacity', percent + '%');
+  }
+  function setDuration(seconds) {
+    durationMs = seconds * 1000;
+    press(document.getElementById('viewer-duration'), 'duration', seconds);
+  }
+  function openMenu() {
+    menu.hidden = false;
+    button('menu').setAttribute('aria-expanded', 'true');
+  }
+  function closeMenu() {
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    button('menu').setAttribute('aria-expanded', 'false');
+  }
+
   function itemAt(i) {
     var id = ids[i], video = videos.has(id);
-    return { id: id, video: video, src: '/images/' + id + (video ? '/file' : '/view') };
+    return { id: id, video: video, silent: silent.has(id), src: '/images/' + id + (video ? '/file' : '/view') };
   }
   function setMessage(text) { message.textContent = text; }
-  function button(action) { return dlg.querySelector('[data-slideshow="' + action + '"]'); }
+  function button(action) { return dlg.querySelector('[data-viewer="' + action + '"]'); }
   function currentVideo() { return current && current.video ? slots[visibleSlot].querySelector('video') : null; }
 
   function clearSlot(slot) {
@@ -651,7 +689,7 @@ var slideshow = (function () {
     });
   }
 
-  function show(i) {
+  function show(i, dir) {
     if (i < 0 || i >= ids.length) return;
     clearTimeout(autoTimer);
     clearTimeout(skipTimer);
@@ -670,7 +708,7 @@ var slideshow = (function () {
     prepareMedia(slots[slot], item).then(function (media) {
       if (epoch === displayEpoch) activate({ index: i, item: item, slot: slot, media: media });
     }, function (err) {
-      if (epoch === displayEpoch) skip(i, err.message, epoch);
+      if (epoch === displayEpoch) skip(i, err.message, epoch, dir || 1);
     });
   }
   function activate(slide) {
@@ -688,13 +726,26 @@ var slideshow = (function () {
       var v = slide.media;
       v.loop = looping;
       v.muted = muted;
+      v.volume = volume / 5;
       v.currentTime = 0;
       v.onended = function () { if (index === slide.index) advance(); };
+      v.ontimeupdate = function () { if (index === slide.index) drawTrack(); };
+      v.onplay = v.onpause = updateControls;
+      drawProgress();
       if (playing) playOrWait(v);
     } else {
       schedule();
     }
     updateControls();
+    // After the controls: the bar's height sets the stage's, which the readout is measured on.
+    zoom.attach(slide.media);
+    openLink.href = current.src;
+    if (afterShow) {
+      var merge = afterShow;
+      afterShow = null;
+      merge();
+      return;
+    }
     prefetch(index + 1);
   }
   function prefetch(i) {
@@ -706,20 +757,83 @@ var slideshow = (function () {
       if (epoch === preloadEpoch) prepared = { index: i, item: item, slot: slot, media: media };
     }, function () {});
   }
-  function skip(i, text, epoch) {
+  function skip(i, text, epoch, dir) {
     setMessage(text + ' Skipping...');
     skipTimer = setTimeout(function () {
       if (epoch !== displayEpoch) return;
-      if (i + 1 < ids.length) { show(i + 1); return; }
+      if (afterShow) { var merge = afterShow; afterShow = null; merge(); i = index; }
+      if (i + dir >= 0 && i + dir < ids.length) { show(i + dir, dir); return; }
+      if (!current && dir > 0 && i > 0) { show(i - 1, -1); return; }
       pause();
       setMessage(text);
+      stalled = true;
     }, 700);
   }
 
   function schedule() {
     clearTimeout(autoTimer);
-    if (!dlg.open || !current || current.video || !playing) return;
+    drawProgress();
+    if (!dlg.open || !current || current.video || !playing || startedAt === null) return;
     autoTimer = setTimeout(advance, remainingMs - (Date.now() - startedAt));
+  }
+  function drawProgress() {
+    clearInterval(progressTimer);
+    var done = 0;
+    if (current && playing) {
+      var v = currentVideo();
+      if (v) done = v.duration ? v.currentTime / v.duration : 0;
+      else done = 1 - (startedAt === null ? remainingMs : remainingMs - (Date.now() - startedAt)) / durationMs;
+      if (v || startedAt !== null) progressTimer = setInterval(drawProgress, 100);
+    }
+    progress.style.width = Math.max(0, Math.min(100, Math.floor(done * 20) * 5)) + '%';
+    drawTrack();
+  }
+  function clock(seconds) {
+    var s = Math.max(0, Math.floor(seconds)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+    s %= 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  function drawTrack() {
+    var v = currentVideo(), at = 0, length = 0, done = 0;
+    if (v) {
+      length = isFinite(v.duration) ? v.duration : 0;
+      at = v.currentTime;
+      done = length ? at / length : 0;
+    }
+    var pct = Math.max(0, Math.min(100, done * 100)) + '%';
+    track.querySelector('.viewer-track-fill').style.width = pct;
+    track.querySelector('.viewer-track-knob').style.left = pct;
+    track.setAttribute('aria-valuemax', String(Math.floor(length)));
+    track.setAttribute('aria-valuenow', String(Math.floor(at)));
+    document.getElementById('viewer-time-at').textContent = clock(at);
+    document.getElementById('viewer-time-len').textContent = clock(length);
+  }
+  function seekTo(x) {
+    var v = currentVideo();
+    if (!v || !isFinite(v.duration)) return;
+    var r = track.getBoundingClientRect();
+    v.currentTime = Math.max(0, Math.min(1, (x - r.left) / r.width)) * v.duration;
+    drawTrack();
+  }
+  function seekBy(seconds) {
+    var v = currentVideo();
+    if (!v || !isFinite(v.duration)) return;
+    v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + seconds));
+    drawTrack();
+  }
+  // The timer waits while an image is zoomed.
+  function zoomChanged() {
+    if (!current || current.video || !playing) return;
+    if (zoom.atFit()) {
+      if (startedAt !== null) return;
+      startedAt = Date.now();
+      schedule();
+    } else if (startedAt !== null) {
+      remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
+      startedAt = null;
+      clearTimeout(autoTimer);
+      drawProgress();
+    }
   }
   function advance() {
     if (!dlg.open || !playing) return;
@@ -728,35 +842,37 @@ var slideshow = (function () {
   }
   function pause() {
     if (!playing) return;
-    if (startedAt !== null) remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
     startedAt = null;
     playing = false;
     clearTimeout(autoTimer);
-    var v = currentVideo();
-    if (v) v.pause();
+    drawProgress();
     updateControls();
   }
   function resume() {
     playing = true;
-    if (current && !current.video) startedAt = Date.now();
     var v = currentVideo();
     if (v) playOrWait(v);
-    schedule();
+    restartTimer();
     updateControls();
+  }
+  function restartTimer() {
+    remainingMs = durationMs;
+    startedAt = playing && current && !current.video && zoom.atFit() ? Date.now() : null;
+    schedule();
   }
   // An AbortError is a play() that lost to a pause, a load or the end of a
   // short clip; only the browser refusing to play waits for Space.
   function playOrWait(v) {
     var at = index;
+    setMessage('');
     v.play().catch(function (err) {
       if (err.name !== 'NotAllowedError' || index !== at) return;
-      pause();
       setMessage('Press Space to play the video.');
     });
   }
   function go(delta) {
     var target = Math.max(0, Math.min(ids.length - 1, index + delta));
-    if (index >= 0 && target !== index) show(target);
+    if (index >= 0 && target !== index) show(target, delta === -1 || delta >= ids.length ? -1 : 1);
   }
   function restart() {
     var v = currentVideo();
@@ -798,18 +914,22 @@ var slideshow = (function () {
   }
 
   function updateControls() {
-    var isVideo = !!(current && current.video);
+    var v = currentVideo(), running = !!v && !v.paused;
     position.textContent = (index + 1) + ' / ' + ids.length;
-    dlg.querySelector('.slideshow-play-label').textContent = playing ? 'Pause' : 'Play';
-    dlg.querySelectorAll('[data-slideshow="first"], [data-slideshow="previous"]').forEach(function (b) { b.disabled = index <= 0; });
-    dlg.querySelectorAll('[data-slideshow="next"], [data-slideshow="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
-    button('restart').disabled = !isVideo;
-    var loop = button('loop');
-    loop.setAttribute('aria-pressed', String(looping));
-    loop.textContent = looping ? 'Loop: on' : 'Loop: off';
-    var mute = button('mute');
-    mute.setAttribute('aria-pressed', String(!muted));
-    mute.textContent = muted ? 'Sound: off' : 'Sound: on';
+    var show = button('show');
+    show.disabled = ids.length < 2;
+    show.setAttribute('aria-pressed', String(playing));
+    show.setAttribute('aria-label', playing ? 'Stop the slideshow' : 'Start the slideshow');
+    var play = button('play');
+    play.classList.toggle('playing', running);
+    play.setAttribute('aria-label', running ? 'Pause video' : 'Play video');
+    track.parentNode.classList.toggle('still', !v);
+    track.parentNode.classList.toggle('silent', !!v && current.silent);
+    dlg.querySelectorAll('[data-viewer="first"], [data-viewer="previous"]').forEach(function (b) { b.disabled = index <= 0; });
+    dlg.querySelectorAll('[data-viewer="next"], [data-viewer="last"]').forEach(function (b) { b.disabled = index >= ids.length - 1; });
+    press(document.getElementById('viewer-loop'), 'loop', looping ? 1 : 0);
+    button('mute').setAttribute('aria-pressed', String(!muted));
+    press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
   }
 
   function teardown() {
@@ -817,24 +937,96 @@ var slideshow = (function () {
     preloadEpoch++;
     clearTimeout(autoTimer);
     clearTimeout(skipTimer);
+    clearInterval(progressTimer);
+    closeMenu();
     prepared = null;
     current = null;
+    afterShow = null;
+    runEpoch++;
+    zoom.attach(null);
     slots.forEach(clearSlot);
     if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
   }
   function ensure() {
     if (dlg && dlg.isConnected) return true;
-    dlg = document.getElementById('slideshow-dialog');
+    dlg = document.getElementById('viewer-dialog');
     if (!dlg) return false;
-    slots = Array.from(dlg.querySelectorAll('.slideshow-slot'));
-    message = document.getElementById('slideshow-message');
-    position = document.getElementById('slideshow-position');
-    durationSelect = document.getElementById('slideshow-duration');
-    dlg.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-slideshow]');
-      if (b) actions[b.dataset.slideshow]();
+    slots = Array.from(dlg.querySelectorAll('.viewer-slot'));
+    message = document.getElementById('viewer-message');
+    position = document.getElementById('viewer-position');
+    menu = document.getElementById('viewer-menu');
+    progress = dlg.querySelector('.viewer-progress span');
+    track = document.getElementById('viewer-track');
+    document.getElementById('viewer-volume').addEventListener('click', function (e) {
+      var r = this.getBoundingClientRect();
+      setVolume(Math.ceil((e.clientX - r.left) / r.width * 5));
+      if (muted) toggleMuted();
     });
-    onSwipe(dlg.querySelector('.slideshow-stage'), actions.previous, actions.next);
+    track.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || !currentVideo()) return;
+      track.setPointerCapture(e.pointerId);
+      seekTo(e.clientX);
+    });
+    track.addEventListener('pointermove', function (e) {
+      if (track.hasPointerCapture(e.pointerId)) seekTo(e.clientX);
+    });
+    dlg.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-viewer]');
+      if (b) { actions[b.dataset.viewer](); return; }
+      b = e.target.closest('#viewer-menu button');
+      if (!b) return;
+      if (b.dataset.duration) {
+        try { localStorage.setItem('monbooru_slideshow_duration', b.dataset.duration); } catch (err) {}
+        setDuration(parseInt(b.dataset.duration, 10));
+        restartTimer();
+      } else if (b.dataset.loop) {
+        if ((b.dataset.loop === '1') !== looping) toggleLoop();
+      } else if (b.dataset.opacity) {
+        try { localStorage.setItem('monbooru_viewer_opacity', b.dataset.opacity); } catch (err) {}
+        setOpacity(b.dataset.opacity);
+      } else if (b.dataset.fullscreen) {
+        if ((b.dataset.fullscreen === '1') !== !!document.fullscreenElement) toggleFullscreen();
+      } else if (b.dataset.zoom) {
+        if (b.dataset.zoom === 'fit') zoom.fit(); else zoom.oneToOne();
+      }
+    });
+    dlg.addEventListener('pointerdown', function (e) {
+      menuPress = false;
+      if (menu.hidden || menu.contains(e.target) || button('menu').contains(e.target)) return;
+      closeMenu();
+      if (e.target.closest('.viewer-bar')) return;
+      e.stopPropagation();
+      menuPress = true;
+    }, true);
+    dlg.addEventListener('click', function (e) {
+      if (!menuPress) return;
+      menuPress = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+    ['pointerdown', 'wheel', 'dblclick'].forEach(function (type) {
+      menu.addEventListener(type, function (e) { e.stopPropagation(); });
+    });
+    openLink = document.getElementById('viewer-open');
+    var stage = dlg.querySelector('.viewer-stage');
+    zoom = zoomer(stage, {
+      label: document.getElementById('viewer-zoom'),
+      swipe: true,
+      onChange: zoomChanged,
+      onOutside: function (e) {
+        // A disabled side strip lets its press through to the stage.
+        var side = Array.from(stage.querySelectorAll('.reader-side')).some(function (s) {
+          var r = s.getBoundingClientRect();
+          return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        });
+        if (side) return;
+        dlg.close();
+        var swallow = function (c) { if (c.isTrusted) { c.preventDefault(); c.stopPropagation(); } };
+        window.addEventListener('click', swallow, true);
+        setTimeout(function () { window.removeEventListener('click', swallow, true); }, 500);
+      },
+    });
+    onSwipe(stage, function () { if (zoom.atFit()) actions.previous(); }, function () { if (zoom.atFit()) actions.next(); });
     dlg.addEventListener('close', function () {
       if (restacks) { restacks--; return; }
       var id = index >= 0 ? ids[index] : 0;
@@ -852,44 +1044,96 @@ var slideshow = (function () {
       params.set('at', id);
       window.location.href = '/?' + params + '#img-' + id;
     });
-    durationSelect.addEventListener('change', function () {
-      try { localStorage.setItem('monbooru_slideshow_duration', durationSelect.value); } catch (e) {}
-      durationMs = parseInt(durationSelect.value, 10) * 1000;
-      if (!current || current.video) return;
-      remainingMs = durationMs;
-      startedAt = playing ? Date.now() : null;
-      schedule();
-    });
     if (!documentBound) bindDocument();
     return true;
   }
   function bindDocument() {
     documentBound = true;
+    document.body.addEventListener('htmx:beforeHistorySave', function () {
+      if (!dlg || !dlg.open) return;
+      index = -1;
+      teardown();
+      dlg.close();
+    });
     // On the document: a button disabled under focus drops it out of the dialog.
     document.addEventListener('keydown', function (e) {
-      if (!dlg || !dlg.open || chorded(e) || e.target.tagName === 'SELECT') return;
+      if (!dlg || !dlg.open || chorded(e)) return;
+      if (e.key === 'Escape' && !menu.hidden) {
+        e.preventDefault();
+        closeMenu();
+        return;
+      }
+      if (zoom.handleKey(e)) return;
+      if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        seekBy(e.key === 'ArrowLeft' ? -10 : 10);
+        return;
+      }
       var action = keys[e.key];
       if (!action) return;
       e.preventDefault();
       actions[action]();
     });
     // In fullscreen the browser keeps Esc to itself, so a fullscreen exit
-    // the slideshow did not ask for is that Esc.
+    // the viewer did not ask for is that Esc.
     document.addEventListener('fullscreenchange', function () {
+      if (dlg) press(document.getElementById('viewer-fullscreen'), 'fullscreen', document.fullscreenElement ? 1 : 0);
       if (document.fullscreenElement || !dlg) return;
       if (dlg.open && !leavingFullscreen) dlg.close();
       leavingFullscreen = false;
     });
   }
 
+  function setList(data) {
+    ids = data.ids;
+    videos = new Set(data.videos);
+    silent = new Set(data.silent);
+  }
+  function open(data) {
+    setList(data);
+    stalled = false;
+    index = -1;
+    current = null;
+    prepared = null;
+    visibleSlot = 0;
+    playing = false;
+    muted = true;
+    looping = false;
+    setDuration(readDuration());
+    setOpacity(readOpacity());
+    setVolume(readVolume());
+    document.querySelectorAll('#viewer-fullscreen button').forEach(function (b) { b.disabled = !document.fullscreenEnabled; });
+    updateControls();
+    document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
+    dlg.classList.toggle('bar-hidden', barHidden());
+    dlg.showModal();
+    show(data.start);
+  }
+
   return {
+    // The image link: modifier and middle clicks keep its own navigation.
+    click: function (e) {
+      if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey) return true;
+      var btn = document.getElementById('viewer-btn');
+      if (!btn) return true;
+      e.preventDefault();
+      viewer.start(btn);
+      return false;
+    },
     start: function (btn) {
       if (!ensure() || dlg.open) return;
       var flash = document.querySelector('[data-action-flash]');
       var startID = Number(btn.dataset.start) || 0;
       var firstID = startID;
+      var run = ++runEpoch;
       var params;
+      detailStart = startID;
+      detailBack = btn.dataset.back || '';
+      // The page already holds this image, so it shows before the search answers.
+      var shown = startID && btn.dataset.playable === '1';
+      if (shown) open({ ids: [startID], videos: btn.dataset.video === '1' ? [startID] : [], silent: btn.dataset.silent === '1' ? [startID] : [], start: 0 });
       if (startID) {
+        if (!btn.dataset.walk) return;
         params = new URLSearchParams({ scope: 'search', q: btn.dataset.q, sort: btn.dataset.sort, order: btn.dataset.order, seed: btn.dataset.seed, next: btn.dataset.next });
       } else {
         var focused = document.querySelector('.thumb-card.focused');
@@ -904,25 +1148,29 @@ var slideshow = (function () {
         flashId: flash.id,
         onOK: function (res) {
           res.json().then(function (data) {
-            if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
-            ids = data.ids;
-            videos = new Set(data.videos);
-            index = -1;
-            current = null;
-            prepared = null;
-            visibleSlot = 0;
-            playing = false;
-            muted = true;
-            looping = false;
-            durationMs = readDuration() * 1000;
-            durationSelect.value = String(durationMs / 1000);
-            updateControls();
-            document.querySelectorAll('.detail-video').forEach(function (v) { v.pause(); });
-            dlg.showModal();
-            enterFullscreen();
-            detailStart = startID;
-            detailBack = btn.dataset.back || '';
-            show(data.start);
+            if (!shown) {
+              if (!data.ids.length) { setFlashText(flash, 'warn', 'No images to play.'); return; }
+              open(data);
+              return;
+            }
+            if (run !== runEpoch) return;
+            var merge = function () {
+              var at = data.ids.indexOf(startID);
+              if (at < 0) {
+                at = Math.min(data.start, data.ids.length);
+                data.ids.splice(at, 0, startID);
+              }
+              if (videos.has(startID)) data.videos.push(startID);
+              if (silent.has(startID)) data.silent.push(startID);
+              setList(data);
+              index = at;
+              updateControls();
+              prefetch(index + 1);
+            };
+            // The image still loading owns the spare slot until it shows.
+            if (current) merge();
+            else if (stalled) { stalled = false; merge(); if (index + 1 < ids.length) show(index + 1, 1); else if (index > 0) show(index - 1, -1); }
+            else afterShow = merge;
           });
         }
       });
@@ -958,6 +1206,7 @@ function handleReaderKey(e) {
     url.hash = '';
     window.location.href = url.pathname + url.search;
   }
+  if (readerZoom && readerZoom.handleKey(e)) return true;
   switch (e.key) {
     case 'ArrowRight': case 'l': case ' ':
       e.preventDefault(); go(page + 1); return true;
@@ -991,14 +1240,10 @@ function handleReaderKey(e) {
         return true;
       }
       return false;
-    case 'v':
-      var pageLink = document.querySelector('.reader-page-link');
-      if (pageLink) {
-        e.preventDefault();
-        lightbox.open(null, pageLink.href);
-        return true;
-      }
-      return false;
+    case 'b':
+      e.preventDefault();
+      toggleBar(reader);
+      return true;
     case 'Escape': case 'Backspace':
       e.preventDefault();
       window.location.href = detail;
@@ -1011,7 +1256,6 @@ document.addEventListener('keydown', function(e) {
   var tag = e.target.tagName.toLowerCase();
   var isInput = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
 
-  if (lightbox.handleKey(e)) return;
   if (!isInput && !chorded(e) && chordStep(e)) return;
   if (handleReaderKey(e)) return;
   if (handlePagesGridKey(e)) return;
@@ -1205,11 +1449,6 @@ document.addEventListener('keydown', function(e) {
     if (modeBtn) { e.preventDefault(); revealSidebarFor(modeBtn); modeBtn.click(); return; }
   }
 
-  if (e.key === 'v' && isDetailPage()) {
-    var lbTrigger = document.querySelector('.detail-img-link');
-    if (lbTrigger) { e.preventDefault(); lightbox.open(null, lbTrigger.href); return; }
-  }
-
   if (e.key === 't') {
     if (batchBarVisible()) {
       if (!document.querySelector('#batch-bar.visible .btn-autotag:not([disabled])')) return;
@@ -1261,8 +1500,8 @@ document.addEventListener('keydown', function(e) {
     if (clickFirstSelector(['.add-tag-form .btn-hash-lookup:not([disabled])'])) { e.preventDefault(); return; }
   }
 
-  if (e.key === 'w') {
-    if (clickFirstSelector(['#slideshow-btn'])) { e.preventDefault(); return; }
+  if (e.key === 'v') {
+    if (clickFirstSelector(['#viewer-btn'])) { e.preventDefault(); return; }
   }
 
   if (isGalleryPage()) {
@@ -1338,8 +1577,8 @@ document.addEventListener('keydown', function(e) {
 
   if (e.key === 'o') {
     if (isDetailPage()) {
-      var dlA = document.querySelector('.detail-actions a[download]');
-      if (dlA) { e.preventDefault(); window.open(dlA.href, '_blank'); return; }
+      var openA = document.getElementById('detail-open');
+      if (openA) { e.preventDefault(); openA.click(); return; }
     } else {
       var foc = document.querySelector('.thumb-card.focused a');
       if (foc) { e.preventDefault(); window.location.href = foc.href; return; }
@@ -1645,6 +1884,11 @@ function tidyQueryTerms(terms) {
   return terms;
 }
 
+function queryTermKey(t) {
+  const m = /^([^\s":]+:)?"(.*)"$/.exec(t);
+  return (m ? (m[1] || '') + m[2].replace(/\\"/g, '"') : t).toLowerCase();
+}
+
 // The button's term is category:name, but the query may hold the bare
 // name, so both forms are removed.
 document.addEventListener('click', function(e) {
@@ -1659,7 +1903,8 @@ document.addEventListener('click', function(e) {
   const bare = colon >= 0 ? tagName.slice(colon + 1) : tagName;
   const terms = si.value.trim().split(/\s+/).filter(Boolean);
   if (btn.classList.contains('active')) {
-    si.value = tidyQueryTerms(terms.filter(t => t !== tagName && t !== bare)).join(' ');
+    const keys = [tagName, bare].map(queryTermKey);
+    si.value = tidyQueryTerms(terms.filter(t => !keys.includes(queryTermKey(t)))).join(' ');
   } else {
     // A query that ends on an operator is waiting for this term.
     const last = terms[terms.length - 1] || '';
@@ -2000,6 +2245,8 @@ function updateBatchBar() {
     pluginBar.classList.toggle('visible', active && !selectAllMatching);
   }
   if (grid) grid.classList.toggle('batch-active', armed);
+  const invert = document.getElementById('batch-invert');
+  if (invert) invert.disabled = selectAllMatching;
   const modeBtn = document.getElementById('select-mode-btn');
   if (modeBtn) modeBtn.setAttribute('aria-pressed', String(armed));
   const matching = matchingTotal();
@@ -2232,6 +2479,8 @@ function openSaveSearchDialog() {
   if (ss) ss.value = savedSort;
   if (so) so.value = url.searchParams.get('order') || '';
   if (se) se.value = savedSort === 'random' ? (url.searchParams.get('seed') || '') : '';
+  document.getElementById('save-search-name').value = '';
+  clearSlots('save-search-result');
   dlg.showModal();
   return true;
 }
@@ -2616,7 +2865,7 @@ function namePreviewVals(prefix, scope) {
   var slot = document.getElementById(prefix + '-preview');
   var rows = parseInt(slot && slot.dataset.rows, 10) || 5;
   var vals = {
-    folder: document.getElementById(prefix + '-folder').value,
+    folder: document.getElementById(prefix + '-folder-input').value,
     name: document.getElementById(prefix + '-name').value,
     scope: scope,
     rows: rows,
@@ -2641,6 +2890,7 @@ function showMoreNamePreview(btn) {
 }
 
 function applySearchSuggest(tagName) {
+  if (/^(not|or|and)$/i.test(tagName)) tagName = '"' + tagName + '"';
   var si = document.getElementById('search-input');
   if (!si) return;
   var words = si.value.split(/(\s+)/);
@@ -2691,8 +2941,15 @@ var _jobAutoClearFinishedAt = '';
 var _lastReloadedFinishedAt = '';
 function refreshGalleryGrid() {
   if (!document.getElementById('gallery-grid') || !window.htmx) return;
+  var viewing = document.querySelector('#viewer-dialog[open]');
+  if (viewing) { viewing.addEventListener('close', refreshGalleryGrid, { once: true }); return; }
   var u = new URL(window.location.href);
-  window.htmx.ajax('GET', u.pathname + u.search, {target: '#gallery-grid', swap: 'innerHTML'});
+  var focused = document.querySelector('.thumb-card.focused');
+  window.htmx.ajax('GET', u.pathname + u.search, {target: '#gallery-grid', swap: 'innerHTML'}).then(function () {
+    var card = focused && document.querySelector('.thumb-card[data-id="' + focused.dataset.id + '"]');
+    var cards = Array.from(document.querySelectorAll('.thumb-card'));
+    if (card) setFocused(cards, cards.indexOf(card));
+  });
 }
 
 function inboxBusy() {
@@ -2709,12 +2966,19 @@ var _lastChanges = -1;
 // page: the grid swap after a job intermittently fails to settle.
 var _pendingGalleryReload = false;
 var _pendingReloadShownAt = '';
+var _jobWhole = '';
 
 function armGalleryReload() {
   _pendingGalleryReload = true;
   _pendingReloadShownAt = (document.getElementById('job-status') || {dataset: {}}).dataset.finishedAt || '';
   refreshJobStatus();
 }
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#job-status .job-done, #job-status .job-error')) return;
+  var js = document.getElementById('job-status');
+  _jobWhole = js.classList.toggle('job-whole') ? js.dataset.finishedAt || '-' : '';
+});
 
 document.body.addEventListener('htmx:afterSettle', function(e) {
   var el = e.detail.elt;
@@ -2732,6 +2996,7 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
   }
 
   if (!el || el.id !== 'job-status') return;
+  el.classList.toggle('job-whole', _jobWhole !== '' && (el.dataset.finishedAt || '-') === _jobWhole);
 
   var firstSettle = _firstJobStatusSettle;
   _firstJobStatusSettle = false;
@@ -2826,7 +3091,12 @@ document.body.addEventListener('htmx:afterSettle', function(e) {
     if (imageTags) {
       var imageId = imageTags.dataset.imageId;
       if (imageId && window.htmx) {
-        window.htmx.ajax('GET', '/images/' + imageId + '/tags', {target: '#image-tags', swap: 'outerHTML'});
+        // Every tag edit and view switch replaces #image-tags; a list read
+        // before one of them must not undo it on screen.
+        imageTags.addEventListener('htmx:beforeSwap', function(e) {
+          if (!imageTags.isConnected) e.detail.shouldSwap = false;
+        });
+        window.htmx.ajax('GET', '/images/' + imageId + '/tags', {source: imageTags, target: '#image-tags', swap: 'outerHTML'});
       }
     }
   }
@@ -3125,38 +3395,12 @@ function cancelJobStatus() {
   postForm('/internal/job/cancel');
 }
 
-function handleSuggestKey(e, dropdownId, inputId) {
-  var dd = document.getElementById(dropdownId);
-  if (!dd) return;
-  var items = Array.from(dd.querySelectorAll('.suggest-item'));
-  var focused = dd.querySelector('.suggest-item.kbd-focused');
-  var idx = focused ? items.indexOf(focused) : -1;
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    items.forEach(function(i){ i.classList.remove('kbd-focused'); });
-    idx = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
-    if (idx >= 0) {
-      items[idx].classList.add('kbd-focused');
-      items[idx].scrollIntoView({ block: 'nearest' });
-    }
-  } else if (e.key === 'Enter' && focused) {
-    e.preventDefault();
-    focused.click();
-  } else if (e.key === 'Escape') {
-    // An open list takes this Escape, so a dialog around the input stays open.
-    if (dd.childElementCount > 0) e.preventDefault();
-    dd.innerHTML = '';
-  }
-}
-
 // blurOnSubmit: after Enter the arrow keys drive the gallery, not the
 // input. clearOnEmpty: drop a swap landing on an input emptied by an add,
 // which keeps focus; label inputs list on an empty prefix on purpose.
 var suggestPairs = {
   'search-suggest': {input: 'search-input', blurOnSubmit: true, clearOnEmpty: true},
   'tag-suggest-dropdown': {input: 'tag-input', clearOnEmpty: true},
-  'batch-place-suggest': {input: 'batch-place-folder'},
-  'place-image-suggest': {input: 'place-image-folder'},
   'batch-tag-suggest': {input: 'batch-tag-input', clearOnEmpty: true},
   'batch-strip-suggest': {input: 'batch-strip-input', clearOnEmpty: true},
   'source-suggest': {input: 'source-site-input'},
@@ -3347,6 +3591,15 @@ document.addEventListener('DOMContentLoaded', function() {
   setFocused(cells, cells.indexOf(target), 'center');
 });
 
+// The upload form's folder, carried over the grid's swaps, which redraw the
+// form: the refresh after an upload, a page change. It is read as the swap
+// begins, so a folder typed, picked or emptied since is the one kept.
+var _inboxUploadFolder = '';
+document.addEventListener('htmx:beforeSwap', function(e) {
+  var field = document.getElementById('upload-folder-input');
+  if (field && e.detail.target && e.detail.target.contains(field)) _inboxUploadFolder = field.value.trim();
+});
+
 function initInboxUpload() {
   var dz = document.getElementById('inbox-upload-drop');
   var input = document.getElementById('inbox-upload-file-input');
@@ -3359,6 +3612,8 @@ function initInboxUpload() {
   // A property: a Back's snapshot would keep a data- flag, not the listeners.
   if (!dz || !input || !list || !form || dz.inboxWired) return;
   dz.inboxWired = true;
+  var folderPicker = document.getElementById('upload-folder');
+  if (folderPicker && _inboxUploadFolder) folderPick(folderPicker, _inboxUploadFolder);
 
   // The file picker replaces input.files on every change, so picks
   // accumulate here and are copied back.
@@ -3377,7 +3632,8 @@ function initInboxUpload() {
     input.files = _pending.files;
     var empty = files.length === 0;
     if (submitBtn) submitBtn.disabled = empty;
-    if (resetBtn) resetBtn.disabled = empty;
+    // A folder kept from the last upload is something to clear too.
+    if (resetBtn) resetBtn.disabled = empty && !_inboxUploadFolder;
   }
 
   function appendFiles(incoming) {
@@ -3398,7 +3654,12 @@ function initInboxUpload() {
     pickBtn.addEventListener('click', function(e) { e.preventDefault(); input.click(); });
   }
   if (resetBtn) {
-    resetBtn.addEventListener('click', function(e) { e.preventDefault(); clearPending(); });
+    resetBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      _inboxUploadFolder = '';
+      if (folderPicker) folderPick(folderPicker, '');
+      clearPending();
+    });
   }
   renderList();
 
@@ -3416,13 +3677,15 @@ function initInboxUpload() {
   // htmx:xhr:progress fires for the response download too; the latch
   // keeps its events from rewinding the counter.
   var uploadDone = false;
-  form.addEventListener('htmx:beforeRequest', function() {
+  form.addEventListener('htmx:beforeRequest', function(e) {
+    // The picker's own requests bubble up here too.
+    if (e.target !== e.currentTarget) return;
     uploadDone = false;
     if (submitBtn) submitBtn.disabled = true;
     if (result) result.innerHTML = '<div class="field-hint">Uploading...</div>';
   });
   form.addEventListener('htmx:xhr:progress', function(e) {
-    if (uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
+    if (e.target !== e.currentTarget || uploadDone || !result || !e.detail || !e.detail.lengthComputable || !e.detail.total) return;
     var pct = Math.round((e.detail.loaded / e.detail.total) * 100);
     if (pct >= 100) {
       uploadDone = true;
@@ -3432,6 +3695,7 @@ function initInboxUpload() {
     result.innerHTML = '<div class="field-hint">Uploading... ' + pct + '%</div>';
   });
   form.addEventListener('htmx:afterRequest', function(e) {
+    if (e.target !== e.currentTarget) return;
     if (submitBtn) submitBtn.disabled = false;
     if (!e.detail.successful) {
       if (result && !result.querySelector('.flash')) setFlashText(result, 'err', 'Upload failed: nothing was uploaded.');
@@ -3439,9 +3703,8 @@ function initInboxUpload() {
     }
     // The result slot sits inside #gallery-grid, which the refresh below
     // replaces.
-    if (result && result.innerHTML.trim() !== '') {
-      showActionFlash(result.innerHTML, /flash-err/.test(result.innerHTML) ? 'err' : 'ok');
-    }
+    if (result && result.querySelector('.flash-err')) return;
+    if (result && result.innerHTML.trim() !== '') showActionFlash(result.innerHTML, 'ok');
     clearPending();
     refreshGalleryGrid();
   });

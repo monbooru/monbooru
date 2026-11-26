@@ -6,7 +6,7 @@
           {{if .Color}}style="color:{{catColor .Color}}"{{end}}
           {{$.Attr}}="{{.Name}}"
           {{$.OnClick}}>
-    <span class="suggest-name">{{.Name}}</span>
+    <span class="suggest-name">{{if .Alias}}<span class="suggest-alias">{{.Alias}} →</span> {{end}}{{.Name}}</span>
     {{if .Description}}<span class="suggest-description">{{.Description}}</span>{{end}}
     {{if .ShowCount}}<span class="suggest-count">{{.UsageCount}}</span>{{end}}
   </button>

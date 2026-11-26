@@ -68,13 +68,28 @@ func TestTheWorkersBlockShowsEachWorkersState(t *testing.T) {
 	spare := workerRowHTML(t, body, "spare")
 	wantIn(t, spare, ">paused<")
 	wantIn(t, spare, "/settings/workers/spare/resume")
-	wantIn(t, body, "To add a worker on another machine")
+	wantIn(t, body, `showModal()">Add a worker</button>`)
+}
+
+func TestTheWorkersBlockFollowsAWorkerThatStartsOrStopsTagging(t *testing.T) {
+	srv := newTestServer(t)
+	busy := fakeWorker(t, "cuda", "a")
+	usePool(t, tagger.WorkerDef{Name: "gpu-box", URL: busy.URL, Token: "tok"})
+	f := busy.Config.Handler.(*worker.Fake)
+	for _, state := range []string{"tagging", "idle"} {
+		f.Mu.Lock()
+		f.Info.Busy = state == "tagging"
+		f.Mu.Unlock()
+		_, body := getBody(t, srv, "/internal/workers")
+		wantIn(t, workerRowHTML(t, body, "gpu-box"), ">"+state+"<")
+	}
 }
 
 func TestWithNoWorkerOnlyTheWorkersBlockShows(t *testing.T) {
 	srv := newTestServer(t)
 	_, body := getBody(t, srv, "/settings")
-	wantIn(t, body, "No worker. To add one, start a monworker instance")
+	wantIn(t, body, `<p class="field-hint">No worker.</p>`)
+	wantIn(t, body, `<dialog id="worker-add-dialog">`)
 	wantIn(t, body, `title="No worker to tag with">no worker`)
 	wantNotIn(t, body, "<h4>Taggers list</h4>")
 	wantNotIn(t, body, "<h4>Local worker</h4>")
@@ -105,6 +120,19 @@ func TestALocalWorkerTurnedOffOffersToEnable(t *testing.T) {
 	wantIn(t, workerRowHTML(t, body, "local"), "Set by MONBOORU_TAGGER_LOCAL_WORKER")
 }
 
+func TestALocalWorkerOnWithNoMonworkerSaysSo(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) { c.Tagger.LocalWorker = true })
+	srv.local = &localWorker{}
+	_, body := getBody(t, srv, "/internal/workers")
+	row := workerRowHTML(t, body, "local")
+	for _, want := range []string{"footer-dot-down", ">not found<", "No monworker beside monbooru or on PATH.", "/settings/workers/local/disable"} {
+		wantIn(t, row, want)
+	}
+	_, page := getBody(t, srv, "/settings")
+	wantIn(t, page, `title="No worker to tag with">no worker`)
+	wantNotIn(t, page, "<h4>Taggers list</h4>")
+}
+
 func TestAWorkersRequestWaitsInTheWorkersBlock(t *testing.T) {
 	p := healthPeer(t)
 	srv := newTestServer(t)
@@ -113,11 +141,19 @@ func TestAWorkersRequestWaitsInTheWorkersBlock(t *testing.T) {
 	_, body := getBody(t, srv, "/settings")
 	wantIn(t, body, `href="/settings#tagger"`)
 	wantIn(t, body, "gpu-box wants to pair")
+	wantIn(t, body, `<span id="settings-pair-count" class="nav-count"></span>`)
+	wantIn(t, body, `<span id="settings-worker-count" class="nav-count"> (1)</span>`)
 	_, workers := getBody(t, srv, "/internal/workers")
 	wantIn(t, workers, "A worker wants to pair.")
+	wantIn(t, workers, `<span id="settings-worker-count" class="nav-count" hx-swap-oob="true"> (1)</span>`)
 	wantIn(t, workers, "/settings/plugins/pair/"+id+"/approve")
 	_, panel := getBody(t, srv, "/internal/plugins/pairing")
 	wantNotIn(t, panel, id)
+
+	other := workerOffer(t, srv, p, "laptop")
+	_, workers = getBody(t, srv, "/internal/workers")
+	wantIn(t, workers, "2 workers want to pair.")
+	mustCode(t, postForm(t, srv, "/settings/plugins/pair/"+other+"/deny", url.Values{}), http.StatusOK)
 
 	w := postForm(t, srv, "/settings/plugins/pair/"+id+"/deny", url.Values{})
 	wantIn(t, w.Body.String(), `id="tagger-workers"`)
@@ -190,4 +226,82 @@ func TestOnlyAFolderOnThisMachineOffersDelete(t *testing.T) {
 	mustMkdirAll(t, filepath.Join(modelPath, "wd-swinv2"), 0o755)
 	_, body = getBody(t, srv, "/settings")
 	wantIn(t, body, "/settings/tagger/wd-swinv2/delete")
+}
+
+func TestTheStatsBlockOfTheTaggerPollsOnItsOwn(t *testing.T) {
+	srv := newTestServer(t)
+	_, page := getBody(t, srv, "/settings")
+	_, block := getBody(t, srv, "/internal/tagger-stats")
+	for _, body := range []string{page, block} {
+		wantIn(t, body, `id="tagger-stats"`)
+		wantIn(t, body, `hx-get="/internal/tagger-stats" hx-trigger="every 5s"`)
+		wantIn(t, body, "<h4>Auto-tagger</h4>")
+	}
+	wantNotIn(t, block, "<h4>Database size per gallery</h4>")
+}
+
+func TestTheStatsBlockListsEveryWorker(t *testing.T) {
+	srv := newTestServer(t)
+	_, body := getBody(t, srv, "/internal/tagger-stats")
+	wantIn(t, body, "<th>Status</th><td>no worker</td>")
+
+	busy := fakeWorker(t, "cuda", "a")
+	gone := fakeWorker(t, "cpu", "a")
+	gone.Close()
+	usePool(t,
+		tagger.WorkerDef{Name: "gpu-box", URL: busy.URL, Token: "tok"},
+		tagger.WorkerDef{Name: "laptop", URL: fakeWorker(t, "cpu", "a").URL, Token: "tok"},
+		tagger.WorkerDef{Name: "attic", URL: gone.URL, Token: "tok"},
+	)
+	f := busy.Config.Handler.(*worker.Fake)
+	f.Mu.Lock()
+	f.Info.Loaded, f.Info.Busy = []string{"wd-swinv2"}, true
+	f.Mu.Unlock()
+	_, body = getBody(t, srv, "/internal/tagger-stats")
+	compact := strings.Join(strings.Fields(body), "")
+	for _, want := range []string{
+		`<th>gpu-box</th><td>tagging</td></tr><tr><thclass="stats-d1">Mode</th>`,
+		`<th>laptop</th><td>idle</td>`,
+		`<thclass="stats-d1">Mode</th><td>CUDA</td></tr><tr><thclass="stats-d1">Models</th><td>wd-swinv2</td>`,
+		`<thclass="stats-d1">Models</th><td>notloaded</td>`,
+		`<th>attic</th><td>offlinesince`,
+	} {
+		wantIn(t, compact, want)
+	}
+	_, attic, _ := strings.Cut(compact, "<th>attic</th>")
+	wantNotIn(t, attic, "Mode")
+	wantNotIn(t, compact, "WorkerPID")
+}
+
+func TestTheWorkersHintGivesMonbooruAddressAndWarnsOnLoopback(t *testing.T) {
+	srv := newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://192.168.1.5:8455", "127.0.0.1:8455"
+	})
+	body := hintAt(srv, "192.168.1.5:8455")
+	wantIn(t, body, `<code id="worker-add-pair-cmd">MONWORKER_MONBOORU_URL=http://192.168.1.5:8455 monworker</code>`)
+	wantIn(t, body, `<p class="flash flash-warn">monbooru listens on 127.0.0.1:8455 only.</p>`)
+
+	srv = newTestServerWith(t, false, func(c *config.Config) {
+		c.Server.BaseURL, c.Server.BindAddress = "http://localhost:8455", "0.0.0.0:8455"
+	})
+	body = hintAt(srv, "localhost:8455")
+	wantIn(t, body, `MONWORKER_MONBOORU_URL=&lt;monbooru&#39;s address on your network&gt; monworker</code>`)
+	wantNotIn(t, body, "listens on")
+}
+
+func hintAt(srv *Server, host string) string {
+	req := httptest.NewRequest("GET", "/settings", nil)
+	req.Host = host
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	return rr.Body.String()
+}
+
+func TestTheLocalWorkerStandingBySaysWhy(t *testing.T) {
+	srv := newTestServer(t)
+	usePool(t,
+		tagger.WorkerDef{Name: tagger.LocalWorker, Local: true, URL: fakeWorker(t, "cpu", "a").URL, Token: "tok"},
+		tagger.WorkerDef{Name: "gpu-box", URL: fakeWorker(t, "cuda", "a").URL, Token: "tok"})
+	_, body := getBody(t, srv, "/internal/workers")
+	wantIn(t, workerRowHTML(t, body, "local"), `title="Takes calls only when no paired worker can">standby<`)
 }

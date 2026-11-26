@@ -1,8 +1,9 @@
 # ![Monbooru](/.github/assets/banner.webp)
 
-Your own private, lightweight and fast booru: a tag-based image gallery, in the style of Danbooru, for your files.
+Your own private, lightweight and fast booru: a Danbooru-style tag-based gallery for your local media.
 
-Designed for organizing your local media collection: images, videos, animated GIFs and manga archives. Tag it by hand or auto-tag it locally with ONNX models (WD14, JoyTag...), then search it by tag. Generation metadata from AI image tools (A1111/Forge, ComfyUI) is read too. The app itself never touches the internet; online features (downloading from boorus, reverse image lookup) live in [monloader](https://github.com/monbooru/monloader), an optional companion.
+Organize images, videos, animated GIFs and manga archives in one searchable library. Tag media by hand or automatically with local ONNX models (WD14, PixAI, etc.), manage tag relationships and provenance, and search by tags, metadata and more.
+Monbooru is fully functional as a standalone application. The app itself never touches the internet; online features (downloading from boorus, reverse image lookup) are handled by [monloader](https://github.com/monbooru/monloader), while local and remote auto-tagging is available through [monworker](https://github.com/monbooru/monworker), both optional companions.
 
 **[Demo](https://monbooru.github.io/demo/)** · **[Documentation](https://monbooru.github.io/mondocs/)** · **[Install](#install)** · **[Releases](https://github.com/monbooru/monbooru/releases)** · **[Changelog](CHANGELOG.md)**
 
@@ -36,9 +37,9 @@ Designed for organizing your local media collection: images, videos, animated GI
 ### Tags
 
 - **Tag management**: merge duplicates, aliases, implications, custom categories, cleanup tools; a page per tag with your note, links and a usage graph
-- **Tag provenance**: each tag remembers what applied it (you, an auto-tagger, a booru); view, search and remove tags by source, and reject a tag to keep it off every image
+- **Tag provenance**: each tag remembers what applied it (you, an auto-tagger, a booru); view, map, search and remove tags by source, and reject a tag to keep it off every image
 - **Rating tags** (general / sensitive / questionable / explicit), with a SFW ceiling in the footer that hides anything rated above it
-- **Meta tags** set from the file itself, under Danbooru's names: `highres`, `absurdres`, `animated`, `sound` and more
+- **Meta tags** set automatically from the file itself, under Danbooru's names: `highres`, `absurdres`, `animated`, `sound` and more
 - **Local auto-tagging** with ONNX models (WD14 SwinV2, animetimm EVA02, JoyTag, Camie v2, PixAI, or any compatible model), on CPU or GPU; several models can run together, on videos and archive pages too
 
 ### Browse and search
@@ -70,7 +71,9 @@ Monbooru runs on Linux (x86_64, arm64) and Windows (x86_64). Once started, it's 
 
 Edit the volume paths in [`docker/docker-compose.yml`](docker/docker-compose.yml), then run `docker compose up -d`.
 
-`latest` can only do CPU auto-tagging. For faster auto-tagging, use the `latest-cuda` image (NVIDIA) or `latest-openvino` (Intel GPU). The `latest-lite` image has no auto-tagger of its own and tags through a [monworker](https://github.com/monbooru/monworker) on another machine.
+The standard images include monworker for local auto-tagging, except for `latest-lite` which requires a separate monworker instance that can run either locally or remotely. Auto-tagging is entirely optional.
+
+For GPU-accelerated auto-tagging, use `latest-cuda` (NVIDIA GPUs) or `latest-openvino` (Intel GPUs). The default `latest` image supports CPU inference only.
 
 ### Download
 
@@ -78,10 +81,10 @@ Download a build for your system from the [releases](https://github.com/monbooru
 
 Downloads come in two flavours:
 
-- **lite** is the program and ffmpeg. It can only tag through a [monworker](https://github.com/monbooru/monworker) you run on this machine or another one.
-- **bundled** adds monworker beside it, so auto-tagging works out of the box.
+- **lite**: Monbooru and ffmpeg only. Requires a separate monworker for auto-tagging.
+- **bundled**: Includes monworker, so auto-tagging works out of the box.
 
-Beside the portable archives, Linux bundled builds also ship as an AppImage and as a Flatpak.
+Linux bundled builds are also available as an AppImage and Flatpak.
 
 ### Next steps
 
@@ -89,17 +92,15 @@ The [documentation](https://monbooru.github.io/mondocs/) covers the first steps.
 
 ## Warning
 
-> **Intended for local network use.** This project is not designed for direct exposure to the public internet.
+> **Intended for trusted local network use.** Monbooru is not designed to be exposed directly to the public internet. If you need remote access, use an appropriately secured private network.
 
 ## Technical overview
 
 Monbooru is a single self-contained Go binary, web assets embedded, with six direct dependencies. Each gallery is one SQLite file: no database server, no cache layer, nothing else to run. Your images stay ordinary files and folders; the database and thumbnails live in a separate data directory, so backing up means copying that directory, and removing monbooru leaves your images where they were. The UI is server-rendered with htmx, with no JS framework and no frontend build step.
 
-The heavy features stay out of the main process. Auto-tagging runs in [monworker](https://github.com/monbooru/monworker), a separate program that monbooru starts on the same machine or reaches on another one, and that unloads its models when idle; it is off until you install a model from **Settings → Auto-Tagger**. ffmpeg is needed only for video, animated previews, AVIF and JPEG XL.
-
 ## Related applications
 
-Monbooru works offline. These optional companions add the online features and auto-tagging:
+Monbooru works offline and on its own. These optional companions add the online features and auto-tagging:
 
 ```mermaid
 ---
@@ -143,7 +144,8 @@ contribute back`"| loader
 ```
 
 - **monbooru**: this application; organizes, tags, and serves your collection.
-- **[monloader](https://github.com/monbooru/monloader)**: downloader. Fetches files and per-post metadata (via gallery-dl) from supported boorus and galleries and pushes them into a monbooru gallery over the REST API. It also answers monbooru's reverse lookups against boorus, IQDB, SauceNAO and the Hydrus Public Tag Repository, to backfill tags and sources; when a matched post has a better file than your local copy, one click replaces it in place. The PTR connection can also pull tag aliases and implications into your catalog, and send yours back.
+- **[monloader](https://github.com/monbooru/monloader)**: downloader and online lookup companion. Fetches files and metadata from supported boorus and galleries through gallery-dl, then pushes them into Monbooru.
+It also handles reverse image lookups through boorus, IQDB and SauceNAO, and synchronizes tags, aliases and implications with the Hydrus Public Tag Repository. When a matched post has a better-quality file, you can replace your local copy with one click.
 - **[monsender](https://github.com/monbooru/monsender)**: browser extension; sends the URL of the page you're browsing to monloader.
 - **[monworker](https://github.com/monbooru/monworker)**: Machine Learning worker; runs the auto-tagging models for monbooru, on the same machine or on another one.
 - **[monbooru-plugins](https://github.com/monbooru/monbooru-plugins)**: community registry of plugins, themes and extra taggers.

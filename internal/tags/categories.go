@@ -260,6 +260,13 @@ func (s *Service) DeleteCategoryMoveOrDelete(id int64, action string, targetID i
 			if err != nil {
 				return err
 			}
+			var global bool
+			if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM tags WHERE category_id = ? AND is_global = 1 AND is_alias = 0)`, id).Scan(&global); err != nil {
+				return err
+			}
+			if global {
+				return ErrTagGlobal
+			}
 			if err := deleteTagsTx(tx, tagIDs); err != nil {
 				return err
 			}

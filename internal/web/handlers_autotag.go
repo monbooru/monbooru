@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,20 +22,20 @@ import (
 )
 
 // A non-zero imageID settles the run as that one image's.
-func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, imageID int64) {
+func (s *Server) spawnAutoTagJob(ids []int64, selected []tagger.TaggerStatus, imageID int64, only []string) {
 	cfg := s.cfgSnapshot()
 	cx := s.active()
 	peak := autotagMemoryMark()
 	go func() {
 		ctx := s.jobs.Context()
-		skipped, err := tagger.RunWithTaggers(ctx, cx.Handle, cfg, ids, selected, s.jobs)
+		res, err := tagger.RunOn(ctx, cx.Handle, cfg, ids, selected, only, s.jobs)
 		if imageID != 0 {
-			if finished, _ := tagger.SettleImage(ctx, s.jobs, imageID, skipped, err); finished {
+			if finished, _ := tagger.SettleImage(ctx, s.jobs, imageID, res.Skipped, err); finished {
 				peak(fmt.Sprintf("image #%d", imageID))
 			}
 			return
 		}
-		if finished, _ := tagger.Settle(ctx, s.jobs, "", "", len(ids), skipped, err); finished {
+		if finished, _ := tagger.Settle(ctx, s.jobs, "", "", len(ids), res, err); finished {
 			peak(fmt.Sprintf("batch %d %s", len(ids), models.Plural(len(ids), "image", "images")))
 		}
 	}()
@@ -258,6 +259,29 @@ func uploadErrorReasons(unsupported, ignored, unsaved int, refused []string) str
 	return reason + namedFiles(refused)
 }
 
+// jobWorkersRefusal says why a job cannot run on the workers named, ""
+// when it can or names none.
+func jobWorkersRefusal(only []string, selected []tagger.TaggerStatus) string {
+	if len(only) == 0 {
+		return ""
+	}
+	can := map[string]tagger.JobWorker{}
+	for _, w := range tagger.CurrentPool().JobWorkers() {
+		can[w.Name] = w
+	}
+	for _, name := range only {
+		if _, ok := can[name]; !ok {
+			return "Worker " + name + " cannot take a job now."
+		}
+	}
+	for _, t := range selected {
+		if !slices.ContainsFunc(only, func(name string) bool { return slices.Contains(can[name].Holds, t.Name) }) {
+			return "No ticked worker holds " + t.Name + "."
+		}
+	}
+	return ""
+}
+
 func (s *Server) autotagTrigger(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfgSnapshot()
 	if !tagger.IsAvailable(cfg) {
@@ -276,6 +300,12 @@ func (s *Server) autotagTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	only := slices.Compact(slices.Sorted(slices.Values(r.Form["workers"])))
+	if msg := jobWorkersRefusal(only, selected); msg != "" {
+		flashStatus(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	ids, ok := s.resolveBatchScope(w, r, "autotag", false)
 	if !ok {
 		return
@@ -289,9 +319,9 @@ func (s *Server) autotagTrigger(w http.ResponseWriter, r *http.Request) {
 		flashStatus(w, http.StatusConflict, "A job is already running.")
 		return
 	}
-	s.jobs.Update(0, len(ids), "starting (loading model may take a few seconds)…")
+	s.jobs.Update(0, len(ids), "loading models…")
 
-	s.spawnAutoTagJob(ids, selected, 0)
+	s.spawnAutoTagJob(ids, selected, 0, only)
 
 	if isHTMXRequest(r) {
 		setFlashHeader(w, fmt.Sprintf("Auto-tagger started for %d image%s.", len(ids), plural(len(ids))), "ok", nil)
@@ -325,9 +355,9 @@ func (s *Server) autotagImage(w http.ResponseWriter, r *http.Request) {
 		hxErr(w, r, "A job is already running.", "job already running", http.StatusConflict)
 		return
 	}
-	s.jobs.Update(0, 1, "starting (loading model may take a few seconds)…")
+	s.jobs.Update(0, 1, "loading models…")
 
-	s.spawnAutoTagJob([]int64{id}, selected, id)
+	s.spawnAutoTagJob([]int64{id}, selected, id, nil)
 
 	if isHTMXRequest(r) {
 		setFlashHeader(w, "Auto-tagger started for this image.", "ok", nil)

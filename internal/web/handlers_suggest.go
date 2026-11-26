@@ -20,18 +20,31 @@ import (
 
 type suggestItem struct {
 	Name        string
+	Alias       string
 	Color       string
 	Description string
 	UsageCount  int
 	ShowCount   bool
 }
 
-func tagSuggestItems(ts []models.Tag, prefix string) []suggestItem {
+func tagSuggestItems(ts []models.Tag) []suggestItem {
 	items := make([]suggestItem, len(ts))
 	for i, t := range ts {
-		items[i] = suggestItem{Name: prefix + t.Name, Color: t.CategoryColor, UsageCount: t.UsageCount, ShowCount: true}
+		items[i] = suggestItem{Name: t.Name, Alias: t.ViaAlias, Color: t.CategoryColor, UsageCount: t.UsageCount, ShowCount: true}
 	}
 	return items
+}
+
+func qualifySearchSuggestions(ts []models.Tag, typedCategory string) {
+	for i := range ts {
+		t := &ts[i]
+		switch {
+		case typedCategory != "" && t.ViaAlias == "":
+			t.Name = typedCategory + ":" + t.Name
+		case t.CategoryName != "" && t.CategoryName != "general":
+			t.Name = t.CategoryName + ":" + t.Name
+		}
+	}
 }
 
 // attr and onclick become HTMLAttr unescaped: only ever pass constants.
@@ -54,37 +67,6 @@ func (s *Server) suggestLabels(q db.Querier, logLabel, query string, args ...any
 		return nil
 	}
 	return slices.DeleteFunc(out, func(v string) bool { return v == "" })
-}
-
-// The NOCASE range seeks the index where LIKE 'prefix%' would walk all of
-// it, and folds case the way the folder: filter does.
-func (s *Server) foldersSuggest(w http.ResponseWriter, r *http.Request) {
-	prefix := strings.TrimSpace(r.URL.Query().Get("prefix"))
-	var folders []string
-	if prefix == "" {
-		folders = s.suggestLabels(s.db().Read, "folders",
-			`SELECT DISTINCT folder_path FROM images INDEXED BY idx_images_folder_nocase_visible
-			 WHERE is_missing = 0 AND folder_path != ''
-			 ORDER BY folder_path COLLATE NOCASE LIMIT 10`)
-	} else {
-		lo, hi := nocasePrefixRange(prefix)
-		folders = s.suggestLabels(s.db().Read, "folders",
-			`SELECT DISTINCT folder_path FROM images INDEXED BY idx_images_folder_nocase_visible
-			 WHERE is_missing = 0
-			   AND folder_path >= ? COLLATE NOCASE
-			   AND folder_path < ? COLLATE NOCASE
-			 ORDER BY folder_path COLLATE NOCASE LIMIT 10`,
-			lo, hi)
-	}
-	if len(folders) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	items := make([]suggestItem, len(folders))
-	for i, fp := range folders {
-		items[i] = suggestItem{Name: fp}
-	}
-	s.renderSuggestList(w, `data-folder-path`, `onclick="applyLabelSuggest(this, 'folderPath')"`, items)
 }
 
 func (s *Server) collectionSuggest(w http.ResponseWriter, r *http.Request) {
@@ -307,29 +289,28 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, _ := s.tagSvc().SuggestTags(tagPrefix, catName, 10)
 	if q.Has("name") {
-		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool { return t.CategoryName == "rating" })
+		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool {
+			return t.CategoryName == "rating" || t.ViaAlias != ""
+		})
 	}
 
-	if catName != "" {
-		for i := range suggestions {
-			suggestions[i].Name = catName + ":" + suggestions[i].Name
-		}
-	} else {
-		// A canonical input reads a bare name in every category, so a general
-		// name that another tag shares is written out in full.
-		var ambiguous map[string]bool
-		if q.Has("canonical_id") || q.Has("target") {
-			ambiguous = s.ambiguousGeneralNames(suggestions)
-		}
-		for i := range suggestions {
-			cat := suggestions[i].CategoryName
-			if cat != "" && (cat != "general" || ambiguous[suggestions[i].Name]) {
-				suggestions[i].Name = cat + ":" + suggestions[i].Name
-			}
+	// A canonical input reads a bare name in every category, so a general
+	// name that another tag shares is written out in full.
+	var ambiguous map[string]bool
+	if q.Has("canonical_id") || q.Has("target") {
+		ambiguous = s.ambiguousGeneralNames(suggestions)
+	}
+	for i := range suggestions {
+		t := &suggestions[i]
+		switch {
+		case catName != "" && t.ViaAlias == "":
+			t.Name = catName + ":" + t.Name
+		case t.CategoryName != "" && (t.CategoryName != "general" || ambiguous[t.Name]):
+			t.Name = t.CategoryName + ":" + t.Name
 		}
 	}
 
-	s.renderSuggestList(w, `data-tag-name`, `onclick="applyTagSuggest(this)"`, tagSuggestItems(suggestions, ""))
+	s.renderSuggestList(w, `data-tag-name`, `onclick="applyTagSuggest(this)"`, tagSuggestItems(suggestions))
 }
 
 // Beyond this the id list outgrows what a batch POST can usefully carry.
@@ -414,13 +395,7 @@ func (s *Server) searchSuggest(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, _ := search.SuggestTagsWithFilter(s.source(), contextExpr, prefix, catFilter, 10)
 
-	for i := range suggestions {
-		if catFilter != "" {
-			suggestions[i].Name = catFilter + ":" + suggestions[i].Name
-		} else if suggestions[i].CategoryName != "" && suggestions[i].CategoryName != "general" {
-			suggestions[i].Name = suggestions[i].CategoryName + ":" + suggestions[i].Name
-		}
-	}
+	qualifySearchSuggestions(suggestions, catFilter)
 
 	if alreadyTyped := alreadyTypedTags(contextTokens); len(alreadyTyped) > 0 {
 		out := suggestions[:0]
@@ -433,7 +408,7 @@ func (s *Server) searchSuggest(w http.ResponseWriter, r *http.Request) {
 		suggestions = out
 	}
 
-	s.renderSearchSuggest(w, tagSuggestItems(suggestions, ""))
+	s.renderSearchSuggest(w, tagSuggestItems(suggestions))
 }
 
 // Free-text values keep their case for the range scans.
@@ -564,7 +539,8 @@ func (s *Server) systemSuggestLevel2(key, valPrefix string) []suggestItem {
 	}
 	if s.categoryExists(key) {
 		suggestions, _ := search.SuggestTagsWithFilter(s.source(), nil, valPrefix, key, 10)
-		return tagSuggestItems(suggestions, key+":")
+		qualifySearchSuggestions(suggestions, key)
+		return tagSuggestItems(suggestions)
 	}
 	return nil
 }

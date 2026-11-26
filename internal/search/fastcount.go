@@ -479,9 +479,14 @@ func fastCountTagged(src Source, e FilterExpr) (int, bool) {
 		return 0, false
 	}
 	var untagged int
-	if e.Key == "autotagged" {
+	switch auto := e.Key == "autotagged"; {
+	case auto && src.heldTalliesOnly:
+		untagged, ok = src.Tallies.AutoUntaggedVisibleCountReady()
+	case auto:
 		untagged, ok = src.Tallies.AutoUntaggedVisibleCount()
-	} else {
+	case src.heldTalliesOnly:
+		untagged, ok = src.Tallies.UntaggedVisibleCountReady()
+	default:
 		untagged, ok = src.Tallies.UntaggedVisibleCount()
 	}
 	if !ok {

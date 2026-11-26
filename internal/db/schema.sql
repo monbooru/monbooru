@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS tags (
     -- 1 = a name mapped to nothing: every add path drops it.
     rejected         INTEGER NOT NULL DEFAULT 0,
     rejected_drops   INTEGER NOT NULL DEFAULT 0,
+    is_global        INTEGER NOT NULL DEFAULT 0,
     UNIQUE(name, category_id)
 );
 
@@ -168,6 +169,25 @@ CREATE TABLE IF NOT EXISTS tag_implications (
     PRIMARY KEY (parent_tag_id, implied_tag_id)
 );
 
+CREATE TABLE IF NOT EXISTS global_tag_changes (
+    tag_id   INTEGER PRIMARY KEY,
+    name     TEXT NOT NULL,
+    category TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS global_tag_removals (
+    tag_id   INTEGER NOT NULL,
+    kind     TEXT    NOT NULL,
+    name     TEXT    NOT NULL,
+    category TEXT    NOT NULL,
+    PRIMARY KEY (tag_id, kind, name, category)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS global_tag_applying (
+    id INTEGER PRIMARY KEY CHECK (id = 1)
+);
+CREATE TABLE IF NOT EXISTS global_tag_making (
+    tag_id INTEGER PRIMARY KEY,
+    merge  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS tag_notes (
     tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
     body   TEXT    NOT NULL DEFAULT '',

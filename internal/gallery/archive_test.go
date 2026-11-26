@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -182,7 +183,7 @@ func TestExtractPage_RefusesAPageThatInflatesPastTheArchive(t *testing.T) {
 	dir := t.TempDir()
 	pic := solidPNG(t, 4, 4, [3]uint8{42, 0, 0})
 	path := writeTestZip(t, dir, "m.cbz", map[string][]byte{
-		"01.avif": make([]byte, 4<<20),
+		"01.avif": make([]byte, 65<<20),
 		"02.png":  pic,
 	})
 	m := mustOpenManga(t, path)
@@ -191,13 +192,29 @@ func TestExtractPage_RefusesAPageThatInflatesPastTheArchive(t *testing.T) {
 	cacheDir := t.TempDir()
 	bomb := filepath.Join(cacheDir, "page_0001.avif")
 	if err := m.extractPage(0, bomb); err == nil {
-		t.Error("a page of 4 MiB of zeros in a small archive was extracted")
+		t.Error("a page of 65 MiB of zeros in a small archive was extracted")
 	}
 	if _, err := os.Stat(bomb); !os.IsNotExist(err) {
 		t.Errorf("the refused page left a file: %v", err)
 	}
 	if err := m.extractPage(1, filepath.Join(cacheDir, "page_0002.png")); err != nil {
 		t.Errorf("a real page beside it was refused: %v", err)
+	}
+}
+
+func TestExtractPage_ExtractsTheFlatPagesOfASmallArchive(t *testing.T) {
+	dir := t.TempDir()
+	page := solidPNG(t, 1500, 2100, [3]uint8{250, 250, 250})
+	entries := map[string][]byte{}
+	for i := 1; i <= 10; i++ {
+		entries[fmt.Sprintf("%02d.png", i)] = page
+	}
+	path := writeTestZip(t, dir, "m.cbz", entries)
+	m := mustOpenManga(t, path)
+	defer func() { _ = m.Close() }()
+
+	if err := m.extractPage(0, filepath.Join(t.TempDir(), "page_0001.png")); err != nil {
+		t.Errorf("a flat page of a small archive was refused: %v", err)
 	}
 }
 

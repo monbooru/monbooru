@@ -1,7 +1,6 @@
 package tagger
 
 import (
-	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -311,12 +310,4 @@ func dense(frames [][]float32) []SparseScores {
 		}
 	}
 	return out
-}
-
-func TestSparseScores_KeepsWhatAggregationCounts(t *testing.T) {
-	nan := float32(math.NaN())
-	got := sparseScores([]float32{0.0009, 0.001, nan, 0.5, 0})
-	if fmt.Sprint(got.I) != "[1 3]" || fmt.Sprint(got.S) != "[0.001 0.5]" {
-		t.Errorf("sparse = %v %v, want [1 3] [0.001 0.5]", got.I, got.S)
-	}
 }

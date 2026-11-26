@@ -13,6 +13,7 @@ import (
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 func (h *Handler) serveImageFile(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +152,7 @@ func (h *Handler) serveMangaPagePath(
 	}
 	page, err := ensure(g.ThumbnailsPath, canonPath, id, n)
 	if err != nil {
+		logx.Warnf("api: page %d of image %d: %v", n, id, err)
 		contract.WriteError(w, http.StatusNotFound, "not_found", "page not found")
 		return
 	}

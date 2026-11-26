@@ -1,5 +1,5 @@
 {{define "partials/plugin_pairing.html"}}
-<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
+<div id="plugin-pairing" hx-get="/internal/plugins/pairing?paired={{.Paired}}&pair={{.PairKey}}" hx-trigger="every 3s [!confirmOpen()]" hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <div class="settings-sub-head">
     <h4>Pairing requests</h4>
     {{if .WindowLeft}}
@@ -10,7 +10,7 @@
       <button type="submit" class="btn-sm">Close</button>
     </form>
     {{else}}
-    <p class="field-hint">Approves monloader and workers without a click.</p>
+    <p class="field-hint">Approves monloader and workers automatically.</p>
     <form class="pair-window-toggle" hx-post="/settings/plugins/pair/window" hx-target="#plugin-pairing" hx-swap="outerHTML">
       <input type="hidden" name="open" value="1">
       <button type="submit" class="btn-sm">Accept pairings for 10 minutes</button>
@@ -20,7 +20,7 @@
   {{if .AutoPaired}}
   <div class="table-scroll">
   <table class="data-table stack-table auto-paired">
-    <thead><tr><th>Paired without a click</th><th>Source</th><th>When</th><th>Scopes</th><th class="cell-action">Revoke</th></tr></thead>
+    <thead><tr><th>Paired automatically</th><th>Source</th><th>When</th><th>Scopes</th><th class="cell-action">Revoke</th></tr></thead>
     <tbody>
       {{range .AutoPaired}}
       <tr>
@@ -88,5 +88,5 @@
   <p class="field-hint">No pending requests. When an app or plugin asks to connect, approve it here.</p>
   {{end}}
 </div>
-{{with .Notice}}{{template "webui/pair_notice" .}}<span id="settings-pair-count" class="nav-count" hx-swap-oob="true">{{with len .Items}} ({{.}}){{end}}</span>{{end}}
+{{with .Notice}}{{template "webui/pair_notice" .}}<span id="settings-pair-count" class="nav-count" hx-swap-oob="true">{{with $.PluginsPending}} ({{.}}){{end}}</span>{{end}}
 {{end}}

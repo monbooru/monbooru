@@ -207,6 +207,8 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/collections", h.auth(h.listCollections))
 
 	mux.HandleFunc("GET /api/v1/galleries", h.auth(h.listGalleries))
+	mux.HandleFunc("GET /api/v1/folders", h.auth(h.listFolders))
+	mux.HandleFunc("GET /api/v1/folders/search", h.auth(h.searchFolders))
 	mux.HandleFunc("GET /api/v1/taggers", h.auth(h.listTaggers))
 	mux.HandleFunc("GET /api/v1/jobs/current", h.auth(h.currentJob))
 

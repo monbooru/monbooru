@@ -54,13 +54,13 @@
           hx-post="/images/{{.ImageID}}/place"
           hx-target="#place-image-error" hx-swap="innerHTML">
       <div class="field">
-        {{template "dest_row" dict "Prefix" "place-image" "NameHint" "The extension is kept."}}
-        {{template "partials/name_tokens.html" (dict "Targets" "place-image-folder place-image-name" "Folder" true)}}
+        {{template "dest_row" dict "Prefix" "place-image" "Folder" .PlaceFolder "NameHint" "The extension is kept."}}
+        {{template "partials/name_tokens.html" (dict "Targets" "place-image-folder-input place-image-name" "Folder" true)}}
         <div id="place-image-preview"
              hx-get="/internal/name/preview"
-             hx-trigger="input delay:200ms from:#place-image-folder, input delay:200ms from:#place-image-name, preview"
+             hx-trigger="input delay:200ms from:#place-image-folder-input, change from:#place-image-folder-input, input delay:200ms from:#place-image-name, preview"
              hx-target="this"
-             hx-vals='js:{scope: "place", ids: "{{.ImageID}}", folder: document.getElementById("place-image-folder").value, name: document.getElementById("place-image-name").value}'></div>
+             hx-vals='js:{scope: "place", ids: "{{.ImageID}}", folder: document.getElementById("place-image-folder-input").value, name: document.getElementById("place-image-name").value}'></div>
       </div>
       <div id="place-image-error"></div>
       {{template "dialog_actions" dict "ID" "place-image-dialog" "Submit" "Rename / move"}}

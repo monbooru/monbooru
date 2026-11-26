@@ -25,7 +25,8 @@ type Req struct {
 	Buttons   []config.PluginButton
 	Repair    bool
 	// Auto is an offer approved on arrival, with no click.
-	Auto bool
+	Auto          bool
+	PrivateSource bool
 }
 
 // An open button's page runs on monbooru's origin with the operator's
@@ -34,6 +35,9 @@ func (r Req) OpenOutranksScopes() bool {
 	return !slices.Contains(r.Scopes, config.ScopeWrite) &&
 		slices.ContainsFunc(r.Buttons, func(b config.PluginButton) bool { return b.Mode == config.ModeOpen })
 }
+
+// Address is where monbooru will call the peer once paired.
+func (r Req) Address() string { return CallbackURL(r.URL, r.Source) }
 
 type Store = pairing.Store[Req, *Req]
 
@@ -128,6 +132,7 @@ func Revoke(c *config.Config, app string) {
 	c.Auth.Tokens = slices.DeleteFunc(c.Auth.Tokens, func(t apitoken.Token) bool { return t.Paired == app })
 	if name, ok := WorkerLabel(app); ok {
 		c.Workers = slices.DeleteFunc(c.Workers, func(w config.WorkerConfig) bool { return w.Name == name })
+		c.DropWorkerRefs(name)
 		return
 	}
 	if app == contract.AppMonloader {

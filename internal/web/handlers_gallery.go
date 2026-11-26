@@ -21,6 +21,7 @@ import (
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/searchkw"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -53,10 +54,13 @@ type galleryData struct {
 	EnabledTaggers    []tagger.TaggerStatus
 	TaggersPresent    bool
 	TaggerReason      string
+	AutotagWorkers    []tagger.JobWorker
 	ActiveTagTerms    map[string]bool
 	InboxClusterAtIdx []*inboxCluster
 	InboxUploadActive bool
 	AcceptFileTypes   string
+	UploadFolder      webui.FolderPicker
+	PlaceFolder       webui.FolderPicker
 	SimilarityPercent map[int64]int
 	SortSelectOOB     bool
 	PluginSlot        pluginSlotView
@@ -308,6 +312,7 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		EnabledTaggers:    enabledTaggers,
 		TaggersPresent:    taggersPresent,
 		TaggerReason:      taggerReason,
+		AutotagWorkers:    autotagWorkers(),
 		PluginSlot:        s.pluginSlot(r, config.SlotBatchBar, 0, ""),
 		ActiveTagTerms:    computeActiveTagTerms(queryStr),
 		SearchTime:        took,
@@ -320,13 +325,12 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		data.SimilarityPercent = scores
 	}
-	if inboxClustersActive(sortStr, orderStr, expr) {
-		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1, page < totalPages || result.TotalUnknown)
-	}
 	if inboxFilterActive(expr) {
 		data.InboxUploadActive = true
 		data.AcceptFileTypes = gallery.SupportedMIMETypes
+		data.UploadFolder = s.folderPicker("upload")
 	}
+	data.PlaceFolder = s.folderPicker("batch-place")
 	data.HiddenByCeiling = hiddenByCeiling
 	var first, last int64
 	if n := len(result.Results); n > 0 && search.CursorPaging(sq) {
@@ -336,6 +340,9 @@ func (s *Server) galleryHandler(w http.ResponseWriter, r *http.Request) {
 			data.PagerMorePrev = s.cursorPageEdge(r.Context(), sq, first, 0)
 		}
 		data.PagerMoreNext = next == "more"
+	}
+	if inboxClustersActive(sortStr, orderStr, expr) {
+		data.InboxClusterAtIdx = computeInboxClusters(result.Results, queryStr, page > 1 || data.PagerMorePrev, page < totalPages || result.TotalUnknown || data.PagerMoreNext)
 	}
 	if result.TotalUnknown || hiddenLater {
 		data.CountURL = buildCountURL(queryStr, sortStr, orderStr, page, randomSeed, result.TotalUnknown, first, last, data.PagerMorePrev, next, took)
@@ -812,6 +819,7 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 	}
 	markers := make([]*inboxCluster, len(images))
 	gap := time.Duration(batchGapMinutes) * time.Minute
+	flagged := len(search.Unreadable(queryStr)) > 0
 	start := 0
 	for i := 1; i <= len(images); i++ {
 		closeCluster := i == len(images)
@@ -828,6 +836,9 @@ func computeInboxClusters(images []models.Image, queryStr string, moreAbove, mor
 		if closeCluster {
 			spills := (start == 0 && moreAbove) || (i == len(images) && moreBelow)
 			markers[start] = buildInboxCluster(images[start:i], queryStr, !spills)
+			if flagged {
+				markers[start].RangeLink, markers[start].RangeQuery = "", ""
+			}
 			start = i
 		}
 	}
@@ -862,4 +873,13 @@ func buildInboxCluster(rows []models.Image, queryStr string, whole bool) *inboxC
 		RangeQuery: clusterQ,
 		Whole:      whole,
 	}
+}
+
+// autotagWorkers are what the batch Auto-tag dialog offers, once there
+// are two to choose from.
+func autotagWorkers() []tagger.JobWorker {
+	if ws := tagger.CurrentPool().JobWorkers(); len(ws) > 1 {
+		return ws
+	}
+	return nil
 }

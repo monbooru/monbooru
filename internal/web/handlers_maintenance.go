@@ -172,8 +172,8 @@ func (s *Server) resetTagsGet(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/settings#maintenance", http.StatusSeeOther)
 		return
 	}
-	_, ids, aliases, implications, err := s.tagSvc().TagResetScope()
-	data := map[string]any{"Gallery": s.active().Name, "Tags": len(ids), "Aliases": aliases, "Implications": implications}
+	_, ids, global, aliases, implications, err := s.tagSvc().TagResetScope()
+	data := map[string]any{"Gallery": s.active().Name, "Tags": len(ids), "Global": len(global), "Aliases": aliases, "Implications": implications}
 	if err != nil {
 		data["Err"] = "Error: " + err.Error()
 	}
@@ -188,12 +188,12 @@ func (s *Server) resetTagsPost(w http.ResponseWriter, r *http.Request) {
 		writeInlineFlash(w, "err", "type-to-confirm name does not match")
 		return
 	}
-	ratingAliases, ids, _, _, err := s.tagSvc().TagResetScope()
+	ratingAliases, ids, global, _, _, err := s.tagSvc().TagResetScope()
 	if err != nil {
 		writeInlineFlash(w, "err", "Error: "+err.Error())
 		return
 	}
-	if len(ids) == 0 && len(ratingAliases) == 0 {
+	if len(ids) == 0 && len(ratingAliases) == 0 && len(global) == 0 {
 		writeInlineFlash(w, "ok", "No tags to reset.")
 		return
 	}
@@ -201,6 +201,11 @@ func (s *Server) resetTagsPost(w http.ResponseWriter, r *http.Request) {
 		for _, id := range ratingAliases {
 			if err := s.tagSvc().DeleteTag(id); err != nil {
 				logx.Warnf("delete tag %d: %v", id, err)
+			}
+		}
+		for _, id := range global {
+			if err := s.tagSvc().StripTagFromAllImages(id); err != nil {
+				logx.Warnf("strip tag %d: %v", id, err)
 			}
 		}
 		s.runDeleteTagsByIDs(ids)
@@ -573,15 +578,16 @@ func (s *Server) vacuumDBPost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Holds a job slot so an autotag cannot start before ReleaseAll and lose
-// its worker mid-inference.
+// Holds a job slot so no auto-tag call is in flight when the local worker
+// restarts.
 func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 	if err := s.jobs.Start(models.JobTypeFreeMemory); err != nil {
 		flashStatus(w, http.StatusConflict, "A job is running; try again when it finishes.")
 		return
 	}
 	defer s.jobs.Complete("Memory caches released.")
-	before := desktop.ProcStatus("self", "VmRSS")
+	_, worker := s.localWorkerRSS()
+	before := desktop.ProcStatus("self", "VmRSS") + worker.Total
 	ctxs := s.allContexts()
 	for _, cx := range ctxs {
 		if err := cx.ShrinkMemory(); errors.Is(err, db.ErrPoolBusy) {
@@ -591,7 +597,11 @@ func (s *Server) freeMemoryPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	debug.FreeOSMemory()
-	after := desktop.ProcStatus("self", "VmRSS")
+	if s.local != nil {
+		s.local.restart(s.peers.Supervisor)
+	}
+	_, worker = s.localWorkerRSS()
+	after := desktop.ProcStatus("self", "VmRSS") + worker.Total
 	if before > 0 && after > 0 && before > after {
 		writeInlineFlash(w, "ok", "Freed "+webui.HumanBytes(int64(before-after))+".")
 		return

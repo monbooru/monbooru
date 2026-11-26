@@ -24,6 +24,7 @@ import (
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/search"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 )
 
@@ -112,6 +113,7 @@ type detailData struct {
 	GenericMeta       []models.SDParam
 	MangaMeta         *models.MangaMetadata
 	IsManga           bool
+	Silent            bool
 	MisnamedExt       string
 	ResumePage        int
 	MangaHint         string
@@ -162,6 +164,7 @@ type detailData struct {
 	BoxW, BoxH int
 	// The thumbnail fills the box meanwhile.
 	Placeholder bool
+	PlaceFolder webui.FolderPicker
 }
 
 // External links go by sha because an image id can be reused after a delete.
@@ -301,6 +304,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		annotations []models.Annotation
 		sidebar     tagSidebar
 		lookupState lookupView
+		silent      []int64
 		prevID      *int64
 		nextID      *int64
 	)
@@ -329,6 +333,9 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if isManga {
 		wg.Go(func() { mangaMeta = loadMangaMeta(ctx, s.db(), id) })
+	}
+	if gallery.IsVideoType(img.FileType) {
+		wg.Go(func() { silent, _ = gallery.SilentVideos(s.db(), []int64{id}) })
 	}
 	if wantAdjacent {
 		wg.Go(func() {
@@ -451,6 +458,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 	data := detailData{
 		baseData:          s.base(r, "gallery", fmt.Sprintf("%s - %s", titleName, s.booruName())),
 		Image:             *img,
+		PlaceFolder:       s.folderPicker("place-image"),
 		Filename:          baseName,
 		ImageTags:         imageTags,
 		SDMeta:            sdMeta,
@@ -459,6 +467,7 @@ func (s *Server) detailHandler(w http.ResponseWriter, r *http.Request) {
 		GenericMeta:       genericMeta,
 		MangaMeta:         mangaMeta,
 		IsManga:           isManga,
+		Silent:            len(silent) > 0,
 		MisnamedExt:       misnamedExt,
 		MangaHint:         mangaHint,
 		ResumePage:        resumePage(img),

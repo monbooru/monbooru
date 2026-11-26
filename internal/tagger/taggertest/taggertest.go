@@ -31,6 +31,30 @@ type Worker struct {
 // each, until the test ends.
 func Use(t testing.TB, taggers map[string][]string) *Worker {
 	t.Helper()
+	return UsePool(t, taggers, tagger.WorkerDef{Name: "fake"})[0]
+}
+
+// UsePool makes the pool one worker per def, each holding the same
+// taggers; a def's URL and token are its worker's.
+func UsePool(t testing.TB, taggers map[string][]string, defs ...tagger.WorkerDef) []*Worker {
+	t.Helper()
+	out := make([]*Worker, len(defs))
+	for i := range defs {
+		out[i] = newWorker(t, taggers)
+		srv := httptest.NewServer(out[i])
+		t.Cleanup(srv.Close)
+		t.Cleanup(func() { close(out[i].stop) })
+		defs[i].URL, defs[i].Token = srv.URL, "tok"
+	}
+	p := tagger.NewPool("")
+	p.Set(defs)
+	p.Refresh(context.Background())
+	tagger.SetPool(p)
+	t.Cleanup(func() { tagger.SetPool(tagger.NewPool("")) })
+	return out
+}
+
+func newWorker(t testing.TB, taggers map[string][]string) *Worker {
 	f := &worker.Fake{Token: "tok", Info: worker.Info{Name: "fake", Slots: 2}, Labels: map[string]worker.Labels{}}
 	for name, labels := range taggers {
 		etag := fmt.Sprintf("%q", t.Name()+"/"+name+fmt.Sprint(labels))
@@ -52,16 +76,7 @@ func Use(t testing.TB, taggers map[string][]string) *Worker {
 		}
 		return out
 	}
-	w := &Worker{fake: f, stop: make(chan struct{})}
-	srv := httptest.NewServer(w)
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(w.stop) })
-	p := tagger.NewPool("")
-	p.Set([]tagger.WorkerDef{{Name: "fake", URL: srv.URL, Token: "tok"}})
-	p.Refresh(context.Background())
-	tagger.SetPool(p)
-	t.Cleanup(func() { tagger.SetPool(tagger.NewPool("")) })
-	return w
+	return &Worker{fake: f, stop: make(chan struct{})}
 }
 
 func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {

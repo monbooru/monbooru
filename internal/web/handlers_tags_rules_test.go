@@ -239,7 +239,7 @@ func TestTagRulesPanel_NamesWhyAPairedMonloaderDrawsNoSiteLanes(t *testing.T) {
 	}{
 		{"paused", true, "", "monloader paused", "paused, no site lanes"},
 		{"down", false, peer.ConnDown, "monloader unreachable", "unreachable, no site lanes"},
-		{"rejected", false, peer.ConnRejected, "monloader unreachable", "unreachable, no site lanes"},
+		{"rejected", false, peer.ConnRejected, "monloader auth rejected", "auth rejected, no site lanes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)

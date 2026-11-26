@@ -3,8 +3,10 @@ package web
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -74,8 +76,30 @@ func (s *Server) pairRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Scopes, req.Buttons = nil, nil
+		// Two machines under one name would take each other's place.
+		s.cfgMu.RLock()
+		listed := peer.FindWorker(s.cfg, req.WorkerName())
+		manual := listed != nil && listed.Manual
+		s.cfgMu.RUnlock()
+		var msg string
+		if manual {
+			msg = fmt.Sprintf("a worker named %s is already listed, added by address; set MONWORKER_NAME to another name", req.WorkerName())
+		} else if s.pairedWith(req.Paired()) {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			at, answers := s.pool.Answers(ctx, req.WorkerName())
+			cancel()
+			if answers {
+				msg = fmt.Sprintf("a worker named %s is already paired and answers at %s; set MONWORKER_NAME to another name", req.WorkerName(), at)
+			}
+		}
+		if msg != "" {
+			logx.Infof("pairing: refused %s from %s: %s", req.Paired(), session.ClientIP(r), msg)
+			pairRefuse(w, &pairing.Refusal{Status: http.StatusConflict, Code: "name_taken", Msg: msg})
+			return
+		}
 	}
 	req.Repair = s.pairedWith(req.Paired())
+	req.PrivateSource = privateSource(r)
 	req.Auto = s.autoApproves(r, req)
 	accepted, f := s.pairs.Offer(req)
 	if f != nil {
@@ -130,25 +154,54 @@ func (s *Server) pairTeardown(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, pairing.StatusBody{Status: pairing.Removed})
 }
 
+// A worker never calls monbooru but to pair, so at start it asks whether
+// its pairing still holds: a 401 tells it to offer again.
+func (s *Server) pairCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.pairCORS(w, r) {
+		return
+	}
+	secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.cfgMu.RLock()
+	var paired string
+	if tok := s.cfg.Auth.Tokens.ByHash(apitoken.Hash(secret)); tok != nil {
+		paired = tok.Paired
+	}
+	s.cfgMu.RUnlock()
+	if secret == "" || paired == "" {
+		pairRefuse(w, pairing.NoPairingToken())
+		return
+	}
+	// It also says where it listens now: a new port, or a new host.
+	var body pairing.RequestBody
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+	if u, err := url.Parse(body.URL); err != nil || u.Host == "" {
+		body.URL = ""
+	}
+	s.repointPeer(secret, body.URL, session.ClientIP(r))
+	contract.WriteJSON(w, http.StatusOK, pairing.StatusBody{Status: pairing.Approved})
+}
+
 // Any call carrying a peer's own token names where it is now, so a
 // recreated container's new IP is followed without a re-pair.
 func (s *Server) notePeerAddress(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			s.repointPeer(secret, session.ClientIP(r))
+			s.repointPeer(secret, "", session.ClientIP(r))
 		}
 		next(w, r)
 	}
 }
 
-func (s *Server) repointPeer(secret, source string) {
+// repointPeer moves the peer holding secret to advertised, else to the
+// address it has, on the host it called from.
+func (s *Server) repointPeer(secret, advertised, source string) {
 	s.cfgMu.RLock()
 	var app, was string
 	if tok := s.cfg.Auth.Tokens.ByHash(apitoken.Hash(secret)); tok != nil {
 		app, was = tok.Paired, tok.PeerURL
 	}
 	s.cfgMu.RUnlock()
-	moved := peer.CallbackURL(was, source)
+	moved := peer.CallbackURL(cmp.Or(advertised, was), source)
 	if app == "" || moved == was {
 		return
 	}
@@ -174,7 +227,7 @@ func (s *Server) mintPairedToken(req peer.Req) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	if req.Auto {
+	if req.Auto || s.win.approved(req.ID) {
 		s.win.record(req)
 	} else {
 		s.win.forget(req.Paired())

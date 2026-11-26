@@ -32,7 +32,9 @@ func TestSettleMessages(t *testing.T) {
 			summary string
 			settle  func(*jobs.Manager) (bool, error)
 		}{
-			{tc.summary, func(m *jobs.Manager) (bool, error) { return Settle(ctx, m, "x: ", "page ", 3, tc.skipped, tc.err) }},
+			{tc.summary, func(m *jobs.Manager) (bool, error) {
+				return Settle(ctx, m, "x: ", "page ", 3, Result{Skipped: tc.skipped}, tc.err)
+			}},
 			{tc.image, func(m *jobs.Manager) (bool, error) { return SettleImage(ctx, m, 7, tc.skipped, tc.err) }},
 		} {
 			m := jobs.NewManager()
@@ -45,5 +47,28 @@ func TestSettleMessages(t *testing.T) {
 			}
 		}
 		cancel()
+	}
+}
+
+func TestTheEndLineCountsEachWorkersImagesOnceThereAreTwo(t *testing.T) {
+	for _, tc := range []struct {
+		tagged map[string]int
+		want   string
+	}{
+		{nil, "auto-tagged 3 images"},
+		{map[string]int{"local": 3}, "auto-tagged 3 images"},
+		{map[string]int{"laptop": 1, "gpu-box": 1, "local": 1}, "auto-tagged 3 images (gpu-box 1, laptop 1, local 1)"},
+		{map[string]int{"laptop": 1, "gpu-box": 2}, "auto-tagged 3 images (gpu-box 2, laptop 1)"},
+	} {
+		m := jobs.NewManager()
+		if err := m.Start("autotag"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Settle(context.Background(), m, "", "", 3, Result{Tagged: tc.tagged}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := m.Get().Summary; got != tc.want {
+			t.Errorf("%v: %q, want %q", tc.tagged, got, tc.want)
+		}
 	}
 }

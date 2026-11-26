@@ -505,6 +505,52 @@ func TestMaintenanceDialogs_RedirectAPlainGETToTheMaintenanceSection(t *testing.
 	}
 }
 
+func TestResetTags_KeepsAGlobalTagOffEveryImage(t *testing.T) {
+	srv, first, second := twoGalleries(t)
+	svc := first.TagSvc
+	animation := mustTag(t, svc, "animation", first.GeneralCategoryID)
+	video := mustTag(t, svc, "video", first.GeneralCategoryID)
+	local := mustTag(t, svc, "localtag", first.GeneralCategoryID)
+	mustCreateAlias(t, svc, "anime", first.GeneralCategoryID, animation.ID)
+	mustAddImply(t, svc, animation.ID, video.ID)
+	postForm(t, srv, "/tags/global", url.Values{"ids": {fmt.Sprint(animation.ID)}})
+	settleJobs(t, srv)
+	img := seedImage(t, srv, "reset.png", 8, 8)
+	mustAddTag(t, svc, img, animation.ID, false, nil)
+	mustAddTag(t, svc, img, local.ID, false, nil)
+
+	rating := categoryIDByName(t, srv, "rating")
+	plain := countRows(t, first.DB, "tags WHERE is_alias = 0 AND is_global = 0 AND category_id != ?", rating)
+	w := do(srv, "GET", "/settings/maintenance/reset-tags", [2]string{"HX-Request", "true"})
+	mustCode(t, w, http.StatusOK)
+	wantIn(t, w.Body.String(), fmt.Sprintf("Deletes %d tags, 0 aliases and 0 implications, and takes the tags off every image. 2 global tags stay, off every image.", plain))
+
+	w = postForm(t, srv, "/settings/maintenance/reset-tags", url.Values{"confirm_name": {first.Name}})
+	wantIn(t, w.Body.String(), fmt.Sprintf("Resetting the tags: deleting %d tags.", plain))
+	settleJobs(t, srv)
+	if st := srv.jobs.Get(); st == nil || !strings.Contains(st.Summary, fmt.Sprintf("deleted %d tags", plain)) || strings.Contains(st.Summary, "skipped") {
+		t.Errorf("job = %+v, want %d tags deleted and none skipped", st, plain)
+	}
+	if n := countRows(t, first.DB, "image_tags WHERE image_id = ?", img); n != 0 {
+		t.Errorf("image rows left = %d, want none", n)
+	}
+	if n := countRows(t, first.DB, "tags WHERE is_global = 1 AND usage_count = 0"); n != 2 {
+		t.Errorf("global tags left at no usage = %d, want 2", n)
+	}
+	if got := aliasNames(t, first, "animation"); !slices.Equal(got, []string{"anime"}) {
+		t.Errorf("aliases of the global tag = %v, want anime", got)
+	}
+	if n := countRows(t, first.DB, "tag_implications"); n != 1 {
+		t.Errorf("implications left = %d, want the global one", n)
+	}
+	if n := countRows(t, first.DB, "tags WHERE id = ?", local.ID); n != 0 {
+		t.Error("the local tag survived the reset")
+	}
+	if !isGlobal(t, second, "animation") || !isGlobal(t, second, "video") {
+		t.Error("the other gallery lost a global tag")
+	}
+}
+
 func TestResetTags_TakesTheTypedGalleryNameAndKeepsOnlyTheRatings(t *testing.T) {
 	srv := newTestServer(t)
 	cx := srv.active()

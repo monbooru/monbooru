@@ -553,9 +553,9 @@ func TestSuggestTagsInCategory(t *testing.T) {
 	}
 
 	got := tagNames(results)
-	want := []string{"parasol", "parade", "comparable"}
+	want := []string{"parasol", "parade", "honored", "comparable"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("SuggestTags = %v, want %v (prefix matches in the named category by usage, then substring ones, no alias)", got, want)
+		t.Fatalf("SuggestTags = %v, want %v (prefix matches in the named category by usage, an alias standing for its tag, then substring ones)", got, want)
 	}
 	for _, r := range results {
 		if r.CategoryName != "character" {
@@ -3878,6 +3878,53 @@ func TestFoldedDuplicates_PlanDrivesFromThePairsUnderStaleStatistics(t *testing.
 	}
 }
 
+func TestAliasMatchFrom_PlanStartsFromTheAliases(t *testing.T) {
+	database, _ := setupTestDB(t)
+	for _, stat := range [][2]string{
+		{"idx_tags_alias_canonical", "13401 6 1"},
+		{"idx_tags_active_usage", "16595 6 1"},
+		{"idx_tags_active_name", "16595 1"},
+		{"idx_tags_name", "29996 2"},
+		{"sqlite_autoindex_tags_1", "29996 2 1"},
+	} {
+		if _, err := database.Write.Exec(`DELETE FROM sqlite_stat1 WHERE tbl = 'tags' AND idx = ?`, stat[0]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Write.Exec(`INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES ('tags', ?, ?)`, stat[0], stat[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn, err := database.Read.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(context.Background(), `ANALYZE sqlite_schema`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := conn.QueryContext(context.Background(), `EXPLAIN QUERY PLAN
+		SELECT c.id, MIN(a.name) FROM `+AliasMatchFrom+`
+		WHERE a.is_alias = 1 AND c.is_alias = 0 AND c.rejected = 0 AND c.usage_count > 0
+		  AND a.name LIKE 'x%' ESCAPE '\'
+		GROUP BY c.id ORDER BY c.usage_count DESC, c.name ASC LIMIT 10`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var steps []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		steps = append(steps, detail)
+	}
+	if plan := strings.Join(steps, "; "); !strings.HasPrefix(plan, "SCAN a USING COVERING INDEX idx_tags_alias_canonical") {
+		t.Errorf("plan = %q, want the alias index scanned first", plan)
+	}
+}
+
 func TestMergeTags_DropsTheAliasFoldedPairs(t *testing.T) {
 	for _, side := range []string{"old", "wide"} {
 		t.Run(side, func(t *testing.T) {
@@ -3944,5 +3991,80 @@ func TestDeleteTag_RefusesOnAFailedRatingRead(t *testing.T) {
 	}
 	if n != 1 {
 		t.Error("the canonical rating row was deleted")
+	}
+}
+
+func TestSuggestTagsShowsATagThroughItsAlias(t *testing.T) {
+	database, svc := setupTestDB(t)
+	general := generalCategoryID(t, svc)
+	character := categoryIDOf(t, svc, "character")
+
+	feline, _ := svc.GetOrCreateTag("feline", character)
+	kite, _ := svc.GetOrCreateTag("kite", general)
+	kitsune, _ := svc.GetOrCreateTag("kitsune", general)
+	gone, _ := svc.GetOrCreateTag("gone", general)
+	mustCreateAlias(t, svc, "kitty", general, feline.ID)
+	mustCreateAlias(t, svc, "kitten", general, feline.ID)
+	mustCreateAlias(t, svc, "big_feline", general, feline.ID)
+	mustCreateAlias(t, svc, "kit_fox", general, kitsune.ID)
+	mustCreateAlias(t, svc, "kit_gone", general, gone.ID)
+	if _, err := database.Write.Exec(`UPDATE tags SET stale = 1 WHERE name = 'kitten'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Write.Exec(`UPDATE tags SET rejected = 1 WHERE id = ?`, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i, tag := range []*models.Tag{feline, feline, feline, kite, kite, kitsune} {
+		img := insertTestImage(t, database, fmt.Sprintf("alias_suggest_%d", i))
+		mustAddTag(t, svc, img, tag.ID, false, nil)
+	}
+
+	type row struct{ Name, Category, ViaAlias string }
+	rows := func(prefix, category string) []row {
+		t.Helper()
+		got, err := svc.SuggestTags(prefix, category, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []row{}
+		for _, g := range got {
+			out = append(out, row{g.Name, g.CategoryName, g.ViaAlias})
+		}
+		return out
+	}
+
+	everyCategory := []row{{"feline", "character", "kitten"}, {"kite", "general", ""}, {"kitsune", "general", ""}}
+	for _, tc := range []struct {
+		prefix, category string
+		want             []row
+	}{
+		{"kit", "", everyCategory},
+		{"kit", "general", everyCategory},
+		{"kit", "character", []row{}},
+		{"fel", "", []row{{"feline", "character", ""}}},
+	} {
+		if got := rows(tc.prefix, tc.category); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("SuggestTags(%q, %q) = %v, want %v", tc.prefix, tc.category, got, tc.want)
+		}
+	}
+}
+
+func TestSuggestTagsKeepsRoomForEachTagAnAliasNames(t *testing.T) {
+	database, svc := setupTestDB(t)
+	general := generalCategoryID(t, svc)
+	crowded, _ := svc.GetOrCreateTag("crowded", general)
+	other, _ := svc.GetOrCreateTag("other", general)
+	for i := 0; i < 12; i++ {
+		mustCreateAlias(t, svc, fmt.Sprintf("zz_%02d", i), general, crowded.ID)
+	}
+	mustCreateAlias(t, svc, "zz_second", general, other.ID)
+	mustAddTag(t, svc, insertTestImage(t, database, "alias_room"), crowded.ID, false, nil)
+
+	got, err := svc.SuggestTags("zz", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "crowded" || got[0].ViaAlias != "zz_00" || got[1].Name != "other" || got[1].ViaAlias != "zz_second" {
+		t.Errorf("SuggestTags(zz) = %+v, want crowded through zz_00, then other through zz_second", got)
 	}
 }
