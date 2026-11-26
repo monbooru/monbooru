@@ -22,7 +22,9 @@ const (
 	booruRevokeNote = "This removes the Danbooru compatible endpoint: its addresses are disabled."
 )
 
-// tokenRevokeNotes is what revoking a token of each class also does.
+// tokenRevokeNotes is what revoking a token of each class also does. The
+// shared token table reads it as RevokeNotes; an app without classed
+// tokens passes none.
 func tokenRevokeNotes() map[string]string { return map[string]string{api.BooruClass: booruRevokeNote} }
 
 // The feature a token's class says manages it, or "" for one the

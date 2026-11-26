@@ -1,5 +1,4 @@
 {{define "webui/auth_tokens"}}
-{{/* RevokeNotes, optional, maps a token class to what revoking it also does. */}}
 <div id="auth-tokens"{{if .OOB}} hx-swap-oob="true"{{end}}>
   {{if .Tokens}}
   <div class="table-scroll">
