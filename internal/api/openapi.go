@@ -817,7 +817,7 @@ func buildSpec(baseURL string) map[string]any {
 				"get": op("Suggest tags for a word as typed", "suggestTags",
 					[]map[string]any{
 						galleryParam(),
-						queryParam("q", "The word typed. A category:name prefix naming an existing category narrows to it; any other prefix stays part of the name. Empty finds nothing."),
+						queryParam("q", "The word typed. A category:name prefix naming an existing category narrows to it, and a category with no name after it lists that category's most used tags; any other prefix stays part of the name. Empty finds nothing."),
 						queryParam("limit", "Results (default 10, max 50)"),
 					},
 					map[string]any{
