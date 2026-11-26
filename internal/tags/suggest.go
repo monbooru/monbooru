@@ -77,11 +77,16 @@ func (s *Service) SuggestTags(prefix, categoryName string, limit int) ([]models.
 }
 
 // SuggestTyped answers a word as it was typed. Only a real category splits
-// it ("nier:automata" is one tag name); that category comes back too.
+// it ("nier:automata" is one tag name); that category comes back too. A
+// failed category read is an error, not a whole-word search.
 func (s *Service) SuggestTyped(typed string, limit int) ([]models.Tag, string, error) {
-	category, name := "", typed
-	if f, err := SplitForm(s.db, typed); err == nil && f.CategoryID != 0 {
-		category, name = f.Category, f.Name
+	f, err := SplitForm(s.db, typed)
+	if err != nil {
+		return nil, "", err
+	}
+	category, name := "", f.Name
+	if f.CategoryID != 0 {
+		category = f.Category
 	}
 	ts, err := s.SuggestTags(name, category, limit)
 	return ts, category, err
