@@ -168,9 +168,9 @@ Feel free to ask questions or discuss your setup in [Discussions](https://github
 
 ## Acknowledgements
 
-These cover monbooru and its companion repos ([monloader](https://github.com/monbooru/monloader), [monsender](https://github.com/monbooru/monsender), [mondocs](https://github.com/monbooru/mondocs), [monbooru-plugins](https://github.com/monbooru/monbooru-plugins)).
+These cover monbooru and its companion repos ([monloader](https://github.com/monbooru/monloader), [monworker](https://github.com/monbooru/monworker), [monsender](https://github.com/monbooru/monsender), [mondocs](https://github.com/monbooru/mondocs), [monbooru-plugins](https://github.com/monbooru/monbooru-plugins)).
 
-Thanks to [@gary-host-laptop](https://github.com/gary-host-laptop) and [@CeareDelafont](https://github.com/CeareDelafont) for sustained contributions over time. Everyone credited in a release is listed in [CONTRIBUTORS](CONTRIBUTORS.md).
+Thanks to everyone listed in [CONTRIBUTORS](CONTRIBUTORS.md), whether they helped once or many times, and special thanks to [@gary-host-laptop](https://github.com/gary-host-laptop), [@CeareDelafont](https://github.com/CeareDelafont) and [@IkariDevGIT](https://github.com/IkariDevGIT) for their outstanding contributions.
 
 Thanks to tamaki for the mon-chan visuals.
 

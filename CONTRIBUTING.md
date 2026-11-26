@@ -314,7 +314,7 @@ config:
 flowchart LR
     ship(["`**Your report, request or code ships**`"]) --> log["`**Credited in that release's changelog**
     a thanks line linking the issue or pull request; a merged pull request keeps you as its author on dev`"]
-    log -->|"credited in several releases: a long-standing contributor"| ack(["`**A line in the README Acknowledgements**`"])
+    log -->|"outstanding contributions"| ack(["`**A line in the README Acknowledgements**`"])
 
     class ship,ack hub;
     class log step;
