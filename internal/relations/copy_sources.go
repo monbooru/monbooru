@@ -9,19 +9,23 @@ import (
 	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
+func copyableSourceRule(originalColOrPlaceholder string) string {
+	return `lower(s.site) != '` + contract.SourcePTR + `'
+	  AND NOT EXISTS (SELECT 1 FROM image_sources o
+	                  WHERE o.image_id = ` + originalColOrPlaceholder + ` AND o.site = s.site AND o.post_id = s.post_id)
+	  AND (s.url = '' OR NOT EXISTS (SELECT 1 FROM image_sources o
+	                                 WHERE o.image_id = ` + originalColOrPlaceholder + ` AND o.url = s.url))`
+}
+
 // A source the original already carries, by post or by url, is left alone:
 // its own row is the one a re-pull keeps up to date. A PTR origin is a
 // match for the duplicate's own file, so it stays there.
-const sourcesToCopyFrom = `
+var sourcesToCopyFrom = `
 	FROM image_sources s
 	JOIN dup_group_members m ON m.image_id = s.image_id
 	JOIN dup_groups g ON g.id = m.group_id
 	WHERE m.image_id != g.original_image_id
-	  AND lower(s.site) != '` + contract.SourcePTR + `'
-	  AND NOT EXISTS (SELECT 1 FROM image_sources o
-	                  WHERE o.image_id = g.original_image_id AND o.site = s.site AND o.post_id = s.post_id)
-	  AND (s.url = '' OR NOT EXISTS (SELECT 1 FROM image_sources o
-	                                 WHERE o.image_id = g.original_image_id AND o.url = s.url))`
+	  AND ` + copyableSourceRule("g.original_image_id")
 
 // SourceToCopy names a duplicate's origin and the member it comes from.
 type SourceToCopy struct {
