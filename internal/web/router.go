@@ -640,7 +640,7 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("GET /tags/{id}/ptr-lookup-preview", s.tagPtrLookupPreview)
 	rt.free("GET /tags/{id}/ptr-lookup-search", s.tagPtrLookupSearch)
 	rt.read("POST /tags/{id}/ptr-lookup", s.ptrLookupTagPost)
-	rt.read("GET /internal/tags/suggest", s.tagSuggest)
+	rt.read("GET "+tagSuggestRoute, s.tagSuggest)
 	rt.read("GET /internal/search/suggest", s.searchSuggest)
 	rt.read("GET /internal/search/ids", s.searchIDs)
 	rt.read("POST /internal/search/ids", s.searchIDs)

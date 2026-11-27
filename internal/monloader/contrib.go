@@ -148,7 +148,7 @@ func (l *Link) PTRUnattributed(rctx context.Context, tagSvc func() *tags.Service
 	}
 	var out []string
 	for _, t := range imageTags {
-		name := tags.FormName(t.Category, t.TagName)
+		name := contract.TagForm(t.Category, t.TagName)
 		if !known[name] || slices.ContainsFunc(ledger[t.TagID], isPTRSource) {
 			continue
 		}
@@ -279,7 +279,7 @@ type TagContribDiff struct {
 func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Service, id int64, tag *models.Tag) (*TagContribDiff, error) {
 	ctx, cancel := context.WithTimeout(rctx, 8*time.Second)
 	defer cancel()
-	tagForm := tags.FormName(tag.CategoryName, tag.Name)
+	tagForm := contract.TagForm(tag.CategoryName, tag.Name)
 	aliases, err := tagSvc().AliasesForTagIDs([]int64{id})
 	if err != nil {
 		return nil, err
@@ -296,18 +296,18 @@ func (l *Link) TagContribPreview(rctx context.Context, tagSvc func() *tags.Servi
 	localAlias, localImplied, localImpliedBy := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	var aliasForms []string
 	for _, a := range aliases[id] {
-		form := tags.FormName(a.CategoryName, a.Name)
+		form := contract.TagForm(a.CategoryName, a.Name)
 		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribSibling, A: form, B: tagForm, Rel: "alias of this"})
 		localAlias[form] = true
 		aliasForms = append(aliasForms, form)
 	}
 	for _, im := range impliedBy {
-		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: tags.FormName(im.ParentCategoryName, im.ParentName), B: tagForm, Rel: "implied by"})
-		localImpliedBy[tags.FormName(im.ParentCategoryName, im.ParentName)] = true
+		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: contract.TagForm(im.ParentCategoryName, im.ParentName), B: tagForm, Rel: "implied by"})
+		localImpliedBy[contract.TagForm(im.ParentCategoryName, im.ParentName)] = true
 	}
 	for _, im := range implications {
-		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: tagForm, B: tags.FormName(im.ImpliedCategoryName, im.ImpliedName), Rel: "implies"})
-		localImplied[tags.FormName(im.ImpliedCategoryName, im.ImpliedName)] = true
+		d.Local = append(d.Local, TagPairRow{Kind: contract.ContribParent, A: tagForm, B: contract.TagForm(im.ImpliedCategoryName, im.ImpliedName), Rel: "implies"})
+		localImplied[contract.TagForm(im.ImpliedCategoryName, im.ImpliedName)] = true
 	}
 	names := append([]string{tagForm}, aliasForms...)
 	names = names[:min(len(names), contract.MaxPTRTags)]

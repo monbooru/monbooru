@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -22,6 +24,38 @@ func TestTagSuggest_TargetParam(t *testing.T) {
 	body := w.Body.String()
 	wantIn(t, body, "sword")
 	wantNotIn(t, body, "shield")
+}
+
+// A tag field is the input right before a tag suggestion list, one tag or many.
+var tagFieldRe = regexp.MustCompile(`<input([^>]*)>\s*<div id="[^"]*" class="suggest-dropdown tag-suggest-dropdown">`)
+
+func TestTagsFieldsAskTheTagSuggestRoute(t *testing.T) {
+	srv := newTestServer(t)
+	image := seedImage(t, srv, "fields.png", 10, 10)
+	tag := mustTag(t, srv.tagSvc(), "field_tag", srv.active().GeneralCategoryID)
+	seen := map[string]bool{}
+	for _, page := range []string{"/", "/tags", "/images/" + strconv.FormatInt(image, 10), fmt.Sprintf("/tags/%d", tag.ID)} {
+		w := do(srv, "GET", page)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s = %d", page, w.Code)
+		}
+		for _, m := range tagFieldRe.FindAllStringSubmatch(w.Body.String(), -1) {
+			id := regexp.MustCompile(`id="([^"]*)"`).FindStringSubmatch(m[1])
+			if id == nil {
+				t.Fatalf("%s: a tag field with no id: %s", page, m[1])
+			}
+			seen[id[1]] = true
+			if !strings.Contains(m[1], `hx-get="`+tagSuggestRoute+`"`) {
+				t.Errorf("%s: %s asks elsewhere: %s", page, id[1], m[1])
+			}
+		}
+	}
+	for _, id := range []string{"tag-input", "batch-tag-input", "batch-strip-input", "batch-imply-target", "tag-create-name", "tag-reject-name",
+		"batch-alias-canon", "alias-create-canon", "detail-alias-canon", "implied-by-add-input", "implication-add-input"} {
+		if !seen[id] {
+			t.Errorf("no page rendered the tag field %s", id)
+		}
+	}
 }
 
 func TestTagSuggest_AnEmptyWordListsNothing(t *testing.T) {

@@ -995,7 +995,6 @@ dialog .series-input-wrap { max-width: 360px; }
 .add-cat-form .cat-hex { flex: none; }
 .add-cat-form #cat-order-reset { margin-left: auto; white-space: nowrap; }
 
-dialog:has(.suggest-dropdown) { overflow: visible; }
 dialog { overflow-wrap: anywhere; }
 dialog select { max-width: 100%; }
 
@@ -1436,7 +1435,6 @@ dialog select { max-width: 100%; }
 }
 .series-input-wrap input { width: 100%; }
 .suggest-dropdown.series-suggest-dropdown,
-.suggest-dropdown.tag-suggest-dropdown,
 #search-suggest {
   position: absolute;
   top: 100%;
@@ -1446,7 +1444,6 @@ dialog select { max-width: 100%; }
 }
 #search-suggest { z-index: 100; }
 .series-suggest-dropdown .suggest-list,
-.tag-suggest-dropdown .suggest-list,
 #search-suggest .suggest-list {
   position: static;
   width: 100%;
@@ -1507,45 +1504,6 @@ dialog select { max-width: 100%; }
 .dest-hints { display: flex; gap: 6px; flex-wrap: wrap; }
 .dest-hints > .field-hint { flex: 1 1 190px; }
 .name-preview-err { margin-top: 6px; font-size: 12px; color: var(--error); }
-
-.suggest-dropdown {
-  position: relative;
-}
-.suggest-list {
-  position: absolute;
-  top: 0;
-  left: 0;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  z-index: 200;
-  min-width: 220px;
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.suggest-list::-webkit-scrollbar { width: 8px; }
-.suggest-list::-webkit-scrollbar-thumb { background: var(--border); }
-.suggest-list::-webkit-scrollbar-track { background: transparent; }
-.suggest-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  padding: 3px 8px;
-  font-size: 12px;
-  text-align: left;
-}
-.suggest-item:hover { background: var(--bg-input); }
-.suggest-dropdown.suggest-fresh .suggest-item:hover { background: var(--bg-surface); }
-.suggest-name { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.suggest-description { flex: 1; color: var(--fg-dim); font-size: 11px; font-style: italic; overflow: hidden; text-overflow: ellipsis; }
-.suggest-count { color: var(--fg-dim); font-size: 11px; }
-.suggest-alias { color: var(--fg-dim); }
 
 .duplicates-section { margin-bottom: 16px; }
 .duplicates-section h3 { font-size: 13px; margin-bottom: 8px; }

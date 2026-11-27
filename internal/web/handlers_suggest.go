@@ -15,48 +15,30 @@ import (
 	"github.com/monbooru/monbooru/internal/searchkw"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tags"
 )
 
-type suggestItem struct {
-	Name        string
-	Alias       string
-	Color       string
-	Description string
-	UsageCount  int
-	ShowCount   bool
-}
+const tagSuggestRoute = "/internal/tags/suggest"
 
-func tagSuggestItems(ts []models.Tag) []suggestItem {
-	items := make([]suggestItem, len(ts))
+func tagSuggestItems(ts []models.Tag) []webui.SuggestItem {
+	items := make([]webui.SuggestItem, len(ts))
 	for i, t := range ts {
-		items[i] = suggestItem{Name: t.Name, Alias: t.ViaAlias, Color: t.CategoryColor, UsageCount: t.UsageCount, ShowCount: true}
+		items[i] = webui.SuggestItem{Name: t.Name, Alias: t.ViaAlias, Color: t.CategoryColor, UsageCount: t.UsageCount, ShowCount: true}
 	}
 	return items
 }
 
-func qualifySearchSuggestions(ts []models.Tag, typedCategory string) {
-	for i := range ts {
-		t := &ts[i]
-		switch {
-		case typedCategory != "" && t.ViaAlias == "":
-			t.Name = typedCategory + ":" + t.Name
-		case t.CategoryName != "" && t.CategoryName != "general":
-			t.Name = t.CategoryName + ":" + t.Name
-		}
-	}
-}
-
 // attr and onclick become HTMLAttr unescaped: only ever pass constants.
-func (s *Server) renderSuggestList(w http.ResponseWriter, attr, onclick string, items []suggestItem) {
-	s.renderTemplate(w, "partials/suggest_list.html", map[string]any{
-		"Attr":    template.HTMLAttr(attr),
-		"OnClick": template.HTMLAttr(onclick),
-		"Items":   items,
+func (s *Server) renderSuggestList(w http.ResponseWriter, attr, onclick string, items []webui.SuggestItem) {
+	s.renderTemplate(w, "webui/suggest_list", webui.SuggestList{
+		Attr:    template.HTMLAttr(attr),
+		OnClick: template.HTMLAttr(onclick),
+		Items:   items,
 	})
 }
 
-func (s *Server) renderSearchSuggest(w http.ResponseWriter, rows []suggestItem) {
+func (s *Server) renderSearchSuggest(w http.ResponseWriter, rows []webui.SuggestItem) {
 	s.renderSuggestList(w, `data-tag-name`, `onclick="applySearchSuggest(this.dataset.tagName)"`, rows)
 }
 
@@ -83,9 +65,9 @@ func (s *Server) renderLabelSuggest(w http.ResponseWriter, r *http.Request, quer
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	items := make([]suggestItem, len(labels))
+	items := make([]webui.SuggestItem, len(labels))
 	for i, lbl := range labels {
-		items[i] = suggestItem{Name: lbl}
+		items[i] = webui.SuggestItem{Name: lbl}
 	}
 	s.renderSuggestList(w, `data-series`, `onclick="applyLabelSuggest(this, 'series')"`, items)
 }
@@ -281,13 +263,7 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only a real category splits: "nier:automata" is one tag name.
-	catName, tagPrefix := "", prefix
-	if f, err := tags.SplitForm(s.db(), prefix); err == nil && f.CategoryID != 0 {
-		catName, tagPrefix = f.Category, f.Name
-	}
-
-	suggestions, _ := s.tagSvc().SuggestTags(tagPrefix, catName, 10)
+	suggestions, catName, _ := s.tagSvc().SuggestTyped(prefix, 10)
 	if q.Has("name") {
 		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool {
 			return t.CategoryName == "rating" || t.ViaAlias != ""
@@ -300,17 +276,9 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 	if q.Has("canonical_id") || q.Has("target") {
 		ambiguous = s.ambiguousGeneralNames(suggestions)
 	}
-	for i := range suggestions {
-		t := &suggestions[i]
-		switch {
-		case catName != "" && t.ViaAlias == "":
-			t.Name = catName + ":" + t.Name
-		case t.CategoryName != "" && (t.CategoryName != "general" || ambiguous[t.Name]):
-			t.Name = t.CategoryName + ":" + t.Name
-		}
-	}
+	tags.QualifySuggestions(suggestions, catName, ambiguous)
 
-	s.renderSuggestList(w, `data-tag-name`, `onclick="applyTagSuggest(this)"`, tagSuggestItems(suggestions))
+	s.renderTemplate(w, "webui/suggest_list", webui.TagSuggestList(tagSuggestItems(suggestions)))
 }
 
 // Beyond this the id list outgrows what a batch POST can usefully carry.
@@ -395,7 +363,7 @@ func (s *Server) searchSuggest(w http.ResponseWriter, r *http.Request) {
 
 	suggestions, _ := search.SuggestTagsWithFilter(s.source(), contextExpr, prefix, catFilter, 10)
 
-	qualifySearchSuggestions(suggestions, catFilter)
+	tags.QualifySuggestions(suggestions, catFilter, nil)
 
 	if alreadyTyped := alreadyTypedTags(contextTokens); len(alreadyTyped) > 0 {
 		out := suggestions[:0]
@@ -424,7 +392,7 @@ func suggestValuePrefix(key, val string) string {
 }
 
 func (s *Server) renderSystemSuggest(w http.ResponseWriter, rest string) {
-	var rows []suggestItem
+	var rows []webui.SuggestItem
 	if colonIdx := strings.IndexByte(rest, ':'); colonIdx >= 0 {
 		key := strings.ToLower(rest[:colonIdx])
 		rows = s.systemSuggestLevel2(key, suggestValuePrefix(key, rest[colonIdx+1:]))
@@ -438,13 +406,13 @@ func (s *Server) renderSystemSuggest(w http.ResponseWriter, rest string) {
 	s.renderSearchSuggest(w, rows)
 }
 
-func (s *Server) systemSuggestLevel1(prefix string) []suggestItem {
-	var rows []suggestItem
+func (s *Server) systemSuggestLevel1(prefix string) []webui.SuggestItem {
+	var rows []webui.SuggestItem
 	for _, kw := range searchkw.Keywords {
 		if !strings.HasPrefix(kw, prefix) {
 			continue
 		}
-		rows = append(rows, suggestItem{
+		rows = append(rows, webui.SuggestItem{
 			Name:        kw + ":",
 			Description: searchkw.Descriptions[kw],
 		})
@@ -456,7 +424,7 @@ func (s *Server) systemSuggestLevel1(prefix string) []suggestItem {
 		if !strings.HasPrefix(cat.Name, prefix) {
 			continue
 		}
-		rows = append(rows, suggestItem{
+		rows = append(rows, webui.SuggestItem{
 			Name:        cat.Name + ":",
 			Color:       cat.Color,
 			Description: "tag category",
@@ -465,14 +433,14 @@ func (s *Server) systemSuggestLevel1(prefix string) []suggestItem {
 	return rows
 }
 
-func expansionRows(key, valPrefix string) []suggestItem {
+func expansionRows(key, valPrefix string) []webui.SuggestItem {
 	descs := searchkw.ExpansionDescriptions[key]
-	var rows []suggestItem
+	var rows []webui.SuggestItem
 	for _, exp := range searchkw.Expansions[key] {
 		if !strings.HasPrefix(exp, valPrefix) {
 			continue
 		}
-		rows = append(rows, suggestItem{
+		rows = append(rows, webui.SuggestItem{
 			Name:        key + ":" + exp,
 			Description: descs[exp],
 		})
@@ -481,25 +449,25 @@ func expansionRows(key, valPrefix string) []suggestItem {
 }
 
 // Quoted so a multi-word label stays one parser token.
-func quotedSDLabelRows(key string, labels []string) []suggestItem {
-	rows := make([]suggestItem, 0, len(labels))
+func quotedSDLabelRows(key string, labels []string) []webui.SuggestItem {
+	rows := make([]webui.SuggestItem, 0, len(labels))
 	for _, lbl := range labels {
-		rows = append(rows, suggestItem{
+		rows = append(rows, webui.SuggestItem{
 			Name: key + `:"` + search.QuoteValue(lbl) + `"`,
 		})
 	}
 	return rows
 }
 
-func (s *Server) systemSuggestLevel2(key, valPrefix string) []suggestItem {
+func (s *Server) systemSuggestLevel2(key, valPrefix string) []webui.SuggestItem {
 	switch key {
 	case "cat":
-		return s.categoryValueRows(valPrefix, func(cat systemCategoryRow) suggestItem {
-			return suggestItem{Name: "cat:" + cat.Name, Color: cat.Color}
+		return s.categoryValueRows(valPrefix, func(cat systemCategoryRow) webui.SuggestItem {
+			return webui.SuggestItem{Name: "cat:" + cat.Name, Color: cat.Color}
 		})
 	case "tagcount":
-		return append(expansionRows(key, valPrefix), s.categoryValueRows(valPrefix, func(cat systemCategoryRow) suggestItem {
-			return suggestItem{Name: "tagcount:" + cat.Name + "=", Color: cat.Color, Description: "number of " + cat.Name + " tags"}
+		return append(expansionRows(key, valPrefix), s.categoryValueRows(valPrefix, func(cat systemCategoryRow) webui.SuggestItem {
+			return webui.SuggestItem{Name: "tagcount:" + cat.Name + "=", Color: cat.Color, Description: "number of " + cat.Name + " tags"}
 		})...)
 	case "collection":
 		return quotedSDLabelRows("collection", s.queryCollectionLabels(valPrefix, 10))
@@ -539,7 +507,7 @@ func (s *Server) systemSuggestLevel2(key, valPrefix string) []suggestItem {
 	}
 	if s.categoryExists(key) {
 		suggestions, _ := search.SuggestTagsWithFilter(s.source(), nil, valPrefix, key, 10)
-		qualifySearchSuggestions(suggestions, key)
+		tags.QualifySuggestions(suggestions, key, nil)
 		return tagSuggestItems(suggestions)
 	}
 	return nil
@@ -550,8 +518,8 @@ type systemCategoryRow struct {
 	Color string
 }
 
-func (s *Server) categoryValueRows(prefix string, row func(systemCategoryRow) suggestItem) []suggestItem {
-	var rows []suggestItem
+func (s *Server) categoryValueRows(prefix string, row func(systemCategoryRow) webui.SuggestItem) []webui.SuggestItem {
+	var rows []webui.SuggestItem
 	for _, cat := range s.systemCategoryRows() {
 		if strings.HasPrefix(cat.Name, prefix) {
 			rows = append(rows, row(cat))

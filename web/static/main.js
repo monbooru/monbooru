@@ -2789,44 +2789,6 @@ function lastWordIndex(words) {
   return -1;
 }
 
-function suggestInputOf(btn) {
-  var dd = btn.closest('.suggest-dropdown');
-  var input = dd && dd.parentElement && dd.parentElement.querySelector('input[type="text"]');
-  if (!input) return null;
-  dd.innerHTML = '';
-  return input;
-}
-
-// The word the caret sits in or at the end of; an input keeps its caret
-// while a click on a suggestion has the focus.
-function wordAtCaret(input) {
-  var v = input.value;
-  var at = input.selectionStart == null ? v.length : input.selectionStart;
-  var start = at, end = at;
-  while (start > 0 && !/\s/.test(v[start - 1])) start--;
-  while (end < v.length && !/\s/.test(v[end])) end++;
-  return {start: start, end: end, word: v.slice(start, end)};
-}
-
-function applyTagSuggest(btn) {
-  var tagName = btn.dataset.tagName;
-  if (!tagName) return;
-  var input = suggestInputOf(btn);
-  if (!input) return;
-  if (input.dataset.multiTags) {
-    var w = wordAtCaret(input);
-    var after = input.value.slice(w.end);
-    if (!/^\s/.test(after)) after = ' ' + after;
-    input.value = input.value.slice(0, w.start) + tagName + after;
-    input.focus();
-    var caret = w.start + tagName.length + 1;
-    input.setSelectionRange(caret, caret);
-    return;
-  }
-  input.value = tagName;
-  input.focus();
-}
-
 function applyLabelSuggest(btn, key) {
   var label = btn.dataset[key];
   if (label == null) return;
@@ -3225,13 +3187,6 @@ function openBatchDialog(prefix, scope, opts) {
   if (focusEl) focusEl.focus();
 }
 
-function clearSlots() {
-  for (var i = 0; i < arguments.length; i++) {
-    var el = document.getElementById(arguments[i]);
-    if (el) el.innerHTML = '';
-  }
-}
-
 // A suggest still in its debounce at submit lands after the answer and paints
 // over it; these inputs keep focus, so the focus check alone misses it.
 function disarmSuggest(inputId) {
@@ -3391,10 +3346,8 @@ function cancelJobStatus() {
   postForm('/internal/job/cancel');
 }
 
-// blurOnSubmit: after Enter the arrow keys drive the gallery, not the
-// input. clearOnEmpty: drop a swap landing on an input emptied by an add,
-// which keeps focus; label inputs list on an empty prefix on purpose.
-var suggestPairs = {
+// Label inputs list on an empty prefix on purpose, so they are not clearOnEmpty.
+Object.assign(suggestPairs, {
   'search-suggest': {input: 'search-input', blurOnSubmit: true, clearOnEmpty: true},
   'tag-suggest-dropdown': {input: 'tag-input', clearOnEmpty: true},
   'batch-tag-suggest': {input: 'batch-tag-input', clearOnEmpty: true},
@@ -3412,51 +3365,6 @@ var suggestPairs = {
   'implication-add-suggest': {input: 'implication-add-input', clearOnEmpty: true},
   'implied-by-add-suggest': {input: 'implied-by-add-input', clearOnEmpty: true},
   'ptr-lookup-suggest': {input: 'ptr-lookup-as', clearOnEmpty: true},
-};
-
-var suggestDropdownByInput = {};
-for (var _suggestID in suggestPairs) suggestDropdownByInput[suggestPairs[_suggestID].input] = _suggestID;
-
-// Resolved per event and delegated to document: some inputs live in
-// re-rendered fragments, where listeners on the first nodes would be
-// orphaned.
-document.addEventListener('click', function(e) {
-  for (var ddId in suggestPairs) {
-    var dd = document.getElementById(ddId);
-    if (dd && !dd.contains(e.target) && e.target.id !== suggestPairs[ddId].input) {
-      dd.innerHTML = '';
-    }
-  }
-});
-
-document.addEventListener('submit', function(e) {
-  for (var ddId in suggestPairs) {
-    var input = document.getElementById(suggestPairs[ddId].input);
-    if (!input || e.target !== input.form) continue;
-    clearSlots(ddId);
-    if (suggestPairs[ddId].blurOnSubmit) input.blur();
-  }
-});
-
-// A late response can land after a submit or a focus move, so it is dropped
-// unless the input still has focus. suggest-fresh holds off :hover until the
-// mouse moves, or the item under a still cursor looks picked.
-document.addEventListener('htmx:afterSwap', function(e) {
-  var pair = suggestPairs[e.target.id];
-  if (!pair) return;
-  var input = document.getElementById(pair.input);
-  if (document.activeElement !== input || (pair.clearOnEmpty && input.value === '')) { e.target.innerHTML = ''; return; }
-  e.target.classList.add('suggest-fresh');
-  e.target.addEventListener('mousemove', clearSuggestFresh, {once: true});
-});
-
-// Suggest endpoints answer 204 on no match, and htmx swaps nothing on a
-// 204, which would leave stale matches showing.
-document.addEventListener('htmx:afterRequest', function(e) {
-  if (!e.detail || !e.detail.elt) return;
-  var ddId = suggestDropdownByInput[e.detail.elt.id];
-  if (!ddId) return;
-  if (e.detail.xhr && e.detail.xhr.status === 204) clearSlots(ddId);
 });
 
 function mergeChoiceItem(name, value, checked, decorate) {
@@ -3472,10 +3380,6 @@ function mergeChoiceItem(name, value, checked, decorate) {
   decorate(label);
   li.appendChild(label);
   return li;
-}
-
-function clearSuggestFresh(e) {
-  e.currentTarget.classList.remove('suggest-fresh');
 }
 
 

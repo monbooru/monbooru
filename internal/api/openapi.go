@@ -813,6 +813,26 @@ func buildSpec(baseURL string) map[string]any {
 						"409": resp("The name already names a tag with image_tags rows, merge it instead; or an alias of another tag, repoint it instead; or rejected for a rejected tag", "#/components/schemas/Error"),
 					}),
 			},
+			"/tags/suggest": map[string]any{
+				"get": op("Suggest tags for a word as typed", "suggestTags",
+					[]map[string]any{
+						galleryParam(),
+						queryParam("q", "The word typed. A category:name prefix naming an existing category narrows to it, and a category with no name after it lists that category's most used tags; any other prefix stays part of the name. Empty finds nothing."),
+						queryParam("limit", "Results (default 10, max 50)"),
+					},
+					map[string]any{
+						"200": map[string]any{"description": "Tags whose name or an alias of theirs starts with q, most used first, as the web's tag fields list them", "content": map[string]any{"application/json": map[string]any{"schema": objectSchema(nil, map[string]any{
+							"results": map[string]any{"type": "array", "items": objectSchema(nil, map[string]any{
+								"name":        map[string]any{"type": "string", "description": "As it would be typed: category:name under the category typed or any but general, else the bare name"},
+								"category":    map[string]any{"type": "string"},
+								"color":       map[string]any{"type": "string", "description": "The category's colour"},
+								"usage_count": map[string]any{"type": "integer"},
+								"alias":       map[string]any{"type": "string", "description": "The alias q matched, when it matched that and not the tag"},
+							})},
+						})}}},
+						"500": resp("The tags could not be read", "#/components/schemas/Error"),
+					}),
+			},
 			"/tags/resolve": map[string]any{
 				"post": opBody("What the gallery does with each name on arrival", "resolveTags",
 					[]map[string]any{galleryParam()},

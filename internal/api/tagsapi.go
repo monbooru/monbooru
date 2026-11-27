@@ -3,6 +3,7 @@ package api
 import (
 	"cmp"
 	"net/http"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/tags"
@@ -59,6 +60,28 @@ func (h *Handler) getTag(w http.ResponseWriter, r *http.Request) {
 		distinct = append(distinct, distinctRef{ID: p.ID, Category: p.Category})
 	}
 	contract.WriteJSON(w, http.StatusOK, tagDetailResponse{tagResponse: toTagResponse(t), Note: note.Body, Links: note.Links, DistinctFrom: distinct})
+}
+
+// What the web's tag fields suggest, for a client with tag fields of its own.
+func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
+	g, ok := h.resolveGallery(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	_, limit := contract.PageParams("", q.Get("limit"), contract.TagSuggestLimit, contract.TagSuggestMax)
+	out := []contract.TagSuggestion{}
+	if typed := strings.TrimSpace(q.Get("q")); typed != "" {
+		found, category, err := g.TagSvc.SuggestTyped(typed, limit)
+		if serverError(w, err) {
+			return
+		}
+		tags.QualifySuggestions(found, category, nil)
+		for _, t := range found {
+			out = append(out, contract.TagSuggestion{Name: t.Name, Category: t.CategoryName, Color: t.CategoryColor, UsageCount: t.UsageCount, Alias: t.ViaAlias})
+		}
+	}
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
 func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {

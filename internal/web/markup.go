@@ -8,6 +8,7 @@ import (
 
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/markup"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 )
 
 // One batched read per kind, not one per reference: a page of labelled
@@ -23,7 +24,7 @@ func (s *Server) resolveMarkup(refs markup.Refs) markup.Resolver {
 				Known: target.Found,
 			}
 			if target.Found {
-				ref.Color = categoryColor(target.Color)
+				ref.Color = string(webui.CategoryColor(target.Color))
 			}
 			res.Tags[name] = ref
 		}

@@ -486,3 +486,60 @@ func TestResolveTags_SaysWhatArrivesAsWhat(t *testing.T) {
 	}
 	apiJSON(t, env, "POST", "/api/v1/tags/resolve", map[string]any{"names": []string{}}, http.StatusBadRequest)
 }
+
+func TestSuggestTags(t *testing.T) {
+	env := newTestEnv(t)
+	for i, set := range [][]string{{"blue_eyes", "blue_sky", "artist:user_a", "nier:automata"}, {"blue_eyes"}} {
+		id := env.createTestImage(t, fmt.Sprintf("suggest_%d.png", i), 10, 10)
+		body, _ := json.Marshal(map[string]any{"tags": set})
+		mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", id), body), http.StatusOK)
+	}
+	sky := apiJSON(t, env, "GET", "/api/v1/tags?q=blue_sky&type=tag", nil, http.StatusOK)["results"].([]any)[0].(map[string]any)
+	apiJSON(t, env, "POST", "/api/v1/tags/aliases", map[string]any{"name": "sky_blue", "canonical_id": sky["id"]}, http.StatusCreated)
+
+	type row struct{ Name, Category, Alias string }
+	cases := []struct {
+		name, query string
+		want        []row
+	}{
+		{"most used first, general names bare", "q=blue", []row{{"blue_eyes", "general", ""}, {"blue_sky", "general", ""}}},
+		{"another category spelled out", "q=user", []row{{"artist:user_a", "artist", ""}}},
+		{"a typed category narrows to it", "q=artist:us", []row{{"artist:user_a", "artist", ""}}},
+		{"a typed category with no match", "q=artist:blue", nil},
+		{"a bare category lists its tags", "q=artist:", []row{{"artist:user_a", "artist", ""}}},
+		{"a prefix naming no category stays in the name", "q=nier:a", []row{{"nier:automata", "general", ""}}},
+		{"an alias finds its tag", "q=sky_", []row{{"blue_sky", "general", "sky_blue"}}},
+		{"the limit caps the list", "q=blue&limit=1", []row{{"blue_eyes", "general", ""}}},
+		{"a blank word finds nothing", "q=+", nil},
+		{"no word finds nothing", "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := env.do("GET", "/api/v1/tags/suggest?"+c.query)
+			mustCode(t, w, http.StatusOK)
+			var page struct {
+				Results []struct {
+					Name       string `json:"name"`
+					Category   string `json:"category"`
+					Color      string `json:"color"`
+					UsageCount int    `json:"usage_count"`
+					Alias      string `json:"alias"`
+				} `json:"results"`
+			}
+			mustDecode(t, w, &page)
+			if page.Results == nil {
+				t.Fatalf("results = null, want a list: %s", w.Body.String())
+			}
+			var got []row
+			for _, r := range page.Results {
+				if r.Color == "" || r.UsageCount == 0 {
+					t.Errorf("%s carries no colour or count: %+v", r.Name, r)
+				}
+				got = append(got, row{r.Name, r.Category, r.Alias})
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
