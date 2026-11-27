@@ -740,6 +740,22 @@ func TestListTags_All(t *testing.T) {
 	_ = tags
 }
 
+func TestListTags_SkipCountKeepsThePage(t *testing.T) {
+	_, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	mustTag(t, svc, "skip_a", catID)
+	mustTag(t, svc, "skip_b", catID)
+
+	filter := TagFilter{Prefix: "skip_", Limit: 100, ShowZero: true}
+	counted, total := mustListTags(t, svc, filter)
+	filter.SkipCount = true
+	skipped, skippedTotal := mustListTags(t, svc, filter)
+	if total != 2 || skippedTotal != 0 || len(skipped) != len(counted) {
+		t.Errorf("counted %d rows of %d, skipped %d rows of %d; want the same rows, totals 2 and 0",
+			len(counted), total, len(skipped), skippedTotal)
+	}
+}
+
 func TestListTags_WithPrefix(t *testing.T) {
 	_, svc := setupTestDB(t)
 	catID := generalCategoryID(t, svc)
@@ -806,6 +822,19 @@ func TestListTags_WithCategoryFilter(t *testing.T) {
 		t.Errorf("category filter total = %d, want 1", total)
 	}
 	_ = tags
+}
+
+func TestListTags_ExcludeCategory(t *testing.T) {
+	_, svc := setupTestDB(t)
+	catID := generalCategoryID(t, svc)
+	custom, _ := svc.CreateCategory("custom_exclude", "#000000")
+	mustTag(t, svc, "excl_kept", catID)
+	mustTag(t, svc, "excl_left", custom.ID)
+
+	tags, _ := mustListTags(t, svc, TagFilter{Prefix: "excl_", ExcludeCategoryID: &custom.ID, Limit: 100, ShowZero: true})
+	if len(tags) != 1 || tags[0].Name != "excl_kept" {
+		t.Errorf("excluding a category listed %v, want only excl_kept", tags)
+	}
 }
 
 func TestListTags_SortByUsage(t *testing.T) {

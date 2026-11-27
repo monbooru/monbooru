@@ -525,6 +525,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("DELETE /settings/auth/tokens/{id}", s.settingsTokenRevoke)
 	rt.free("GET /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesGet)
 	rt.free("POST /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesPost)
+	rt.free("POST /settings/auth/booru-endpoint", s.settingsBooruEndpointCreate)
+	rt.free("DELETE /settings/auth/booru-endpoint", s.settingsBooruEndpointRemove)
+	rt.free("POST /settings/auth/booru-gallery", s.settingsBooruGalleryPost)
 	rt.read("PATCH /settings/categories/{id}", s.updateCategoryPatch)
 	rt.free("POST /settings/schedule", s.settingsSchedulePost)
 	rt.free("POST /settings/schedule/run", s.settingsScheduleRunPost)
@@ -688,7 +691,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	api.New(s.cfgSnapshot, s.jobs, s.apiResolver, Version).WithGalleryLock(func() func() {
 		s.set.RLock()
 		return s.set.RUnlock
-	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).Mount(apiMux)
+	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).WithFavicon(func() string {
+		return themeFaviconURL(s.activeTheme())
+	}).Mount(apiMux)
 	// The exact pairing routes above answer ahead of this subtree, so
 	// they skip notePeerAddress: none of them may move a peer.
 	apiHandler := s.notePeerAddress(apiMux.ServeHTTP)
@@ -698,6 +703,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		rt.read(method+" /api/v1/", apiHandler)
 	}
+	// Read-only and keyed by its path, so no peer to note. Free: the layer
+	// takes the gallery lock itself.
+	rt.free("GET "+api.BooruPrefix, apiMux.ServeHTTP)
 }
 
 func (s *Server) allContexts() []*library.Gallery {
@@ -719,7 +727,7 @@ func isNoisyPath(path string) bool {
 		"/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status":
 		return true
 	}
-	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/")
+	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/") || api.IsBooruFile(path)
 }
 
 // Stamped by the outermost middleware so the footer's load time covers
@@ -736,10 +744,11 @@ func requestStartFromContext(ctx context.Context) time.Time {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(context.WithValue(r.Context(), requestStartKey{}, time.Now()))
+		path := api.RedactBooruPath(r.URL.Path)
 		if isNoisyPath(r.URL.Path) {
-			logx.Debugf("%s %s", r.Method, r.URL.Path)
+			logx.Debugf("%s %s", r.Method, path)
 		} else {
-			logx.Infof("%s %s", r.Method, r.URL.Path)
+			logx.Infof("%s %s", r.Method, path)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -962,7 +971,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 	// SQLite reuses the highest id once its row is deleted, so a
 	// thumbnail URL can come back with new bytes.
-	setGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
+	api.SetGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
 	http.ServeFile(w, r, fullPath)
 }
 
@@ -1239,7 +1248,7 @@ func (s *Server) planMangaPage(
 	}
 	// The archive's mtime, not the page's: every hit touches the page to keep
 	// it cached, which would make each ETag new.
-	setGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
 	return page, true
 }
 
@@ -1283,21 +1292,17 @@ func (s *Server) planImageBytes(w http.ResponseWriter, r *http.Request, scaled b
 			w.Header().Add("Vary", "Accept")
 		}
 		if past || (negotiated && !acceptsMediaType(r.Header.Get("Accept"), gallery.MIMEForFileType(fileType))) {
-			maxDim := 0
-			if past {
-				maxDim = gallery.ViewMaxDim
-			}
-			rendition, err := gallery.EnsureViewRendition(canonPath, cx.ThumbnailsPath, id, fileType, maxDim)
+			rendition, err := gallery.ViewRenditionFor(canonPath, cx.ThumbnailsPath, id, fileType, int(width.Int64), int(height.Int64))
 			if err != nil {
 				logx.Warnf("view rendition for image %s: %v", idStr, err)
 			} else {
-				setGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
+				api.SetGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
 				w.Header().Set("Content-Type", "image/jpeg")
 				return rendition, true
 			}
 		}
 	}
-	setGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
 	if ct := gallery.MIMEForFileType(fileType); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
@@ -1317,17 +1322,6 @@ func acceptsMediaType(accept, mediaType string) bool {
 		return err == nil && q > 0
 	}
 	return false
-}
-
-// The gallery is in the tag because /images/{id} URLs repeat across galleries,
-// and the mtime is in nanoseconds so two rewrites in a second differ.
-func setGalleryScopedCache(w http.ResponseWriter, gallery, id, path string) {
-	w.Header().Set("Cache-Control", "private, no-cache")
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%d"`, gallery, id, info.ModTime().UnixNano()))
 }
 
 func (s *Server) RestartRequested() bool { return s.restart.Load() }

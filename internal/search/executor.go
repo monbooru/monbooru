@@ -18,7 +18,7 @@ import (
 
 type Query struct {
 	Expr        Expr
-	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity"
+	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity" | "id"
 	Order       string // "asc" | "desc"
 	RandomSeed  int64
 	Page        int // 1-based
@@ -242,7 +242,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			from = cmp.Or(q.After, q.Before)
 		}
 		residual, residualArgs := buildWherePerRow(q.Expr, src)
-		w := newTagWalk(database, walkLegs, up, walkStart(from, up))
+		w := newTagWalk(database, walkLegs, up, idBoundStart(q.Expr, up, walkStart(from, up)))
 		if images, walked, err = walkPage(ctx, database, w, residual, residualArgs, limit); err != nil {
 			return nil, err
 		}
@@ -1247,6 +1247,9 @@ func buildOrder(sort, order string, randomSeed int64) string {
 		// total.
 		dir := sqlDir(order, "ASC")
 		return "ORDER BY i.series " + dir + ", i.series_order IS NULL, i.series_order " + dir + ", i.id " + dir
+	case "id":
+		// The Danbooru layer pages by id, as Danbooru does.
+		return "ORDER BY i.id " + sqlDir(order, "DESC")
 	case "random":
 		if randomSeed != 0 {
 			// %d emits only digits, so the seed interpolation is

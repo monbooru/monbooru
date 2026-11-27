@@ -417,7 +417,7 @@ func buildSpec(baseURL string) map[string]any {
 					[]map[string]any{
 						galleryParam(),
 						queryParam("q", "Search query (tag list, filters, wildcards)"),
-						queryParam("sort", "Sort field: newest, filesize, order, random, similarity (ranks by tag overlap with the image a similar: term names; newest without one)"),
+						queryParam("sort", "Sort field: newest, filesize, order, random, similarity (ranks by tag overlap with the image a similar: term names; newest without one), id"),
 						queryParam("order", "Sort order: asc, desc"),
 						queryParam("seed", "Random-sort seed for stable pagination when sort=random"),
 						queryParam("page", "Page number (1-based)"),

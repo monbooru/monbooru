@@ -125,6 +125,9 @@ func columnFilterIndexHint(expr Expr, sort string) string {
 		switch sort {
 		case "filesize":
 			return " INDEXED BY idx_images_filesize_visible"
+		case "id":
+			// The rowid is the id order already.
+			return ""
 		default:
 			return " INDEXED BY idx_images_ingested_visible"
 		}
@@ -808,7 +811,7 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"duration": comp("(i.duration_seconds IS NOT NULL AND i.duration_seconds %s ?)", parseFloatValue),
 	"hash":     (*whereBuilder).buildHashFilter,
 	"md5":      (*whereBuilder).buildMD5Filter,
-	"id":       intEq("i.id"),
+	"id":       comp("i.id %s ?", parseIntValue),
 	// A token, not a time range: two batches can land in the same minute.
 	"batch":      intEq("i.upload_batch"),
 	"phash":      (*whereBuilder).buildPhashFilter,
@@ -831,13 +834,20 @@ var filterBuilders = map[string]func(*whereBuilder, FilterExpr) string{
 	"upgrade":    (*whereBuilder).buildUpgradeFilter,
 }
 
+// IsFilterKey says whether key: is one of the filters; any other key: reads
+// as a category or a tag.
+func IsFilterKey(key string) bool {
+	_, ok := filterBuilders[key]
+	return ok
+}
+
 func comp(sqlTemplate string, parseVal func(string) (any, bool)) func(*whereBuilder, FilterExpr) string {
 	return func(b *whereBuilder, e FilterExpr) string {
 		return b.buildCompFilter(sqlTemplate, e.Val, parseVal)
 	}
 }
 
-// Equality only: through comp, id:>5 would start matching.
+// Equality only: through comp, batch:>5 would start matching.
 func intEq(col string) func(*whereBuilder, FilterExpr) string {
 	return func(b *whereBuilder, e FilterExpr) string {
 		n, ok := parseIntValue(e.Val)

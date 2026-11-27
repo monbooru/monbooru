@@ -4,12 +4,15 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/monbooru/monbooru/internal/api"
 	"github.com/monbooru/monbooru/internal/shared/desktop"
 )
 
 const sessionCookie = "monbooru_session"
 
-func isOpenPath(path string) bool { return isPublicPath(path) || isStaticPath(path) }
+func isOpenPath(path string) bool {
+	return isPublicPath(path) || isStaticPath(path) || api.IsBooruPath(path)
+}
 
 func (s *Server) hostMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

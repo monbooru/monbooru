@@ -903,13 +903,18 @@
       <div class="settings-sub">
         <h4>API Tokens</h4>
         <p class="field-hint">For scripts and apps that talk to monbooru. A token is shown once, when you create it.</p>
-        {{template "webui/auth_tokens" (dict "Tokens" $cfg.Auth.Tokens)}}
+        {{template "webui/auth_tokens" (dict "Tokens" $cfg.Auth.Tokens "RevokeNotes" .TokenRevokeNotes)}}
         <form hx-post="/settings/auth/tokens" hx-target="#flash-auth" hx-swap="innerHTML" style="margin-top:8px"
               hx-on:token-created="this.reset()">
           <input type="text" name="name" placeholder="token name" maxlength="64" required>
           <button type="submit">Create token</button>
         </form>
       </div>
+    </div>
+    <div class="settings-sub" style="margin-top:16px">
+      <h4>Danbooru compatible endpoint</h4>
+      <p class="field-hint">For booru client apps such as LoliSnatcher or Boorusama: turn on the galleries to share, then add an address as a Danbooru site, one per gallery. Login and API key can stay empty.</p>
+      {{template "partials/booru_endpoints.html" (dict "View" .BooruEndpoints)}}
     </div>
   </section>
 

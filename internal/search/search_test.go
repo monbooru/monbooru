@@ -128,6 +128,17 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestIsFilterKey(t *testing.T) {
+	for key, want := range map[string]bool{
+		"width": true, "rating": true, "id": true, "mime": true, "sourceurl": true,
+		"artist": false, "score": false, "re": false, "": false,
+	} {
+		if got := IsFilterKey(key); got != want {
+			t.Errorf("IsFilterKey(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func TestUnreadable_Grouping(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
@@ -2946,6 +2957,10 @@ func TestColumnFilterIndexHint_NegatedWorkflowTerm(t *testing.T) {
 		{FilterExpr{Key: "comfyui", Val: "KSampler"}, "newest", ""},
 		{NotExpr{Expr: FilterExpr{Key: "comfyui", Val: ""}}, "newest", ""},
 		{NotExpr{Expr: FilterExpr{Key: "source", Val: "none"}}, "newest", ""},
+		// The id sort reads the rowid in order, so no index is pinned.
+		{NotExpr{Expr: FilterExpr{Key: "comfyui", Val: "KSampler"}}, "id", ""},
+		{FilterExpr{Key: "type", Val: "image"}, "id", ""},
+		{FilterExpr{Key: "type", Val: "image"}, "newest", " INDEXED BY idx_images_ingested_visible"},
 	} {
 		if got := columnFilterIndexHint(tc.expr, tc.sort); got != tc.want {
 			t.Errorf("%#v under %s: hint = %q, want %q", tc.expr, tc.sort, got, tc.want)
@@ -5031,6 +5046,55 @@ func TestExecute_IDFilter(t *testing.T) {
 	bres := mustExecute(t, database, Query{Expr: bad, Sort: "newest", Page: 1, Limit: 40})
 	if bres.Total != 0 {
 		t.Fatalf("id:nope total=%d, want 0", bres.Total)
+	}
+}
+
+func TestExecute_IDRange(t *testing.T) {
+	database, env := setupSearchDB(t)
+	a := ingestTestImageWithID(t, database, env, "a.png")
+	b := ingestTestImageWithID(t, database, env, "b.png")
+	c := ingestTestImageWithID(t, database, env, "c.png")
+	id := func(n int64) string { return strconv.FormatInt(n, 10) }
+	cases := []struct {
+		query string
+		want  []int64
+	}{
+		{"id:>" + id(a), []int64{b, c}},
+		{"id:>=" + id(b), []int64{b, c}},
+		{"id:<" + id(c), []int64{a, b}},
+		{"id:<=" + id(a), []int64{a}},
+		{"id:" + id(a) + ".." + id(b), []int64{a, b}},
+		{"id:" + id(b) + "..", []int64{b, c}},
+		{"id:.." + id(b), []int64{a, b}},
+		{"-id:" + id(b), []int64{a, c}},
+		{"id:>nope", nil},
+	}
+	for _, tc := range cases {
+		checkSearchIDs(t, database, tc.query, tc.want)
+	}
+}
+
+// The id sort ignores ingested_at, which an imported gallery keeps out of
+// id order.
+func TestExecute_IDSort(t *testing.T) {
+	database, env := setupSearchDB(t)
+	a := ingestTestImageWithID(t, database, env, "a.png")
+	b := ingestTestImageWithID(t, database, env, "b.png")
+	c := ingestTestImageWithID(t, database, env, "c.png")
+	mustExec(t, database.Write, `UPDATE images SET ingested_at = '2001-01-01T00:00:00Z' WHERE id = ?`, c)
+	cases := []struct {
+		order string
+		want  []int64
+	}{
+		{"desc", []int64{c, b, a}},
+		{"asc", []int64{a, b, c}},
+		{"", []int64{c, b, a}},
+	}
+	for _, tc := range cases {
+		res := mustExecute(t, database, Query{Sort: "id", Order: tc.order, Page: 1, Limit: 40})
+		if got := resultIDs(res); !slices.Equal(got, tc.want) {
+			t.Errorf("id sort %q = %v, want %v", tc.order, got, tc.want)
+		}
 	}
 }
 
