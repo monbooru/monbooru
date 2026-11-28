@@ -33,6 +33,7 @@ Each version links to its release notes; a version in bold includes their code. 
 | [@seli-32](https://github.com/seli-32) | [v1.21.0](https://github.com/monbooru/monbooru/releases/tag/v1.21.0) | [v1.12.0](https://github.com/monbooru/monloader/releases/tag/v1.12.0) |  |
 | [@sflavelle](https://github.com/sflavelle) |  | [v1.14.0](https://github.com/monbooru/monloader/releases/tag/v1.14.0) |  |
 | [@spry-key](https://github.com/spry-key) | **[v1.24.0](https://github.com/monbooru/monbooru/releases/tag/v1.24.0)**, [v1.24.1](https://github.com/monbooru/monbooru/releases/tag/v1.24.1), [v1.25.0](https://github.com/monbooru/monbooru/releases/tag/v1.25.0) | [v1.14.0](https://github.com/monbooru/monloader/releases/tag/v1.14.0) |  |
+| [@sslxqii-sudo](https://github.com/sslxqii-sudo) | **[v1.25.0](https://github.com/monbooru/monbooru/releases/tag/v1.25.0)** |  |  |
 | [@Stitcher-Frame](https://github.com/Stitcher-Frame) | [v1.25.0](https://github.com/monbooru/monbooru/releases/tag/v1.25.0) |  |  |
 | [@StockholmAlcoholic](https://github.com/StockholmAlcoholic) | [v1.22.2](https://github.com/monbooru/monbooru/releases/tag/v1.22.2) |  |  |
 | [@Toaaa](https://github.com/Toaaa) |  | [v1.12.0](https://github.com/monbooru/monloader/releases/tag/v1.12.0) |  |
