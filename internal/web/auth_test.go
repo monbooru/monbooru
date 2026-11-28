@@ -665,6 +665,16 @@ func TestCreatingTheBooruEndpoint(t *testing.T) {
 	}
 }
 
+func TestANewBooruEndpointSharesNothingLeftOn(t *testing.T) {
+	srv := newTestServer(t)
+	shareBooruGalleries(srv)
+	body := postHTMXForm(t, srv, "/settings/auth/booru-endpoint", url.Values{}).Body.String()
+	wantIn(t, body, "endpoint created")
+	if srv.cfg.Galleries[0].Booru {
+		t.Error("a gallery left on by a token removed by hand is shared by the new endpoint")
+	}
+}
+
 func TestRemovingTheBooruEndpoint(t *testing.T) {
 	cases := []struct {
 		name, flash string

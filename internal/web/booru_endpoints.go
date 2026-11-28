@@ -107,6 +107,9 @@ func (s *Server) settingsBooruEndpointCreate(w http.ResponseWriter, r *http.Requ
 		if c.Auth.Tokens.ByClass(api.BooruClass) != nil {
 			return errBooruEndpointExists
 		}
+		for i := range c.Galleries {
+			c.Galleries[i].Booru = false
+		}
 		return c.Auth.Tokens.Add(tok)
 	})
 	if err != nil {
