@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
+	"log"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -190,5 +192,20 @@ func TestSystemSuggestKeepsTheCaseOfFreeTextValues(t *testing.T) {
 		if !strings.Contains(w.Body.String(), "DPM&#43;&#43; 2M") {
 			t.Errorf("%s: %d %q, want the sampler listed", q, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestTagSuggest_LogsAFailedRead(t *testing.T) {
+	srv := newTestServer(t)
+	var buf bytes.Buffer
+	out := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(out) })
+	if err := srv.db().Close(); err != nil {
+		t.Fatal(err)
+	}
+	do(srv, "GET", tagSuggestRoute+"?tag=artist:us")
+	if !strings.Contains(buf.String(), "tag suggest:") {
+		t.Errorf("the failed read left no line: %q", buf.String())
 	}
 }
