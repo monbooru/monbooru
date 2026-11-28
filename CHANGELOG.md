@@ -2,31 +2,31 @@
 
 ## [v1.25.0] - 2026-xx-xx
 ### Added
-- The auto-tagger now runs on monworker, a separate program: either on the same machine, started and managed by monbooru (except for the `-lite` monbooru variants), or on any number of other machines paired via Settings > Auto-Tagger > Workers. ([#145](https://github.com/monbooru/monbooru/issues/145))
+- The auto-tagger now runs on monworker, a separate program: either on the same machine, started and managed by monbooru (except for the `-lite` monbooru variants), or on any number of other machines paired via Settings > Auto-Tagger > Workers. ([#145](https://github.com/monbooru/monbooru/issues/145), thanks @IkariDevGIT and @Mar2ck for testing)
 - A `latest-lite` Docker image with no worker, for users who don't need tagging or only use a remote monworker.
 - During a batch auto-tag you can select the workers that share the images.
 - A worker can be added in serverless mode by its address and token, and marked on demand (monbooru leaves it alone until a job that uses it starts).
 - Frames go as PNG to a worker off the local network, smaller and faster than raw images and with the same accuracy.
 - In the scheduled auto-tag, it is possible to set the available taggers, workers, a limit of images a run, and each tagger catches up on the images it has not read.
 - A CPU threads setting limits the cores the worker uses, and a new "Images prepared at once" field sets how many images monbooru preprocesses at once.
-- A tag can be made global: it keeps the same name, category, aliases, implications and note in every gallery, and an edit in one gallery reaches the others. ([#108](https://github.com/monbooru/monbooru/issues/108))
-- The lightbox and the slideshow are merged into one media viewer: `v` opens it on an image with zoom and pan, and slideshow features. ([#152](https://github.com/monbooru/monbooru/issues/152))
-- The viewer gets video and volume controls. ([#235](https://github.com/monbooru/monbooru/issues/235))
-- The bar of the viewer and of the manga reader can be hidden with `b`. ([#233](https://github.com/monbooru/monbooru/issues/233))
-- The viewer's Backdrop (background opacity) setting can now be changed. ([#221](https://github.com/monbooru/monbooru/issues/221))
-- You can use pinch to zoom in the viewer, and zoom and pan on video like on images. ([#187](https://github.com/monbooru/monbooru/issues/187))
+- A tag can be made global: it keeps the same name, category, aliases, implications and note in every gallery, and an edit in one gallery reaches the others. ([#108](https://github.com/monbooru/monbooru/issues/108), thanks @CeareDelafont and @spry-key for the suggestion)
+- The lightbox and the slideshow are merged into one media viewer: `v` opens it on an image with zoom and pan, and slideshow features. ([#152](https://github.com/monbooru/monbooru/issues/152), thanks @RustyNova016 for the suggestion)
+- The viewer gets video and volume controls. ([#235](https://github.com/monbooru/monbooru/issues/235), thanks @cobalt-technicals for the suggestion)
+- The bar of the viewer and of the manga reader can be hidden with `b`. ([#233](https://github.com/monbooru/monbooru/issues/233), thanks @cobalt-technicals for the suggestion)
+- The viewer's Backdrop (background opacity) setting can now be changed. ([#221](https://github.com/monbooru/monbooru/issues/221), thanks @IkariDevGIT for the suggestion)
+- You can use pinch to zoom in the viewer, and zoom and pan on video like on images. ([#187](https://github.com/monbooru/monbooru/issues/187), thanks @IkariDevGIT for the code)
 - The manga reader lets you zoom a page in place, with the wheel, a pinch or `+` and `-`.
-- Search groups terms with parentheses and priorities, like in `( cat OR dog ) beach`. ([#178](https://github.com/monbooru/monbooru/issues/178))
-- `sourceurl:` finds images by a source or credited URL, as a prefix or with a wildcard `*`. ([#197](https://github.com/monbooru/monbooru/issues/197))
-- The search time shows beside the match count. ([#203](https://github.com/monbooru/monbooru/issues/203))
-- Tag suggestions show the aliases. ([#156](https://github.com/monbooru/monbooru/issues/156))
-- The Relations comparison zooms and pans both images together. ([#194](https://github.com/monbooru/monbooru/issues/194))
-- `[copy sources]` copies the sources of duplicates onto the original. ([#198](https://github.com/monbooru/monbooru/issues/198))
-- The upload form has a Folder field, with a folder tree, suggestions and a new folder button. ([#180](https://github.com/monbooru/monbooru/issues/180))
-- The Rename / move dialogs and the default upload folder in Settings use the same folder picker. ([#246](https://github.com/monbooru/monbooru/issues/246))
+- Search groups terms with parentheses and priorities, like in `( cat OR dog ) beach`. ([#178](https://github.com/monbooru/monbooru/issues/178), thanks @IkariDevGIT for the code)
+- `sourceurl:` finds images by a source or credited URL, as a prefix or with a wildcard `*`. ([#197](https://github.com/monbooru/monbooru/issues/197), thanks @IkariDevGIT for the code)
+- The search time shows beside the match count. ([#203](https://github.com/monbooru/monbooru/issues/203), thanks @IkariDevGIT for the code)
+- Tag suggestions show the aliases. ([#156](https://github.com/monbooru/monbooru/issues/156), thanks @Stitcher-Frame for the suggestion)
+- The Relations comparison zooms and pans both images together. ([#194](https://github.com/monbooru/monbooru/issues/194), thanks @IkariDevGIT for the code)
+- `[copy sources]` copies the sources of duplicates onto the original. ([#198](https://github.com/monbooru/monbooru/issues/198), thanks @IkariDevGIT for the code)
+- The upload form has a Folder field, with a folder tree, suggestions and a new folder button. ([#180](https://github.com/monbooru/monbooru/issues/180), thanks @IkariDevGIT for the code)
+- The Rename / move dialogs and the default upload folder in Settings use the same folder picker. ([#246](https://github.com/monbooru/monbooru/issues/246), thanks @IkariDevGIT for the code)
 - Settings > Plugins can accept pairings for 10 minutes, approving monloader and workers as they ask; a new install does so for its first ten minutes, and so does the desktop app for a monloader or a worker on the same machine.
 - The image page has an Open in a new tab button.
-- API: `GET /api/v1/folders` and `GET /api/v1/folders/search` list and search a gallery's folders. ([#238](https://github.com/monbooru/monbooru/pull/238))
+- API: `GET /api/v1/folders` and `GET /api/v1/folders/search` list and search a gallery's folders. ([#238](https://github.com/monbooru/monbooru/pull/238), thanks @IkariDevGIT for the code)
 - API: a tag carries `global`, and `GET /api/v1/tags` takes `scope=global` or `scope=local`.
 - API: `POST /api/v1/pair/check` tells a paired app whether the pairing still holds.
 
@@ -35,7 +35,7 @@
 - `w` no longer starts the slideshow: `v` opens the viewer and `s` starts the slideshow there. The viewer does not go fullscreen by itself.
 - A tagger's mappings are kept in the data folder, so the models folder can be read-only or on another machine. The first start copies them there.
 - The lite downloads carry ffmpeg, and differ from the bundled ones only by the fact monworker is not included.
-- With no worker, the Auto-Tagger section shows a message instead of listing taggers that cannot run. ([#210](https://github.com/monbooru/monbooru/issues/210))
+- With no worker, the Auto-Tagger section shows a message instead of listing taggers that cannot run. ([#210](https://github.com/monbooru/monbooru/issues/210), thanks @RustyNova016 for the suggestion)
 - Settings > Stats lists every worker in its Auto-tagger block.
 - The tag provenance graph draws one `all sites` lane for monloader's global tag rules for all sites, and shows the condition of a blacklist line; needs monloader v1.15.0.
 - monbooru holds less memory on a large library.
@@ -59,17 +59,7 @@
 
 ### TODO
 
-- In Settings > Authentication you can create a Danbooru compatible endpoint, which is a read-only address per gallery that booru client apps such as Boorusama, LoliSnatcher, Grabber, etc. can browse. ([#153](https://github.com/monbooru/monbooru/issues/153))
-
-Thanks to @IkariDevGIT for the search groups (https://github.com/monbooru/monbooru/pull/202), the source URL search (https://github.com/monbooru/monbooru/pull/204), the search time (https://github.com/monbooru/monbooru/pull/211), copying sources from duplicates to the original (https://github.com/monbooru/monbooru/pull/217), zoom and pan in the relations comparison (https://github.com/monbooru/monbooru/pull/218), pinch to zoom in the image viewer (https://github.com/monbooru/monbooru/pull/219), listing a gallery's folders through the API (https://github.com/monbooru/monbooru/pull/238), the folder field on the upload form (https://github.com/monbooru/monbooru/pull/250), the folder picker in the move dialogs and Settings (https://github.com/monbooru/monbooru/pull/252), the Danbooru compatible endpoint (https://github.com/monbooru/monbooru/pull/245), the suggestion (https://github.com/monbooru/monbooru/issues/221) and testing the monworker split (https://github.com/monbooru/monbooru/issues/145).
-Thanks to @IZA09 for the suggestion and testing the Danbooru compatible endpoint (https://github.com/monbooru/monbooru/issues/153).
-Thanks to @Schw1 for testing the Danbooru compatible endpoint (https://github.com/monbooru/monbooru/issues/153).
-Thanks to @Mar2ck for testing the monworker split (https://github.com/monbooru/monbooru/issues/145).
-Thanks to @CeareDelafont for the suggestion (https://github.com/monbooru/monbooru/issues/108).
-Thanks to @spry-key for the suggestion (https://github.com/monbooru/monbooru/issues/108).
-Thanks to @RustyNova016 for the suggestions (https://github.com/monbooru/monbooru/issues/152, https://github.com/monbooru/monbooru/issues/210).
-Thanks to @Stitcher-Frame for the suggestion (https://github.com/monbooru/monbooru/issues/156).
-Thanks to @cobalt-technicals for the suggestions (https://github.com/monbooru/monbooru/issues/233, https://github.com/monbooru/monbooru/issues/235).
+- In Settings > Authentication you can create a Danbooru compatible endpoint, which is a read-only address per gallery that booru client apps such as Boorusama, LoliSnatcher, Grabber, etc. can browse. ([#153](https://github.com/monbooru/monbooru/issues/153), thanks @IkariDevGIT for the code, @IZA09 for the suggestion and testing, @Schw1 for testing)
 
 Co-authored-by: IkariDevGIT <90197782+IkariDevGIT@users.noreply.github.com>
 
