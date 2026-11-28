@@ -445,6 +445,9 @@ func plan(cx, cy *catalog, changed []int64) ([]op, []Skip) {
 		case t != nil && t.alias:
 		case t == nil || !t.global:
 			d := cy.byKey[cx.known[id]]
+			if (d == nil || d.alias || !d.global) && t != nil {
+				d = cy.byKey[t.key]
+			}
 			if d == nil || d.alias || !d.global {
 				continue
 			}

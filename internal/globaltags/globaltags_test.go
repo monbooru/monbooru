@@ -433,6 +433,38 @@ func TestMakeLocalStopsTheSharingAndKeepsEveryGallery(t *testing.T) {
 	want(t, "b after a local edit in a", b.aliases("animation"), "anime")
 }
 
+func TestMakeLocalReachesAGalleryThatLeftAnAliasOutAfterARename(t *testing.T) {
+	for _, edit := range []struct {
+		name string
+		do   func(a *gallery) error
+	}{
+		{"cartoon", func(a *gallery) error { return a.Tags.RenameTagKeepAlias(a.tag("animation"), "cartoon") }},
+		{"medium:animation", func(a *gallery) error {
+			return a.Tags.ChangeTagCategory(a.tag("animation"), a.category("medium"))
+		}},
+	} {
+		a, b := open(t, "a"), open(t, "b")
+		all := sides(a, b)
+		makeGlobal(t, a, all, false, "animation")
+		b.image("anime")
+		a.alias("anime", "animation")
+		if skipped := push(t, all); len(skipped) != 1 {
+			t.Fatalf("skipped %v, want the alias left out in b", skipped)
+		}
+		if err := edit.do(a); err != nil {
+			t.Fatal(err)
+		}
+		push(t, all)
+		want(t, "b global after the edit", b.global(), edit.name)
+
+		if err := MakeLocal(a.Side, []int64{a.tag(edit.name)}); err != nil {
+			t.Fatal(err)
+		}
+		push(t, all)
+		want(t, "b global after "+edit.name+" is made local", b.global())
+	}
+}
+
 func TestADeletedGlobalTagGoesLocalElsewhere(t *testing.T) {
 	a, b := open(t, "a"), open(t, "b")
 	all := sides(a, b)
