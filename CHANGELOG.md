@@ -1,6 +1,6 @@
 # Changelog
 
-## [v1.25.0] - 2026-xx-xx
+## [v1.25.0] - 2026-11-28
 ### Added
 - A tag can be made global: it keeps the same name, category, aliases, implications and note in every gallery, and an edit in one gallery reaches the others. ([#108](https://github.com/monbooru/monbooru/issues/108), thanks @CeareDelafont and @spry-key for the suggestion)
   - API: a tag carries `global`, and `GET /api/v1/tags` takes `scope=global` or `scope=local`.
@@ -12,6 +12,7 @@
   - In the scheduled auto-tag, it is possible to set the available taggers, workers, a limit of images a run, and each tagger catches up on the images it has not read.
   - A CPU threads setting limits the cores the worker uses, and a new "Images prepared at once" field sets how many images monbooru preprocesses at once.
 - The lightbox and the slideshow are merged into one media viewer: `v` opens it on an image with zoom and pan, and slideshow features. ([#152](https://github.com/monbooru/monbooru/issues/152), thanks @RustyNova016 for the suggestion)
+- In Settings > Authentication you can create a Danbooru compatible endpoint, which is a read-only address per gallery that booru client apps such as Boorusama, LoliSnatcher, Grabber, etc. can browse. ([#153](https://github.com/monbooru/monbooru/issues/153), thanks @IkariDevGIT for the code, @IZA09 for the suggestion and testing, @Schw1 for testing)
 - Tag suggestions show the aliases. ([#156](https://github.com/monbooru/monbooru/issues/156), thanks @Stitcher-Frame for the suggestion)
 - Search groups terms with parentheses and priorities, like in `( cat OR dog ) beach`. ([#178](https://github.com/monbooru/monbooru/issues/178), thanks @IkariDevGIT for the code)
 - The upload form has a Folder field, with a folder tree, suggestions and a new folder button. ([#180](https://github.com/monbooru/monbooru/issues/180), thanks @IkariDevGIT for the code)
@@ -25,6 +26,7 @@
 - The viewer gets video and volume controls. ([#235](https://github.com/monbooru/monbooru/issues/235), thanks @cobalt-technicals for the suggestion)
 - API: `GET /api/v1/folders` and `GET /api/v1/folders/search` list and search a gallery's folders. ([#238](https://github.com/monbooru/monbooru/pull/238), thanks @IkariDevGIT for the code)
 - The Rename / move dialogs and the default upload folder in Settings use the same folder picker. ([#246](https://github.com/monbooru/monbooru/issues/246), thanks @IkariDevGIT for the code)
+- API: `GET /api/v1/tags/suggest` suggests tags for a typed word, the way the tag fields do. ([#257](https://github.com/monbooru/monbooru/pull/257), thanks @IkariDevGIT for the code)
 - The manga reader lets you zoom a page in place, with the wheel, a pinch or `+` and `-`.
 - Settings > Plugins can accept pairings for 10 minutes, approving monloader and workers as they ask; a new install does so for its first ten minutes, and so does the desktop app for a monloader or a worker on the same machine.
 - The image page has an Open in a new tab button.
@@ -44,6 +46,7 @@
 - A job that fails is written to the log.
 
 ### Fixed
+- In the Relations review session, closing the duplicate dialog no longer saves the decision. ([#224](https://github.com/monbooru/monbooru/issues/224), thanks @sslxqii-sudo for the code, @IkariDevGIT for the report)
 - Deletes, uploads, moves and file replacements are refused while the gallery folder cannot be read, such as an unmounted volume; the API answers 503 `gallery_unavailable`.
 - A refused upload keeps the staged files.
 - A tag edited right after an auto-tag job ends is no longer undone on screen.
@@ -57,11 +60,8 @@
 - The `tagger` build tag and the `tagger-worker` subcommand: a build from source is `make build`, with a monworker beside it or on `PATH` to tag.
 - `MONBOORU_TAGGER_BACKEND`, and `model_file` and `tags_file` of a tagger entry, are no longer read.
 
-### TODO
-
-- In Settings > Authentication you can create a Danbooru compatible endpoint, which is a read-only address per gallery that booru client apps such as Boorusama, LoliSnatcher, Grabber, etc. can browse. ([#153](https://github.com/monbooru/monbooru/issues/153), thanks @IkariDevGIT for the code, @IZA09 for the suggestion and testing, @Schw1 for testing)
-
 Co-authored-by: IkariDevGIT <90197782+IkariDevGIT@users.noreply.github.com>
+Co-authored-by: sslxqii-sudo <267515549+sslxqii-sudo@users.noreply.github.com>
 
 ## [v1.24.1] - 2026-11-16
 ### Added
