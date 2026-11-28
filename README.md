@@ -36,16 +36,16 @@ Monbooru is fully functional as a standalone application. The app itself never t
 
 ### Tags
 
-- **Tag management**: merge duplicates, aliases, implications, custom categories, cleanup tools; a page per tag with your note, links and a usage graph
+- **Tag management**: merge duplicates, aliases, implications, custom categories, cleanup tools, global tags shared by every gallery; a page per tag with your note, links and a usage graph
 - **Tag provenance**: each tag remembers what applied it (you, an auto-tagger, a booru); view, map, search and remove tags by source, and reject a tag to keep it off every image
 - **Rating tags** (general / sensitive / questionable / explicit), with a SFW ceiling in the footer that hides anything rated above it
 - **Meta tags** set automatically from the file itself, under Danbooru's names: `highres`, `absurdres`, `animated`, `sound` and more
-- **Local auto-tagging** with ONNX models (WD14 SwinV2, animetimm EVA02, JoyTag, Camie v2, PixAI, or any compatible model), on CPU or GPU; several models can run together, on videos and archive pages too
+- **Auto-tagging** with ONNX models (WD14 SwinV2, animetimm EVA02, JoyTag, Camie v2, PixAI, or any compatible model), on CPU or GPU, on this machine or on others through monworker; several models can run together, on videos and archive pages too
 
 ### Browse and search
 
 - **Gallery** with folder tree, favorites, collections, related-image suggestions, animated previews on hover, and a fullscreen slideshow of a search or a selection
-- **Search** with wildcards, OR, exclusions, saved searches, and filters on folder, date, size, dimensions, category, generation settings, and more
+- **Search** with wildcards, OR, parentheses, exclusions, saved searches, and filters on folder, date, size, dimensions, category, generation settings, and more
 - **Batch operations** on a selection or a whole search: add or remove tags, rename, move, delete, auto-tag, set collection or source, download as a zip, and more
 - **Keyboard-driven**: shortcuts on every page, from grid navigation to batch actions; press `?` in the app for the full list
 - **On a phone**: layouts made for a small screen, and swipe between images
@@ -60,6 +60,7 @@ Monbooru is fully functional as a standalone application. The app itself never t
 
 - **Optional password login**
 - **REST API** with scoped tokens, an OpenAPI spec, and built-in docs
+- **Booru client apps**: a read-only Danbooru-compatible address per gallery, for Boorusama, LoliSnatcher, Grabber and others
 - **Plugins and themes**: drop one in the plugins or themes folder and turn it on in Settings; monbooru launches and supervises plugins for you
 - **Downloads and reverse lookup** through the optional [monloader](#related-applications) companion
 
