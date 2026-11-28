@@ -35,7 +35,6 @@ func (s *Service) DuplicateCandidateDetails(originalCandidate, dupCandidate int6
 		return 0, false, false, err
 	}
 
-	// Resolve the effective original image matching AddDuplicateOf logic:
 	effectiveOriginal = originalCandidate
 	switch {
 	case origGroupID.Valid && !dupGroupID.Valid:
@@ -51,6 +50,9 @@ func (s *Service) DuplicateCandidateDetails(originalCandidate, dupCandidate int6
 	case origGroupID.Valid && dupGroupID.Valid:
 		if origGroupID.Int64 == dupGroupID.Int64 {
 			effectiveOriginal = origGroupOriginal.Int64
+			if effectiveOriginal == dupCandidate {
+				effectiveOriginal = originalCandidate
+			}
 		} else {
 			survivor := min(origGroupID.Int64, dupGroupID.Int64)
 			survivorOriginal := origGroupOriginal.Int64

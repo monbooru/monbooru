@@ -100,8 +100,33 @@ func TestDuplicateCandidateDetails_BothInGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if effectiveOrig != rootA && effectiveOrig != rootB {
-		t.Errorf("effectiveOriginal = %d, want either %d or %d", effectiveOrig, rootA, rootB)
+	if effectiveOrig != rootA {
+		t.Errorf("effectiveOriginal = %d, want the older group's original %d", effectiveOrig, rootA)
+	}
+	if err := svc.AddDuplicateOf(left, right); err != nil {
+		t.Fatal(err)
+	}
+	var saved int64
+	if err := database.Read.QueryRow(`SELECT g.original_image_id FROM dup_group_members m JOIN dup_groups g ON g.id = m.group_id WHERE m.image_id = ?`, right).Scan(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved != effectiveOrig {
+		t.Errorf("saved original = %d, predicted %d", saved, effectiveOrig)
+	}
+}
+
+func TestDuplicateCandidateDetails_RightIsTheSharedGroupsOriginal(t *testing.T) {
+	database, svc := setupTestDB(t)
+	right := insertImage(t, database, "cand-swap-r", 1000)
+	left := insertImage(t, database, "cand-swap-l", 1000)
+	mustAddDuplicate(t, svc, right, left)
+
+	effectiveOrig, _, _, err := svc.DuplicateCandidateDetails(left, right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effectiveOrig != left {
+		t.Errorf("effectiveOriginal = %d, want the left image %d", effectiveOrig, left)
 	}
 }
 
