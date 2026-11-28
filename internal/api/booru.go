@@ -78,7 +78,7 @@ func IsBooruFile(path string) bool {
 		return false
 	}
 	switch first, _, _ := strings.Cut(route, "/"); first {
-	case "file", "sample", "thumb":
+	case "file", "sample", "mid", "thumb":
 		return true
 	}
 	return false
@@ -121,6 +121,7 @@ func (h *Handler) mountBooru(mux *http.ServeMux) {
 	mux.HandleFunc(at+"notes.json", h.booru(booruNotes))
 	mux.HandleFunc(at+"file/{name}", h.booruFile("file", fileOf))
 	mux.HandleFunc(at+"sample/{name}", h.booruFile("sample", booruSampleOf))
+	mux.HandleFunc(at+"mid/{name}", h.booruFile("mid", booruMidOf))
 	mux.HandleFunc(at+"thumb/{name}", h.booruFile("thumb", thumbnailOf))
 	mux.HandleFunc(at+"favicon.ico", h.booru(h.booruFavicon))
 	mux.HandleFunc(at+"{rest...}", h.booru(booruEmpty))
@@ -422,9 +423,10 @@ type booruVariant struct {
 }
 
 // Danbooru's sizes, each served by the nearest monbooru has: the thumbnail
-// for the small ones, the sample or the file for 720x720, but a video's
-// thumbnail, as Danbooru's is a still.
-func booruVariants(p booruPost, video bool) []booruVariant {
+// for the small ones; for 720x720 the mid rendition, or the sample or the
+// file of an image that has none, but a video's thumbnail, as Danbooru's is
+// a still.
+func booruVariants(p booruPost, video bool, mid string) []booruVariant {
 	w, h := p.ImageWidth, p.ImageHeight
 	tw, th := gallery.ThumbSize(w, h)
 	thumb := booruVariant{URL: p.PreviewFileURL, Width: tw, Height: th, FileExt: "jpg"}
@@ -434,6 +436,10 @@ func booruVariants(p booruPost, video bool) []booruVariant {
 		large = booruVariant{URL: p.LargeFileURL, Width: sw, Height: sh, FileExt: "jpg"}
 	}
 	view := large
+	if mid != "" {
+		mw, mh := gallery.MidRenditionSize(w, h)
+		view = booruVariant{URL: mid, Width: mw, Height: mh, FileExt: "jpg"}
+	}
 	if video {
 		view = thumb
 	}
@@ -508,10 +514,14 @@ func booruPostOf(base string, img models.Image, imageTags []imageTagJSON, noted 
 	if noted {
 		p.LastNotedAt = &created
 	}
+	mid := ""
+	if booruMidSized(img.FileType, p.ImageWidth, p.ImageHeight) {
+		mid = base + "/mid/" + id + ".jpg"
+	}
 	p.MediaAsset = booruMediaAsset{
 		ID: img.ID, CreatedAt: created, UpdatedAt: created, MD5: img.MD5, FileExt: ext, FileSize: img.FileSize,
 		ImageWidth: p.ImageWidth, ImageHeight: p.ImageHeight, Duration: (*booruSeconds)(img.DurationSec), Status: "active", IsPublic: true,
-		Variants: booruVariants(p, gallery.IsVideoType(img.FileType)),
+		Variants: booruVariants(p, gallery.IsVideoType(img.FileType), mid),
 	}
 
 	byCategory := map[int][]string{}
@@ -601,6 +611,32 @@ func booruSampleOf(w http.ResponseWriter, g *library.Gallery, id int64) (string,
 	if err != nil {
 		logx.Warnf("booru sample for image %d: %v", id, err)
 		return fileOf(w, g, id)
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	return rendition, true
+}
+
+func booruMidSized(fileType string, width, height int) bool {
+	return fileType != models.FileTypeCBZ && !gallery.IsVideoType(fileType) && gallery.NeedsMidRendition(width, height)
+}
+
+func booruMidOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
+	canonPath, fileType, ok := containedCanonical(w, g, id)
+	if !ok {
+		return "", false
+	}
+	var width, height int
+	err := g.DB.Read.QueryRow(`SELECT COALESCE(width, 0), COALESCE(height, 0) FROM images WHERE id = ?`, id).Scan(&width, &height)
+	if serverError(w, err) {
+		return "", false
+	}
+	if !booruMidSized(fileType, width, height) {
+		return booruSampleOf(w, g, id)
+	}
+	rendition, err := gallery.EnsureMidRendition(canonPath, g.ThumbnailsPath, id, fileType)
+	if err != nil {
+		logx.Warnf("booru mid rendition for image %d: %v", id, err)
+		return booruSampleOf(w, g, id)
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	return rendition, true

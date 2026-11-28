@@ -49,7 +49,6 @@ func TestDuplicateCandidateDetails_LeftIsAlreadyDuplicate(t *testing.T) {
 	mustAddDuplicate(t, svc, orig, left)
 	mustAddDuplicate(t, svc, orig, otherMember)
 
-	// otherMember in the left's group has a unique tag
 	addTagRow(t, database, otherMember, "left-group-tag", false)
 
 	effectiveOrig, hasTags, _, err := svc.DuplicateCandidateDetails(left, right)

@@ -37,12 +37,25 @@ const thumbQuality = 85
 const (
 	viewMaxPixels = 100_000_000
 	ViewMaxDim    = 4000
+	MidMaxDim     = 720
 )
 
 var viewRenditionMu sync.Mutex
 
 func viewRenditionPath(dir string, imageID int64) string {
 	return filepath.Join(dir, fmt.Sprintf("%d_view.jpg", imageID))
+}
+
+func midRenditionPath(dir string, imageID int64) string {
+	return filepath.Join(dir, fmt.Sprintf("%d_mid.jpg", imageID))
+}
+
+func NeedsMidRendition(width, height int) bool { return width > MidMaxDim || height > MidMaxDim }
+
+func MidRenditionSize(width, height int) (int, int) { return ScaledSize(width, height, MidMaxDim) }
+
+func EnsureMidRendition(srcPath, dstDir string, imageID int64, fileType string) (string, error) {
+	return ensureRendition(midRenditionPath(dstDir, imageID), srcPath, dstDir, fileType, MidMaxDim)
 }
 
 func NeedsViewRendition(width, height int) bool { return int64(width)*int64(height) > viewMaxPixels }
@@ -69,7 +82,10 @@ func ViewRenditionFor(srcPath, dstDir string, imageID int64, fileType string, wi
 // only an oversized image, or an AVIF or JPEG XL the browser cannot show,
 // needs one.
 func EnsureViewRendition(srcPath, dstDir string, imageID int64, fileType string, maxDim int) (string, error) {
-	dst := viewRenditionPath(dstDir, imageID)
+	return ensureRendition(viewRenditionPath(dstDir, imageID), srcPath, dstDir, fileType, maxDim)
+}
+
+func ensureRendition(dst, srcPath, dstDir, fileType string, maxDim int) (string, error) {
 	if _, err := os.Stat(dst); err == nil {
 		return dst, nil
 	}
@@ -383,6 +399,7 @@ func writeThumbnails(srcPath, dstDir string, imageID int64, fileType string, pag
 	// The display rendition would otherwise keep showing the old bytes
 	// after a replace or rebuild.
 	_ = os.Remove(viewRenditionPath(dstDir, imageID))
+	_ = os.Remove(midRenditionPath(dstDir, imageID))
 
 	dstPath := ThumbnailPath(dstDir, imageID)
 

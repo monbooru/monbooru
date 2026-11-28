@@ -70,6 +70,7 @@ func TestBooruPaths(t *testing.T) {
 		{"/booru/main/0123abcd/thumb/7.jpg", "/booru/main/<key>/thumb/7.jpg", true},
 		{"/booru/main/0123abcd/file/7.png", "/booru/main/<key>/file/7.png", true},
 		{"/booru/main/0123abcd/sample/7.jpg", "/booru/main/<key>/sample/7.jpg", true},
+		{"/booru/main/0123abcd/mid/7.jpg", "/booru/main/<key>/mid/7.jpg", true},
 		{"/booru/file/0123abcd/posts.json", "/booru/file/<key>/posts.json", false},
 		{"/booru/thumb/0123abcd/thumb/7.jpg", "/booru/thumb/<key>/thumb/7.jpg", true},
 		{"/booru/main/0123abcd/", "/booru/main/<key>/", false},
@@ -247,7 +248,6 @@ func TestBooruObjectRoute(t *testing.T) {
 	}
 }
 
-// A gallery with one tagged, noted image behind the test token's address.
 func booruEnv(t *testing.T) (*testEnv, string, int64) {
 	t.Helper()
 	env := newTestEnv(t)
@@ -282,7 +282,6 @@ func TestBooruAuth(t *testing.T) {
 		t.Errorf("a write answered %d, want 405", w.Code)
 	}
 
-	// A token that is not the endpoint's, or one without read, opens nothing.
 	env.cfg.Auth.Tokens[0].Class = ""
 	if w := env.do("GET", base+"/posts.json"); w.Code != http.StatusUnauthorized {
 		t.Errorf("no endpoint: %d, want 401", w.Code)
@@ -293,7 +292,6 @@ func TestBooruAuth(t *testing.T) {
 		t.Errorf("a token without read: %d, want 401", w.Code)
 	}
 
-	// A gallery not turned on answers as an unknown one, files too.
 	env.cfg.Auth.Tokens[0].Scopes = []string{config.ScopeRead}
 	env.cfg.FindGallery(gallery).Booru = false
 	unknown := env.do("GET", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken), "no_such"))+"/posts.json").Body.String()
@@ -331,16 +329,16 @@ func TestBooruPosts(t *testing.T) {
 		{"?limit=1&page=2", []int64{id}},
 		{fmt.Sprintf("?page=b%d", id), nil},
 		{"?page=a1", []int64{other}},
-		// A page after an id comes back newest first, as on Danbooru.
+
 		{"?page=a0", []int64{other, id}},
 		{fmt.Sprintf("?page=b%d", other), []int64{id}},
 		{fmt.Sprintf("?page=a%d&limit=1", id), []int64{other}},
-		// Paged by id whatever the search's order.
+
 		{fmt.Sprintf("?tags=order:id&page=b%d", other+1), []int64{other, id}},
 		{fmt.Sprintf("?tags=id:%d..%d", id, other), []int64{other, id}},
 		{fmt.Sprintf("?tags=id:>%d", id), []int64{other}},
 		{"?page=bx", []int64{other, id}},
-		// The search one app tests a new site with.
+
 		{"?tags=*&page=1&limit=30", []int64{other, id}},
 		{fmt.Sprintf("?tags=id:%d,%d", id, other), []int64{other, id}},
 		{"?tags=status:deleted", nil},
@@ -394,7 +392,7 @@ func TestBooruPosts(t *testing.T) {
 		got, want any
 	}{
 		{"rating", p.Rating, "e"},
-		// Ingest adds the small, plain image's meta tags.
+
 		{"tag_string", p.TagString, "blue_sky char_a greyscale lowres user_a"},
 		{"tag_string_general", p.TagStringGeneral, "blue_sky"},
 		{"tag_string_artist", p.TagStringArtist, "user_a"},
@@ -422,7 +420,6 @@ func TestBooruPosts(t *testing.T) {
 		}
 	}
 
-	// The post's page, without .json, as one app tests a new site.
 	pages := []struct {
 		path, want string
 	}{
@@ -483,7 +480,6 @@ func TestBooruPosts(t *testing.T) {
 	}
 }
 
-// The JSON type of each field of a real Danbooru post.
 var danbooruPostTypes = map[string]string{
 	"approver_id": "null", "bit_flags": "number", "created_at": "string", "down_score": "number",
 	"fav_count": "number", "file_ext": "string", "file_size": "number", "file_url": "string",
@@ -618,7 +614,7 @@ func TestBooruTagList(t *testing.T) {
 		query string
 		want  []string
 	}{
-		// How the apps list the popular tags.
+
 		{"search[order]=count&limit=3", []string{"blue_sky", "greyscale", "lowres"}},
 		{"search[order]=count&limit=3&page=2", []string{"char_a", "sky_b", "user_a"}},
 		{"search[order]=name&limit=2", []string{"blue_sky", "char_a"}},
@@ -630,7 +626,7 @@ func TestBooruTagList(t *testing.T) {
 		{"search[name_matches]=Blue Sky", []string{"blue_sky"}},
 		{"search[name_comma]=user_a,blue_sky&search[order]=count", []string{"blue_sky", "user_a"}},
 		{"search[name_comma]=user_a,blue_sky&search[order]=name", []string{"blue_sky", "user_a"}},
-		// Ratings stay out, as they are a metatag on Danbooru.
+
 		{"search[name_matches]=expl*", nil},
 	}
 	for _, tc := range cases {
@@ -648,7 +644,6 @@ func TestBooruTagList(t *testing.T) {
 	}
 }
 
-// Danbooru lists 20 a page when the app names no limit.
 func TestBooruTagListPageSize(t *testing.T) {
 	env, base, id := booruEnv(t)
 	var names []string
@@ -713,6 +708,7 @@ func TestBooruFavicon(t *testing.T) {
 
 func TestBooruFiles(t *testing.T) {
 	env, base, id := booruEnv(t)
+	wide := env.createTestImage(t, "wide.png", 1440, 900)
 	cases := []struct {
 		path        string
 		code        int
@@ -721,6 +717,9 @@ func TestBooruFiles(t *testing.T) {
 		{fmt.Sprintf("/file/%d.png", id), http.StatusOK, "image/png"},
 		{fmt.Sprintf("/thumb/%d.jpg", id), http.StatusOK, "image/jpeg"},
 		{fmt.Sprintf("/sample/%d.jpg", id), http.StatusOK, "image/png"},
+		{fmt.Sprintf("/mid/%d.jpg", id), http.StatusOK, "image/png"},
+		{fmt.Sprintf("/mid/%d.jpg", wide), http.StatusOK, "image/jpeg"},
+		{"/mid/999999.jpg", http.StatusNotFound, ""},
 		{"/file/999999.png", http.StatusNotFound, ""},
 		{"/thumb/x.jpg", http.StatusNotFound, ""},
 	}
@@ -731,7 +730,6 @@ func TestBooruFiles(t *testing.T) {
 		}
 	}
 
-	// An app that has the bytes gets a 304, and other bytes another tag.
 	for _, path := range []string{fmt.Sprintf("/file/%d.png", id), fmt.Sprintf("/thumb/%d.jpg", id)} {
 		w := env.do("GET", base+path)
 		tag := w.Header().Get("ETag")
@@ -751,7 +749,13 @@ func TestBooruFiles(t *testing.T) {
 		t.Error("the file and its thumbnail share an ETag")
 	}
 
-	// Past the web UI's pixel cap, the sample is its cached JPEG.
+	if _, err := os.Stat(filepath.Join(env.thumbDir, fmt.Sprintf("%d_mid.jpg", wide))); err != nil {
+		t.Errorf("the mid rendition was not kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.thumbDir, fmt.Sprintf("%d_mid.jpg", id))); err == nil {
+		t.Error("a small image got a mid rendition")
+	}
+
 	mustExec(t, env.database.Write, `UPDATE images SET width = 20000, height = 10000 WHERE id = ?`, id)
 	w := env.do("GET", fmt.Sprintf("%s/sample/%d.jpg", base, id))
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/jpeg" {
@@ -762,7 +766,6 @@ func TestBooruFiles(t *testing.T) {
 	}
 }
 
-// lockSeen notes whether the gallery lock was held when the answer began.
 type lockSeen struct {
 	*httptest.ResponseRecorder
 	held     *bool
@@ -797,6 +800,7 @@ func TestBooruLetsGoOfTheLockForFiles(t *testing.T) {
 		{fmt.Sprintf("/file/%d.png", id), false},
 		{fmt.Sprintf("/thumb/%d.jpg", id), false},
 		{fmt.Sprintf("/sample/%d.jpg", id), false},
+		{fmt.Sprintf("/mid/%d.jpg", id), false},
 	}
 	for _, tc := range cases {
 		w := &lockSeen{ResponseRecorder: httptest.NewRecorder(), held: &held}
@@ -810,8 +814,6 @@ func TestBooruLetsGoOfTheLockForFiles(t *testing.T) {
 	}
 }
 
-// gallery-dl pages an order:id search by a<last id>, so the first page must
-// be in id order even where an import left the ingest times against it.
 func TestBooruOrderIDPagesAnImportedGallery(t *testing.T) {
 	env, base, id := booruEnv(t)
 	other := env.createTestImage(t, "other.png", 20, 20)
@@ -836,7 +838,6 @@ func TestBooruOrderIDPagesAnImportedGallery(t *testing.T) {
 	}
 }
 
-// A rendition that cannot be built falls back to the file, as in the web UI.
 func TestBooruSampleFallsBackToTheFile(t *testing.T) {
 	env, base, id := booruEnv(t)
 	var canonPath string
@@ -853,7 +854,6 @@ func TestBooruSampleFallsBackToTheFile(t *testing.T) {
 	}
 }
 
-// An app declaring duration a double fails on a bare 5, so it is 5.0.
 func TestBooruDuration(t *testing.T) {
 	seconds := func(f float64) *float64 { return &f }
 	cases := []struct {
@@ -903,6 +903,7 @@ func TestBooruPostListsANameOnce(t *testing.T) {
 }
 
 func TestBooruVariants(t *testing.T) {
+	const m = "m"
 	post := func(w, h int, ext string, large bool) booruPost {
 		p := booruPost{ImageWidth: w, ImageHeight: h, FileExt: ext, HasLarge: large,
 			FileURL: "f", LargeFileURL: "f", PreviewFileURL: "t"}
@@ -915,26 +916,49 @@ func TestBooruVariants(t *testing.T) {
 		name  string
 		post  booruPost
 		video bool
+		mid   string
 		want  string
 	}{
-		{"a small image", post(40, 30, "png", false), false,
+		{"a small image", post(40, 30, "png", false), false, "",
 			"180x180 t 40x30 jpg, 360x360 t 40x30 jpg, 720x720 f 40x30 png, original f 40x30 png"},
-		{"a wide image", post(1200, 600, "png", false), false,
-			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 f 1200x600 png, original f 1200x600 png"},
-		{"an image past the pixel cap", post(20000, 10000, "png", true), false,
-			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 s 4000x2000 jpg, sample s 4000x2000 jpg, original f 20000x10000 png"},
-		{"a format phones do not decode", post(600, 900, "jxl", true), false,
-			"180x180 t 200x300 jpg, 360x360 t 200x300 jpg, 720x720 s 600x900 jpg, sample s 600x900 jpg, original f 600x900 jxl"},
-		{"a video", post(1920, 1080, "mp4", false), true,
+		{"a wide image", post(1200, 600, "png", false), false, m,
+			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 m 720x360 jpg, original f 1200x600 png"},
+		{"an image past the pixel cap", post(20000, 10000, "png", true), false, m,
+			"180x180 t 300x150 jpg, 360x360 t 300x150 jpg, 720x720 m 720x360 jpg, sample s 4000x2000 jpg, original f 20000x10000 png"},
+		{"a format phones do not decode", post(600, 900, "jxl", true), false, m,
+			"180x180 t 200x300 jpg, 360x360 t 200x300 jpg, 720x720 m 480x720 jpg, sample s 600x900 jpg, original f 600x900 jxl"},
+		{"a small one of those", post(600, 700, "jxl", true), false, "",
+			"180x180 t 257x300 jpg, 360x360 t 257x300 jpg, 720x720 s 600x700 jpg, sample s 600x700 jpg, original f 600x700 jxl"},
+		{"a video", post(1920, 1080, "mp4", false), true, "",
 			"180x180 t 300x168 jpg, 360x360 t 300x168 jpg, 720x720 t 300x168 jpg, original f 1920x1080 mp4"},
 	}
 	for _, tc := range cases {
 		var got []string
-		for _, v := range booruVariants(tc.post, tc.video) {
+		for _, v := range booruVariants(tc.post, tc.video, tc.mid) {
 			got = append(got, fmt.Sprintf("%s %s %dx%d %s", v.Type, v.URL, v.Width, v.Height, v.FileExt))
 		}
 		if s := strings.Join(got, ", "); s != tc.want {
 			t.Errorf("%s:\n got %s\nwant %s", tc.name, s, tc.want)
+		}
+	}
+}
+
+func TestBooruMidSized(t *testing.T) {
+	cases := []struct {
+		name          string
+		fileType      string
+		width, height int
+		want          bool
+	}{
+		{"a small image", models.FileTypePNG, 720, 400, false},
+		{"a wide image", models.FileTypePNG, 1200, 600, true},
+		{"a tall AVIF", models.FileTypeAVIF, 600, 900, true},
+		{"an archive", models.FileTypeCBZ, 2000, 3000, false},
+		{"a video", models.FileTypeMP4, 1920, 1080, false},
+	}
+	for _, tc := range cases {
+		if got := booruMidSized(tc.fileType, tc.width, tc.height); got != tc.want {
+			t.Errorf("%s: mid sized = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

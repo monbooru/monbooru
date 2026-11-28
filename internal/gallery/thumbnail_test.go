@@ -565,6 +565,32 @@ func TestEnsureViewRendition_TurnsByEXIFOrientation(t *testing.T) {
 	}
 }
 
+func TestEnsureMidRendition_FitsWithinItsSizeAndGoesWithTheImage(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "wide.png")
+	mustWriteFile(t, src, solidPNG(t, 1440, 900, [3]uint8{200, 30, 30}), 0o644)
+	dst, err := EnsureMidRendition(src, dir, 1, "png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := image.DecodeConfig(f)
+	_ = f.Close()
+	if w, h := MidRenditionSize(1440, 900); err != nil || cfg.Width != w || cfg.Height != h || w != 720 || h != 450 {
+		t.Errorf("rendition %dx%d (%v), want %dx%d and that 720x450", cfg.Width, cfg.Height, err, w, h)
+	}
+	if !NeedsMidRendition(721, 10) || !NeedsMidRendition(10, 721) || NeedsMidRendition(720, 720) {
+		t.Error("an image needs the rendition when a side is past 720")
+	}
+	RemoveImageArtifacts(dir, 1, "png")
+	if fileExists(dst) {
+		t.Error("the rendition outlived its image")
+	}
+}
+
 func TestGenerate_TurnsCBZPageThumbnailsByTheirEXIF(t *testing.T) {
 	dir := t.TempDir()
 	cbz := writeTestZip(t, dir, "m.cbz", map[string][]byte{"01.jpg": orientedJPEG(t, 6), "02.jpg": orientedJPEG(t, 8)})

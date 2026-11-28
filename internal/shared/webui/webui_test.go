@@ -163,7 +163,7 @@ func (d testIntegration) Supported() bool { return d.MenuSupported || d.Autostar
 
 func TestTheTokenTableShowsAClassAndItsRevokeNote(t *testing.T) {
 	tmpl := template.Must(template.New("").Funcs(Funcs("")).ParseFS(Templates, "*.html"))
-	// The fields the table reads, as an app's token carries them.
+
 	type token struct {
 		ID, Name, CreatedAt, Paired, Class string
 		Scopes                             []string

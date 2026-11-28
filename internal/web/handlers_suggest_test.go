@@ -28,7 +28,6 @@ func TestTagSuggest_TargetParam(t *testing.T) {
 	wantNotIn(t, body, "shield")
 }
 
-// A tag field is the input right before a tag suggestion list, one tag or many.
 var tagFieldRe = regexp.MustCompile(`<input([^>]*)>\s*<div id="[^"]*" class="suggest-dropdown tag-suggest-dropdown">`)
 
 func TestTagsFieldsAskTheTagSuggestRoute(t *testing.T) {

@@ -22,24 +22,26 @@ func TestPruneOrphanThumbnails_KeepsTheLiveAndDropsTheOrphans(t *testing.T) {
 	database := newCollectionsTestDB(t)
 	thumbs := t.TempDir()
 	live := insertImage(t, database, false)
-	liveFiles := []string{fmt.Sprintf("%d.jpg", live), fmt.Sprintf("%d_hover.webp", live), fmt.Sprintf("%d_view.jpg", live)}
+	liveFiles := []string{fmt.Sprintf("%d.jpg", live), fmt.Sprintf("%d_hover.webp", live), fmt.Sprintf("%d_view.jpg", live), fmt.Sprintf("%d_mid.jpg", live)}
 	writeThumbFiles(t, thumbs, liveFiles...)
-	writeThumbFiles(t, thumbs, "9999.jpg", "9999_hover.webp", "9999_view.jpg", "notes.txt")
+	writeThumbFiles(t, thumbs, "9999.jpg", "9999_hover.webp", "9999_view.jpg", "9999_mid.jpg", "notes.txt")
 	var last int
 	removed, processed, total, err := PruneOrphanThumbnails(context.Background(), database, thumbs, func(done, _ int) { last = done })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 3 || processed != 7 || total != 7 || last != 7 {
-		t.Errorf("removed %d, processed %d of %d, last progress %d; want 3, 7, 7, 7", removed, processed, total, last)
+	if removed != 4 || processed != 9 || total != 9 || last != 9 {
+		t.Errorf("removed %d, processed %d of %d, last progress %d; want 4, 9, 9, 9", removed, processed, total, last)
 	}
 	for _, n := range append(liveFiles, "notes.txt") {
 		if !fileExists(filepath.Join(thumbs, n)) {
 			t.Errorf("%s went", n)
 		}
 	}
-	if fileExists(filepath.Join(thumbs, "9999_view.jpg")) {
-		t.Error("an orphan's view stayed")
+	for _, n := range []string{"9999_view.jpg", "9999_mid.jpg"} {
+		if fileExists(filepath.Join(thumbs, n)) {
+			t.Errorf("an orphan's %s stayed", n)
+		}
 	}
 }
 

@@ -145,7 +145,7 @@ func TestExecute_TheTagWalkPagesByIDAsSQLDoes(t *testing.T) {
 		{"walk_a id:<=" + m, "desc"},
 		{"walk_a walk_b id:>" + m, "asc"},
 		{"walk_a id:>=" + m, "asc"},
-		// A bound on the far side leaves the walk's start alone.
+
 		{"walk_b id:>" + m, "desc"},
 		{"walk_b id:<" + m, "asc"},
 		{"walk_c -id:<" + m, "desc"},

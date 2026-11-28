@@ -582,14 +582,12 @@ func wantBooruURL(srv *Server, tok apitoken.Token) string {
 	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash, srv.cfg.Galleries[0].Name))
 }
 
-// newBooruEndpointToken is a token as creating the endpoint makes it.
 func newBooruEndpointToken() apitoken.Token {
 	tok, _ := apitoken.New(booruTokenName, []string{config.ScopeRead})
 	tok.Class = api.BooruClass
 	return tok
 }
 
-// shareBooruGalleries turns every gallery on, so its address shows.
 func shareBooruGalleries(srv *Server) {
 	srv.cfgMu.Lock()
 	for i := range srv.cfg.Galleries {
@@ -632,7 +630,6 @@ func TestBooruEndpointInSettings(t *testing.T) {
 		})
 	}
 
-	// Without an endpoint there is no gallery to turn on.
 	srv := newTestServer(t)
 	body := postHTMXForm(t, srv, "/settings/auth/booru-gallery", url.Values{"gallery": {"default"}, "on": {"1"}}).Body.String()
 	wantIn(t, body, "create the Danbooru compatible endpoint first")
@@ -649,8 +646,7 @@ func TestCreatingTheBooruEndpoint(t *testing.T) {
 	if tok == nil || len(tok.Scopes) != 1 || !tok.HasScope(config.ScopeRead) {
 		t.Fatalf("the endpoint's token = %+v, want one locked to read", tok)
 	}
-	// Both blocks redraw: the token shows in API Tokens, the block offers
-	// its galleries, none of them on yet.
+
 	wantIn(t, body, `id="auth-tokens" hx-swap-oob="true"`)
 	wantIn(t, body, `id="booru-endpoints" hx-swap-oob="true"`)
 	wantIn(t, body, "Remove endpoint")
@@ -698,7 +694,7 @@ func TestRemovingTheBooruEndpoint(t *testing.T) {
 			if srv.cfg.Auth.Tokens.ByClass(api.BooruClass) != nil || srv.cfg.Auth.Tokens.ByID(reader.ID) == nil {
 				t.Errorf("tokens left: %+v, want only reader", srv.cfg.Auth.Tokens)
 			}
-			// A new endpoint starts with none shared.
+
 			if srv.cfg.Galleries[0].Booru {
 				t.Error("the gallery still answers")
 			}
@@ -791,8 +787,6 @@ func TestTurningABooruGalleryOn(t *testing.T) {
 	}
 }
 
-// The layer checks its own key, so a login in the web UI does not turn
-// the apps away.
 func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	srv := newTestServer(t)
 	setTestPassword(t, srv, "s3cret")
