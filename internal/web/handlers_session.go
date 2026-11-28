@@ -122,8 +122,14 @@ func (s *Server) sessionPage(w http.ResponseWriter, r *http.Request) {
 		} else if ok {
 			pair.SharedAncestor = src
 		}
-		origA, hasTagsA, hasSourcesA, _ := cx.RelationsSvc.DuplicateCandidateDetails(pair.A.ID, pair.B.ID)
-		origB, hasTagsB, hasSourcesB, _ := cx.RelationsSvc.DuplicateCandidateDetails(pair.B.ID, pair.A.ID)
+		origA, hasTagsA, hasSourcesA, err := cx.RelationsSvc.DuplicateCandidateDetails(pair.A.ID, pair.B.ID)
+		if err != nil {
+			logx.Debugf("session duplicate preview: %v", err)
+		}
+		origB, hasTagsB, hasSourcesB, err := cx.RelationsSvc.DuplicateCandidateDetails(pair.B.ID, pair.A.ID)
+		if err != nil {
+			logx.Debugf("session duplicate preview: %v", err)
+		}
 		pair.LeftAOriginalID = origA
 		pair.LeftAHasTags = hasTagsA
 		pair.LeftAHasSources = hasSourcesA
