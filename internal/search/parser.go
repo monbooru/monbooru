@@ -49,20 +49,24 @@ func parse(query string) (Expr, []string) {
 	if len(tokens) > maxQueryTokens {
 		return TagExpr{}, []string{"query too long"}
 	}
-	p := &parser{tokens: tokens}
+	p := &parser{}
 	if open {
 		p.problem("unterminated quote")
 	}
-	var expr Expr
-	for {
-		expr = andOf(expr, p.parseOr())
-		if p.peek() == nil {
-			return expr, p.problems
+	depth := 0
+	for _, t := range tokens {
+		switch {
+		case t.kind == tokOpen:
+			depth++
+		case t.kind == tokClose && depth == 0:
+			p.problem("unmatched )")
+			continue
+		case t.kind == tokClose:
+			depth--
 		}
-		// Only a ) stops parseOr at the top level.
-		p.problem("unmatched )")
-		p.next()
+		p.tokens = append(p.tokens, t)
 	}
+	return p.parseOr(), p.problems
 }
 
 type tokenKind int
