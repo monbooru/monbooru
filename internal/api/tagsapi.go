@@ -62,7 +62,6 @@ func (h *Handler) getTag(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, tagDetailResponse{tagResponse: toTagResponse(t), Note: note.Body, Links: note.Links, DistinctFrom: distinct})
 }
 
-// What the web's tag fields suggest, for a client with tag fields of its own.
 func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
 	g, ok := h.resolveGallery(w, r)
 	if !ok {
