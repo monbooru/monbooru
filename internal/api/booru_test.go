@@ -19,9 +19,12 @@ import (
 )
 
 func TestBooruKey(t *testing.T) {
-	a, b := BooruKey(apitoken.Hash("secret_a")), BooruKey(apitoken.Hash("secret_b"))
-	if len(a) != 32 || a == b || a != BooruKey(apitoken.Hash("secret_a")) {
+	a, b := BooruKey(apitoken.Hash("secret_a"), "main"), BooruKey(apitoken.Hash("secret_b"), "main")
+	if len(a) != 32 || a == b || a != BooruKey(apitoken.Hash("secret_a"), "main") {
 		t.Errorf("keys %q and %q: want 32 hex characters, one per token, the same every time", a, b)
+	}
+	if a == BooruKey(apitoken.Hash("secret_a"), "other") {
+		t.Error("two galleries share a key")
 	}
 	if strings.Contains(apitoken.Hash("secret_a"), a) {
 		t.Error("the key must not be part of the stored hash")
@@ -53,7 +56,7 @@ func TestBooruToken(t *testing.T) {
 			t.Errorf("%s: no BooruToken, want %q", tc.name, tc.want)
 		}
 	}
-	if booruKeyValid(config.AuthConfig{Tokens: apitoken.List{reader, endpoint}}, BooruKey(reader.TokenHash)) {
+	if booruKeyValid(config.AuthConfig{Tokens: apitoken.List{reader, endpoint}}, "main", BooruKey(reader.TokenHash, "main")) {
 		t.Error("a read token that is not the endpoint's opened the layer")
 	}
 }
@@ -254,7 +257,7 @@ func booruEnv(t *testing.T) (*testEnv, string, int64) {
 	body, _ := json.Marshal(map[string]any{"tags": []string{"blue_sky", "artist:user_a", "character:char_a", "rating:explicit"}})
 	mustCode(t, doJSON(env.mux, "POST", fmt.Sprintf("/api/v1/images/%d/tags", id), body), http.StatusOK)
 	mustExec(t, env.database.Write, `INSERT INTO image_annotations (image_id, site, post_id, x, y, w, h, body, manual) VALUES (?, '', '', 1, 2, 3, 4, 'a note', 1)`, id)
-	return env, BooruPath(env.cfg.DefaultGallery, BooruKey(apitoken.Hash(testAPIToken))), id
+	return env, BooruPath(env.cfg.DefaultGallery, BooruKey(apitoken.Hash(testAPIToken), env.cfg.DefaultGallery)), id
 }
 
 func TestBooruAuth(t *testing.T) {
@@ -267,7 +270,8 @@ func TestBooruAuth(t *testing.T) {
 		{"the address", base + "/posts.json", http.StatusOK},
 		{"a wrong key", BooruPath(gallery, strings.Repeat("0", 32)) + "/posts.json", http.StatusUnauthorized},
 		{"a wrong key on a file", BooruPath(gallery, strings.Repeat("0", 32)) + "/thumb/1.jpg", http.StatusUnauthorized},
-		{"an unknown gallery", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken))) + "/posts.json", http.StatusNotFound},
+		{"another gallery's key", BooruPath(gallery, BooruKey(apitoken.Hash(testAPIToken), "no_such")) + "/posts.json", http.StatusUnauthorized},
+		{"an unknown gallery", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken), "no_such")) + "/posts.json", http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		if w := env.do("GET", tc.path); w.Code != tc.code {
@@ -292,7 +296,7 @@ func TestBooruAuth(t *testing.T) {
 	// A gallery not turned on answers as an unknown one, files too.
 	env.cfg.Auth.Tokens[0].Scopes = []string{config.ScopeRead}
 	env.cfg.FindGallery(gallery).Booru = false
-	unknown := env.do("GET", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken)))+"/posts.json").Body.String()
+	unknown := env.do("GET", BooruPath("no_such", BooruKey(apitoken.Hash(testAPIToken), "no_such"))+"/posts.json").Body.String()
 	for _, path := range []string{"/posts.json", "/thumb/1.jpg"} {
 		w := env.do("GET", base+path)
 		if w.Code != http.StatusNotFound || w.Body.String() != unknown {

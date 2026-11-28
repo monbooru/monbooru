@@ -44,9 +44,10 @@ const (
 )
 
 // BooruKey is derived from the stored hash, so the address lives as long as
-// the token; the prefix keeps the key from being the hash itself.
-func BooruKey(tokenHash string) string {
-	sum := sha256.Sum256([]byte("monbooru-booru\x00" + tokenHash))
+// the token; the prefix keeps the key from being the hash itself, and the
+// gallery's name keeps one address from opening another gallery.
+func BooruKey(tokenHash, gallery string) string {
+	sum := sha256.Sum256([]byte("monbooru-booru\x00" + tokenHash + "\x00" + gallery))
 	return hex.EncodeToString(sum[:16])
 }
 
@@ -103,9 +104,9 @@ func splitBooruPath(path string) (gallery, route string, ok bool) {
 	return gallery, route, true
 }
 
-func booruKeyValid(auth config.AuthConfig, key string) bool {
+func booruKeyValid(auth config.AuthConfig, gallery, key string) bool {
 	t := BooruToken(auth)
-	return t != nil && subtle.ConstantTimeCompare([]byte(BooruKey(t.TokenHash)), []byte(key)) == 1
+	return t != nil && subtle.ConstantTimeCompare([]byte(BooruKey(t.TokenHash, gallery)), []byte(key)) == 1
 }
 
 type booruHandler func(http.ResponseWriter, *http.Request, *library.Gallery)
@@ -152,7 +153,7 @@ func (h *Handler) booru(next booruHandler) http.HandlerFunc {
 // that does not.
 func (h *Handler) booruGallery(w http.ResponseWriter, r *http.Request) (*library.Gallery, bool) {
 	cfg := h.cfg()
-	if !booruKeyValid(cfg.Auth, r.PathValue("key")) {
+	if !booruKeyValid(cfg.Auth, r.PathValue("gallery"), r.PathValue("key")) {
 		contract.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid key")
 		return nil, false
 	}

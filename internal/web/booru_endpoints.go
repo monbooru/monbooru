@@ -61,9 +61,9 @@ func (s *Server) booruEndpoints(r *http.Request) booruEndpointsView {
 		return booruEndpointsView{}
 	}
 	v := booruEndpointsView{Exists: true}
-	origin, key := s.browserOrigin(r), api.BooruKey(tok.TokenHash)
+	origin := s.browserOrigin(r)
 	for _, g := range c.Galleries {
-		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, key), On: g.Booru})
+		v.Addresses = append(v.Addresses, booruAddress{Gallery: g.Name, URL: origin + api.BooruPath(g.Name, api.BooruKey(tok.TokenHash, g.Name)), On: g.Booru})
 	}
 	switch {
 	case desktop.IsLoopbackAddr(c.Server.BindAddress):

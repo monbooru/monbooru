@@ -579,7 +579,7 @@ func TestPairedTokenPrivilegesLocked(t *testing.T) {
 }
 
 func wantBooruURL(srv *Server, tok apitoken.Token) string {
-	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+	return "http://example.com" + api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash, srv.cfg.Galleries[0].Name))
 }
 
 // newBooruEndpointToken is a token as creating the endpoint makes it.
@@ -789,7 +789,7 @@ func TestBooruLayerAnswersPastTheLogin(t *testing.T) {
 	tok := newBooruEndpointToken()
 	setTokens(srv, []apitoken.Token{tok})
 	shareBooruGalleries(srv)
-	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash))
+	path := api.BooruPath(srv.cfg.Galleries[0].Name, api.BooruKey(tok.TokenHash, srv.cfg.Galleries[0].Name))
 	cases := []struct {
 		name, path string
 		code       int
