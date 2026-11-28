@@ -452,12 +452,12 @@
   var postdecideDlg = document.getElementById('session-postdecide-delete-dialog');
   var pdFlash = document.getElementById('postdecide-flash');
   var btnDuplicate = document.getElementById('session-btn-duplicate');
-  var decideAnswered = false;
+  var decideSent = false;
   var decideRedirect = null;
 
   function openDuplicateDialog() {
     if (!postdecideDlg || !pair) return;
-    decideAnswered = false;
+    decideSent = false;
     decideRedirect = null;
     var leftID = currentLeftID();
     var aID = pair.dataset.a, bID = pair.dataset.b;
@@ -508,10 +508,10 @@
     };
     if (formDetector) params.detector = formDetector.value;
 
+    decideSent = true;
     postForm('/relations/session/decide', params, {
-      hx: true,
+      hx: true, flashId: 'postdecide-flash',
       onOK: function(res) {
-        decideAnswered = true;
         var redir = res.headers.get('HX-Redirect');
         if (redir) decideRedirect = redir;
 
@@ -529,6 +529,7 @@
           if (postdecideDlg) postdecideDlg.close();
         }
 
+        // A refused copy answers 200 with an error body, so the body decides.
         function pdCopy(what, next) {
           var box = document.getElementById('postdecide-copy-' + what);
           if (!box || !box.checked || groupID <= 0) { next(); return; }
@@ -542,12 +543,6 @@
                 }
                 next();
               });
-            },
-            onErr: function(msg) {
-              if (pdFlash) {
-                if (msg.indexOf('<') !== -1) pdFlash.innerHTML = msg;
-                else pdFlash.innerHTML = '<div class="flash flash-err">' + msg + '</div>';
-              }
             }
           });
         }
@@ -564,28 +559,14 @@
           postForm('/relations/duplicates/marked/delete-one', {image_id: String(dupID)}, {
             hx: true, flashId: 'postdecide-flash',
             onOK: function(delRes) {
+              // A raw fetch does not process HX-Trigger, so the flash is
+              // stashed for the reload by hand.
               var f = JSON.parse(delRes.headers.get('HX-Trigger') || '{}')['action-flash'];
               if (f) stashActionFlash(f.text, f.kind);
               pdDone();
-            },
-            onErr: function(msg) {
-              if (pdFlash) {
-                if (msg.indexOf('<') !== -1) pdFlash.innerHTML = msg;
-                else pdFlash.innerHTML = '<div class="flash flash-err">' + msg + '</div>';
-              }
             }
           });
         });
-      },
-      onErr: function(msg) {
-        decideAnswered = true;
-        if (pdFlash) {
-          if (msg.indexOf('<') !== -1) {
-            pdFlash.innerHTML = msg;
-          } else {
-            pdFlash.innerHTML = '<div class="flash flash-err">' + msg + '</div>';
-          }
-        }
       }
     });
   }
@@ -599,16 +580,14 @@
     submitDuplicateDecision(true);
   });
 
-  // If decide has answered (success or refusal), closing reloads the page.
-  // Esc or [X] before decide answers simply dismisses the dialog with nothing to undo.
   if (postdecideDlg) {
     postdecideDlg.addEventListener('cancel', function(e) {
       e.preventDefault();
       postdecideDlg.close();
     });
     postdecideDlg.addEventListener('close', function() {
-      if (decideAnswered) {
-        decideAnswered = false;
+      if (decideSent) {
+        decideSent = false;
         if (decideRedirect) {
           window.location.href = decideRedirect;
         } else {
