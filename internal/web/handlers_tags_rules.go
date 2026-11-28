@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,7 +17,10 @@ import (
 
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/monloader"
+	"github.com/monbooru/monbooru/internal/peer"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/shared/logx"
+	"github.com/monbooru/monbooru/internal/shared/webui"
 	"github.com/monbooru/monbooru/internal/tagger"
 	"github.com/monbooru/monbooru/internal/tags"
 )
@@ -278,19 +280,21 @@ func (s *Server) tagRulesPanel(w http.ResponseWriter, r *http.Request) {
 }
 
 // tagRulesAnswers asks monloader about the tag and its first aliases; state
-// is unpaired, paused, old, unreachable or live.
-func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases []models.Tag) ([]monloader.TagRules, string) {
+// is unpaired, paused, old, rejected, unreachable or live.
+func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases []models.Tag) ([]contract.TagRules, string) {
 	switch {
 	case !s.pairedWith(monloader.App):
 		return nil, "unpaired"
 	case s.ml.Paused():
 		return nil, "paused"
+	case s.ml.Status().Conn == peer.ConnRejected:
+		return nil, "rejected"
 	case !s.ml.Usable():
 		return nil, "unreachable"
 	}
-	names := []monloader.TagName{{Tag: tag.Name, Category: tag.CategoryName}}
+	names := []contract.TagName{{Tag: tag.Name, Category: tag.CategoryName}}
 	for _, a := range aliases[:min(len(aliases), maxRulesAliases)] {
-		names = append(names, monloader.TagName{Tag: a.Name, Category: a.CategoryName})
+		names = append(names, contract.TagName{Tag: a.Name, Category: a.CategoryName})
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -305,9 +309,9 @@ func (s *Server) tagRulesAnswers(ctx context.Context, tag *models.Tag, aliases [
 	return answers, "live"
 }
 
-func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []monloader.TagRules, state string) tagPath {
+func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []contract.TagRules, state string) tagPath {
 	colors := s.categoryColors()
-	catColor := func(cat string) string { return categoryColor(colors[cat]) }
+	catColor := func(cat string) string { return string(webui.CategoryColor(colors[cat])) }
 	p := tagPath{Monloader: state, GalleryName: s.activeGallery(), Category: tag.CategoryName, CatColor: catColor(tag.CategoryName)}
 	web := s.monloaderWebBase()
 
@@ -323,6 +327,8 @@ func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []m
 		switch p.Monloader {
 		case "paused":
 			note.Span = &pathBox{Parts: []pathPart{part("paused, no site lanes", "dim")}}
+		case "rejected":
+			note.Span = &pathBox{Parts: []pathPart{part("auth rejected, no site lanes", "dim")}}
 		case "unreachable":
 			note.Span = &pathBox{Parts: []pathPart{part("unreachable, no site lanes", "dim")}}
 		case "old":
@@ -429,11 +435,11 @@ func (s *Server) buildTagPath(tag *models.Tag, aliases []models.Tag, answers []m
 }
 
 // Sites with nothing naming the tag fold into one lane; the PTR never does.
-func siteLanes(name, cat string, rules monloader.TagRules, web string, catColor func(string) string) []pathLane {
-	var lanes []pathLane
-	var folded []monloader.TagRule
-	for _, r := range rules.Sites {
-		if r.Rule == "none" && len(r.MappedFrom) == 0 && len(r.RenamedFrom) == 0 && r.Blacklist == "" && r.Kept && r.Kind != "lookup" {
+func siteLanes(name, cat string, rules contract.TagRules, web string, catColor func(string) string) []pathLane {
+	lanes, sites := allSitesLane(name, cat, rules.Sites, web, catColor)
+	var folded []contract.TagRule
+	for _, r := range sites {
+		if r.Rule == contract.RuleNone && len(r.MappedFrom) == 0 && len(r.RenamedFrom) == 0 && len(r.RenamedFromGlobal) == 0 && r.Blacklist == "" && r.Kept && r.Kind != contract.KindLookup {
 			folded = append(folded, r)
 			continue
 		}
@@ -455,25 +461,49 @@ func siteLanes(name, cat string, rules monloader.TagRules, web string, catColor 
 	return lanes
 }
 
-func siteLane(name, cat string, r monloader.TagRule, web string, catColor func(string) string) pathLane {
+// Sites that only monloader's tag rules for all sites touch answer alike, so
+// two or more of them share one lane; the PTR keeps its own.
+func allSitesLane(name, cat string, sites []contract.TagRule, web string, catColor func(string) string) (lanes []pathLane, rest []contract.TagRule) {
+	var shared []contract.TagRule
+	for _, r := range sites {
+		touched := r.RuleList == contract.ListGlobal || (r.Rule == contract.RuleNone && len(r.RenamedFromGlobal) > 0)
+		if touched && r.Kind != contract.KindLookup && r.Blacklist == "" && len(r.MappedFrom) == 0 && len(r.RenamedFrom) == 0 {
+			shared = append(shared, r)
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	if len(shared) < 2 {
+		return nil, sites
+	}
+	lane := siteLane(name, cat, shared[0], web, catColor)
+	lane.Name, lane.Site = "all sites", ""
+	lane.Steps[0].Right = ""
+	return []pathLane{lane}, rest
+}
+
+func siteLane(name, cat string, r contract.TagRule, web string, catColor func(string) string) pathLane {
 	lane := pathLane{Kind: "site", Name: r.Site, NameClass: "ml", Site: r.Kind}
 	tagCat := cat
-	isPTR := r.Kind == "lookup"
+	isPTR := r.Kind == contract.KindLookup
 	ruleHref, rulesHref := "", ""
 	if web != "" {
 		ruleHref = web + "/settings?site=" + url.QueryEscape(r.Site) + "&tab=mapping&q=" + url.QueryEscape(name)
 		rulesHref = web + "/settings#rules"
 	}
 	step1 := &pathBox{Href: ruleHref}
+	if r.RuleList == contract.ListGlobal {
+		step1.Href = rulesHref
+	}
 	if r.Builtin {
 		step1.Right = "built-in"
 	}
 	switch r.Rule {
-	case "drop":
+	case contract.RuleDrop:
 		step1.Parts, step1.State = []pathPart{part("tag rule: ", "fg"), part("drop", "err")}, "stop"
 		lane.Steps[0] = step1
 		return lane
-	case "rename", "move":
+	case contract.RuleRename, contract.RuleMove:
 		targetCat, _, _ := strings.Cut(r.Target, ":")
 		if !strings.Contains(r.Target, ":") {
 			targetCat = cat
@@ -483,8 +513,12 @@ func siteLane(name, cat string, r monloader.TagRule, web string, catColor func(s
 		return lane
 	}
 	switch {
-	case len(r.RenamedFrom) > 0:
-		step1.Parts = []pathPart{part("tag rule: ", "fg"), colored(strings.Join(r.RenamedFrom, ", "), catColor(cat)), part(" → here", "dim")}
+	case len(r.RenamedFrom)+len(r.RenamedFromGlobal) > 0:
+		names := slices.Concat(r.RenamedFrom, r.RenamedFromGlobal)
+		step1.Parts = []pathPart{part("tag rule: ", "fg"), colored(strings.Join(names, ", "), catColor(cat)), part(" → here", "dim")}
+		if len(r.RenamedFrom) == 0 {
+			step1.Href = rulesHref
+		}
 	case len(r.MappedFrom) > 0:
 		step1.Parts = []pathPart{part("category map: "+strings.Join(r.MappedFrom, ", ")+" → ", "fg"), colored(cat, catColor(cat))}
 	default:
@@ -495,16 +529,22 @@ func siteLane(name, cat string, r monloader.TagRule, web string, catColor func(s
 	step2 := &pathBox{Parts: []pathPart{part("passes", "dim")}, Href: rulesHref}
 	if r.Blacklist != "" {
 		list := "global list"
-		if r.Blacklist == "site" {
+		if r.Blacklist == contract.ListSite {
 			list = r.Site + "'s own list"
 			if web != "" {
 				step2.Href = web + "/settings?site=" + url.QueryEscape(r.Site) + "&tab=mapping"
 			}
 		}
-		if others := blacklistCondition(r.BlacklistLine, name); others != "" {
+		switch {
+		case r.BlacklistCondition != nil && *r.BlacklistCondition != "":
 			step2.Parts, step2.State = []pathPart{part("skip", "warn")}, "cond"
-			step2.Note = "only with " + others
-		} else {
+			step2.Note = "only with " + *r.BlacklistCondition
+		// An older monloader names no condition, so a longer line is shown
+		// whole rather than parsed here.
+		case r.BlacklistCondition == nil && len(strings.Fields(r.BlacklistLine)) > 1:
+			step2.Parts, step2.State = []pathPart{part("skip", "warn")}, "cond"
+			step2.Note = r.BlacklistLine
+		default:
 			step2.Parts, step2.State = []pathPart{part("skip", "err")}, "stop"
 			step2.Note = list + ": post skipped"
 			if isPTR {
@@ -553,16 +593,16 @@ func sharedCategory(aliases []models.Tag) string {
 
 // A spelling no site does anything with joins the quiet list; one a site
 // drops, renames or skips gets that site's lane, the others folded beside it.
-func aliasLanes(cat string, aliases []models.Tag, answers []monloader.TagRules, web string, catColor func(string) string) (lanes []pathLane, quiet []models.Tag) {
+func aliasLanes(cat string, aliases []models.Tag, answers []contract.TagRules, web string, catColor func(string) string) (lanes []pathLane, quiet []models.Tag) {
 	for i, a := range aliases {
 		if i >= len(answers) {
 			quiet = append(quiet, aliases[i:]...)
 			break
 		}
-		var loud []pathLane
-		var folded []monloader.TagRule
-		for _, r := range answers[i].Sites {
-			if r.Rule == "none" && r.Blacklist == "" && r.Kept && len(r.RenamedFrom) == 0 {
+		loud, sites := allSitesLane(a.Name, a.CategoryName, answers[i].Sites, web, catColor)
+		var folded []contract.TagRule
+		for _, r := range sites {
+			if r.Rule == contract.RuleNone && r.Blacklist == "" && r.Kept && len(r.RenamedFrom) == 0 && len(r.RenamedFromGlobal) == 0 {
 				folded = append(folded, r)
 				continue
 			}
@@ -615,31 +655,11 @@ func (s *Server) elsewhereLines(tag *models.Tag, aliases []models.Tag) []pathLin
 	return lines
 }
 
-// A blacklist line skips a post only when all its tags match, so a line
-// naming more than the tag is a condition: the rest of the line.
-func blacklistCondition(line, name string) string {
-	tokens := strings.Fields(line)
-	if len(tokens) < 2 {
-		return ""
-	}
-	for i, t := range tokens {
-		_, bare, found := strings.Cut(t, ":")
-		if !found {
-			bare = t
-		}
-		if ok, _ := path.Match(bare, name); ok {
-			return strings.Join(slices.Delete(tokens, i, i+1), " ")
-		}
-	}
-	return strings.Join(tokens, " ")
-}
-
 // One lane per tagger whose label file reaches the name, and one more when
 // a label lands on a spelling of it; a tagger off for this gallery shows
 // so on the name's own lane, and one that knows neither has no lane.
 func (s *Server) taggerLanes(tag *models.Tag, aliases []models.Tag, catColor func(string) string) (own, spelled []pathLane) {
 	cfg := s.cfgSnapshot()
-	modelPath := s.modelPath()
 	catIDs, _ := s.categoryChoices()
 	active := s.activeGallery()
 	reaches := func(v tagger.LabelView, name, cat string) bool {
@@ -649,7 +669,7 @@ func (s *Server) taggerLanes(tag *models.Tag, aliases []models.Tag, catColor fun
 		if t.Malformed {
 			continue
 		}
-		views, err := tagger.BrowseLabels(modelPath, t.Name, taggerTagsFile(t.TaggerInstance), catIDs)
+		views, err := tagger.BrowseLabels(s.dataPath(), t.Name, catIDs)
 		if err != nil {
 			continue
 		}

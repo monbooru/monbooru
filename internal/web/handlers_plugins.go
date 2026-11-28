@@ -5,8 +5,8 @@ import (
 	"net"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/monloader"
@@ -145,6 +145,20 @@ func (s *Server) pairedTokenInfo(app string) (string, []string) {
 	return "", nil
 }
 
+// pairedKey changes with any paired token, a re-pair's new one included.
+func (s *Server) pairedKey() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	var ids []string
+	for _, t := range s.cfg.Auth.Tokens {
+		if t.Paired != "" {
+			ids = append(ids, t.ID)
+		}
+	}
+	slices.Sort(ids)
+	return strings.Join(ids, ".")
+}
+
 func (s *Server) pairedPeerCount() int {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
@@ -157,23 +171,54 @@ func (s *Server) pairedPeerCount() int {
 	return n
 }
 
+// pendingCounts counts the requests waiting under Plugins: a worker's
+// waits under Auto-Tagger.
+func (s *Server) pendingCounts() int {
+	n := 0
+	for _, req := range s.pairs.ListPending() {
+		if req.App != contract.AppMonworker {
+			n++
+		}
+	}
+	return n
+}
+
 // The answers carry the nav notice and the settings count too, so a
 // decision clears them at once rather than on the next job-status poll.
 func (s *Server) pairViewData() map[string]any {
 	n := s.pairNotice()
 	n.OOB = true
-	return map[string]any{
-		"Pending": s.pendingOffers(),
-		"Paired":  s.pairedPeerCount(),
-		"Notice":  n,
-		"PairKey": n.Key(),
+	plugins := s.pendingCounts()
+	data := map[string]any{
+		"Pending":        s.pendingOffers(),
+		"Paired":         s.pairedKey(),
+		"Notice":         n,
+		"PluginsPending": plugins,
+		"PairKey":        n.Key(),
+		"AutoPaired":     s.win.list(),
 	}
+	if closes := s.win.closesAt(); !closes.IsZero() {
+		data["WindowSecs"] = int(time.Until(closes).Round(time.Second).Seconds())
+		data["WindowLeft"] = countdown(closes)
+	}
+	return data
 }
 
+// A worker's request waits in the Auto-Tagger section, under its name;
+// the notice leads there when no other request waits.
 func (s *Server) pairNotice() webui.PairNotice {
 	n := webui.PairNotice{Href: "/settings#plugins"}
+	workers := 0
 	for _, req := range s.pairs.ListPending() {
-		n.Items = append(n.Items, webui.PairItem{App: req.App, Source: req.Source, Version: req.Version, Repair: req.Repair, ExpiresAt: req.ExpiresAt()})
+		name := req.App
+		if req.App == contract.AppMonworker {
+			name = req.WorkerName()
+			workers++
+		}
+		n.Items = append(n.Items, webui.PairItem{App: name, Source: req.Source, Version: req.Version, Repair: req.Repair, ExpiresAt: req.ExpiresAt()})
+	}
+	if workers > 0 && workers == len(n.Items) {
+		n.Href = "/settings#tagger"
 	}
 	return n
 }
@@ -197,6 +242,9 @@ func (s *Server) pendingOffers() []pendingOffer {
 	}
 	out := make([]pendingOffer, 0, len(pending))
 	for _, req := range pending {
+		if req.App == contract.AppMonworker {
+			continue
+		}
 		ip := net.ParseIP(req.Source)
 		local := managed[req.App] && ip != nil && ip.IsLoopback()
 		out = append(out, pendingOffer{Req: req, SessionNote: req.OpenOutranksScopes() && !local})
@@ -206,12 +254,12 @@ func (s *Server) pendingOffers() []pendingOffer {
 
 func (s *Server) pluginPairingFragment(w http.ResponseWriter, r *http.Request) {
 	data := s.pairViewData()
-	count, _ := data["Paired"].(int)
 	if r.URL.Query().Get("pair") == data["PairKey"] {
 		delete(data, "Notice")
 	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", data)
-	if was := r.URL.Query().Get("paired"); was != "" && was != strconv.Itoa(count) {
+	s.win.markSeen()
+	if r.URL.Query().Has("paired") && r.URL.Query().Get("paired") != data["Paired"] {
 		s.renderPluginRows(w, r, true)
 		s.renderAuthTokensOOB(w, r)
 	}
@@ -221,7 +269,12 @@ func (s *Server) pluginPairDeny(w http.ResponseWriter, r *http.Request) {
 	if !parseFormOK(w, r) {
 		return
 	}
+	req, _ := s.pairs.Get(r.PathValue("id"))
 	s.pairs.SetState(r.PathValue("id"), pairing.Denied)
+	if req.App == contract.AppMonworker {
+		s.workerPairDecided(w, pairing.Denied, "")
+		return
+	}
 	s.renderTemplate(w, "partials/plugin_pairing.html", s.pairViewData())
 }
 
@@ -233,6 +286,9 @@ func (s *Server) pluginPairRemove(w http.ResponseWriter, r *http.Request) {
 	saveErr, notifyErr := s.removePeerPairing(r, name)
 	s.renderPluginRows(w, r, false)
 	s.renderAuthTokensOOB(w, r)
+	panel := s.pairViewData()
+	panel["OOB"] = true
+	s.renderTemplate(w, "partials/plugin_pairing.html", panel)
 	if saveErr != nil {
 		writeFlashOOB(w, "flash-plugins", "err", "Could not save: "+saveErr.Error())
 	} else if notifyErr != nil {

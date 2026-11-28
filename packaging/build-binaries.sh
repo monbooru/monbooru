@@ -1,7 +1,9 @@
 #!/bin/sh
 # packaging/build-binaries.sh <lite|bundled>
 #
-# Assembles the downloadable archives into dist/.
+# Assembles the downloadable archive for GOOS/GOARCH into dist/, from the
+# tools fetch-tools.sh left: lite is monbooru and ffmpeg, bundled adds
+# the monworker beside them.
 set -eu
 
 shape=${1:?usage: build-binaries.sh lite|bundled}
@@ -27,8 +29,9 @@ build() {
   mkdir -p "$dir"
 
   compile "$pkg" "$dir/$exe"
+  cp -r tools/* "$dir/"
   if [ "$shape" = bundled ]; then
-    cp -r tools/* "$dir/"
+    cp -r worker/* "$dir/"
   fi
 
   cp LICENSE README.md "$dir/"
@@ -50,27 +53,16 @@ build() {
 
 compile() {
   ldflags="-s -w $gui $LDFLAGS -X '$MOD.Package=$1' -X 'main.defaultDesktop=true'"
-  if [ "$shape" = bundled ]; then
-    GOOS=$os GOARCH=$arch CGO_ENABLED=1 go build -tags tagger -trimpath \
-      -ldflags="$ldflags" -o "$2" ./cmd/monbooru
-  else
-    GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-      -ldflags="$ldflags" -o "$2" ./cmd/monbooru
-  fi
+  GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+    -ldflags="$ldflags" -o "$2" ./cmd/monbooru
 }
 
 case "$shape" in
-lite)
-  for target in linux/amd64 linux/arm64 windows/amd64; do
-    build "${target%/*}" "${target#*/}"
-  done
-  ;;
-bundled)
-  build "${GOOS:?GOOS must name the target}" "${GOARCH:?GOARCH must name the target}"
-  ;;
+lite | bundled) ;;
 *)
   echo "unknown shape $shape" >&2
   exit 2
   ;;
 esac
+build "${GOOS:?GOOS must name the target}" "${GOARCH:?GOARCH must name the target}"
 ls -la dist

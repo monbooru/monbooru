@@ -3,6 +3,6 @@
 {{if eq $provider ""}}{{$provider = "cpu"}}{{end}}
 {{$label := providerLabel $provider}}
 <span id="tagger-mode-badge"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  {{if eq $provider "cpu"}}<span class="status-badge status-off" title="Auto-tagger runs on {{$label}}">{{$label}}</span>{{else}}<span class="status-badge status-ok" title="Auto-tagger runs on {{$label}}">{{$label}}</span>{{end}}
+  {{if .None}}<span class="status-badge status-off" title="No worker to tag with">no worker</span>{{else if eq $provider "cpu"}}<span class="status-badge status-off" title="Auto-tagger runs on {{$label}}">{{$label}}</span>{{else}}<span class="status-badge status-ok" title="Auto-tagger runs on {{$label}}">{{$label}}</span>{{end}}
 </span>
 {{end}}

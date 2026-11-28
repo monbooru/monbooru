@@ -105,6 +105,9 @@ func (cx *Gallery) Land(ctx context.Context, dir, name string, write func(dst st
 	if err := cx.landable(want); err != nil {
 		return LandResult{}, err
 	}
+	if err := gallery.RootReadable(cx.Boundary().Root()); err != nil {
+		return LandResult{}, landErr(LandWrite, err)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return LandResult{}, landErr(LandWrite, err)
 	}

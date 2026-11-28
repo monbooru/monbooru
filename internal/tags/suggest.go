@@ -3,6 +3,7 @@ package tags
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
@@ -75,44 +76,98 @@ func (s *Service) SuggestTags(prefix, categoryName string, limit int) ([]models.
 	return SuggestUsageRanked(s.db, prefix, categoryName, false, limit)
 }
 
+// Only a real category splits the word: "nier:automata" is one tag name.
+// A failed category read is an error, not a whole-word search.
+func (s *Service) SuggestTyped(typed string, limit int) ([]models.Tag, string, error) {
+	f, err := SplitForm(s.db, typed)
+	if err != nil {
+		return nil, "", err
+	}
+	category, name := "", f.Name
+	if f.CategoryID != 0 {
+		category = f.Category
+	}
+	ts, err := s.SuggestTags(name, category, limit)
+	return ts, category, err
+}
+
+// A general name in spellOut is written out in full, for an input that
+// reads a bare name in every category.
+func QualifySuggestions(ts []models.Tag, typedCategory string, spellOut map[string]bool) {
+	for i := range ts {
+		t := &ts[i]
+		switch {
+		case typedCategory != "" && t.ViaAlias == "":
+			t.Name = typedCategory + ":" + t.Name
+		case t.CategoryName != "" && (t.CategoryName != "general" || spellOut[t.Name]):
+			t.Name = t.CategoryName + ":" + t.Name
+		}
+	}
+}
+
+const AliasMatchFrom = `tags a INDEXED BY idx_tags_alias_canonical
+	CROSS JOIN tags c ON c.id = a.canonical_tag_id`
+
 func SuggestUsageRanked(database *db.DB, prefix, categoryName string, requireUsage bool, limit int) ([]models.Tag, error) {
 	prefix = db.EscapeLike(NormalizeTagName(prefix))
 	// Ranked on tags alone so idx_tags_active_usage can stop at the
 	// limit; with the category join the planner drives from
 	// tag_categories and temp-sorts every tag.
-	baseSQL := `SELECT t.id, t.name, tc.name, tc.color, t.usage_count
-	            FROM (SELECT id, name, category_id, usage_count
-	                  FROM tags
-	                  WHERE is_alias = 0 AND rejected = 0
-	                    %s
-	                    AND name LIKE ? ESCAPE '\'
-	                    %s
+	baseSQL := `SELECT t.id, t.name, tc.name, tc.color, t.usage_count, t.via_alias
+	            FROM (SELECT id, name, category_id, usage_count,
+	                         CASE WHEN MAX(own) = 1 THEN '' ELSE MIN(via_alias) END AS via_alias
+	                  FROM (SELECT * FROM (
+	                            SELECT id, name, category_id, usage_count, 1 AS own, '' AS via_alias
+	                            FROM tags
+	                            WHERE is_alias = 0 AND rejected = 0
+	                              %[1]s
+	                              AND name LIKE ? ESCAPE '\'
+	                              %[2]s
+	                            ORDER BY usage_count DESC, name ASC
+	                            LIMIT ?)
+	                        UNION ALL
+	                        SELECT * FROM (
+	                            SELECT c.id, c.name, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
+	                            FROM ` + AliasMatchFrom + `
+	                            WHERE a.is_alias = 1 AND c.is_alias = 0 AND c.rejected = 0
+	                              %[3]s
+	                              AND a.name LIKE ? ESCAPE '\'
+	                              %[4]s
+	                            GROUP BY c.id
+	                            ORDER BY c.usage_count DESC, c.name ASC
+	                            LIMIT ?))
+	                  GROUP BY id
 	                  ORDER BY usage_count DESC, name ASC
 	                  LIMIT ?) t
 	            JOIN tag_categories tc ON tc.id = t.category_id
 	            ORDER BY t.usage_count DESC, t.name ASC`
-	usageClause := ""
+	usageClause, aliasUsageClause := "", ""
 	if requireUsage {
 		usageClause = "AND usage_count > 0"
+		aliasUsageClause = "AND c.usage_count > 0"
 	}
-	catClause := ""
+	catClause, aliasCatClause := "", ""
 	var catArgs []any
 	if categoryName != "" {
 		catClause = "AND category_id = (SELECT id FROM tag_categories WHERE name = ?)"
+		aliasCatClause = "AND a.category_id = (SELECT id FROM tag_categories WHERE name = ?)"
 		catArgs = []any{categoryName}
 	}
 
 	return SuggestTwoPass(prefix, limit, func(pat, notLike string, n int) ([]models.Tag, error) {
-		extra := catClause
-		qargs := make([]any, 0, 2+len(catArgs))
-		qargs = append(qargs, pat)
-		qargs = append(qargs, catArgs...)
+		extra, aliasExtra := catClause, aliasCatClause
+		leg := make([]any, 0, 3+len(catArgs))
+		leg = append(leg, pat)
+		leg = append(leg, catArgs...)
 		if notLike != "" {
-			extra = extra + ` AND name NOT LIKE ? ESCAPE '\'`
-			qargs = append(qargs, notLike)
+			extra += ` AND name NOT LIKE ? ESCAPE '\'`
+			aliasExtra += ` AND a.name NOT LIKE ? ESCAPE '\'`
+			leg = append(leg, notLike)
 		}
-		qargs = append(qargs, n)
-		return db.QueryAll(database.Read, ScanTag, fmt.Sprintf(baseSQL, usageClause, extra), qargs...)
+		leg = append(leg, n)
+		qargs := slices.Concat(leg, leg, []any{n})
+		return db.QueryAll(database.Read, ScanSuggestion,
+			fmt.Sprintf(baseSQL, usageClause, extra, aliasUsageClause, aliasExtra), qargs...)
 	})
 }
 
@@ -125,13 +180,26 @@ func SuggestTwoPass(likePrefix string, limit int, query func(pat, notLike string
 		return nil, err
 	}
 	if len(out) < limit {
-		more, err := query("%"+likePrefix+"%", likePrefix+"%", limit-len(out))
+		more, err := query("%"+likePrefix+"%", likePrefix+"%", limit)
 		if err != nil {
 			return out, err
 		}
-		out = append(out, more...)
+		for _, m := range more {
+			if len(out) == limit {
+				break
+			}
+			if !slices.ContainsFunc(out, func(t models.Tag) bool { return t.ID == m.ID }) {
+				out = append(out, m)
+			}
+		}
 	}
 	return out, nil
+}
+
+func ScanSuggestion(rows *sql.Rows) (models.Tag, error) {
+	var t models.Tag
+	err := rows.Scan(&t.ID, &t.Name, &t.CategoryName, &t.CategoryColor, &t.UsageCount, &t.ViaAlias)
+	return t, err
 }
 
 func ScanTag(rows *sql.Rows) (models.Tag, error) {

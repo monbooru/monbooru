@@ -2,8 +2,9 @@ services:
   monbooru:
     container_name: monbooru
 
-    # you can use monbooru:latest-cuda if you have a CUDA compatible GPU, or
-    # monbooru:latest-openvino for an Intel GPU, for faster auto-tagging
+    # local auto-tagging: you can use monbooru:latest-cuda if you have a CUDA compatible GPU, or
+    # monbooru:latest-openvino for an Intel GPU, for faster auto-tagging.
+    # use monbooru:latest-lite if you don't want local auto-tagging on this machine
     image: ghcr.io/monbooru/monbooru:latest
 
     # if using CUDA, pass the GPU to the container

@@ -10,6 +10,7 @@
 {{$created := .CreatedAfter}}
 {{$conflicts := .Conflicts}}
 {{$stale := .Stale}}
+{{$scope := .Scope}}
 {{$folded := ""}}{{if .Folded}}{{$folded = "1"}}{{end}}
 {{$zero := "0"}}{{if .ZeroOnly}}{{$zero = "only"}}{{else if .ShowZero}}{{$zero = "1"}}{{end}}
 {{if not .RowsOnly}}
@@ -36,6 +37,7 @@
       <input type="hidden" name="conflicts" value="{{$conflicts}}">
       <input type="hidden" name="stale"     value="{{$stale}}">
       <input type="hidden" name="folded"    value="{{$folded}}">
+      <input type="hidden" name="scope"     value="{{$scope}}">
       <input type="hidden" name="show_zero" value="{{$zero}}">
       <button type="submit">OK</button>
     </form>
@@ -43,33 +45,33 @@
     <div class="filter-group">
       <span class="filter-label">Category</span>
       <a class="filter-btn{{if eq $catID ""}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat=&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat=&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">All</a>
       {{range .Categories}}
       <a class="filter-btn{{if eq (printf "%d" .ID) $catID}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{.ID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">{{.Name}}</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{.ID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">{{.Name}}</a>
       {{end}}
     </div>
 
     <div class="filter-group">
       <span class="filter-label">Type</span>
       <a class="filter-btn{{if eq $type ""}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">All</a>
       <a class="filter-btn{{if eq $type "tag"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=tag&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Tags</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=tag&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Tags</a>
       <a class="filter-btn{{if eq $type "alias"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=alias&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Aliases</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=alias&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Aliases</a>
       <a class="filter-btn{{if eq $type "rejected"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=rejected&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type=rejected&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Names mapped to nothing: every add path drops them">Rejected{{if .RejectedTotal}} <span class="count-badge">{{.RejectedTotal}}</span>{{end}}</a>
     </div>
 
     <div class="filter-group">
       <span class="filter-label" title="Sources that currently apply the tag to at least one image">Applied by</span>
       <a class="filter-btn{{if eq $usedBy ""}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by=&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by=&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">All</a>
       {{range .UsedByLabels}}
       <a class="filter-btn{{if eq $usedBy .}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{.}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{.}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Tags this source has applied to an image, whether or not it created them">{{.}}</a>
       {{end}}
     </div>
@@ -77,43 +79,55 @@
     <div class="filter-group">
       <span class="filter-label" title="The source that first created the tag, whether or not it still uses it">Created by</span>
       <a class="filter-btn{{if eq $origin ""}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin=&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin=&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">All</a>
       {{range .OriginCounts}}
       <a class="filter-btn{{if eq $origin .Label}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{.Label}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">{{.Label}} <span class="count-badge">{{.Count}}</span></a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{.Label}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">{{.Label}} <span class="count-badge">{{.Count}}</span></a>
       {{end}}
     </div>
 
     <div class="filter-group">
       <span class="filter-label">Created</span>
       <a class="filter-btn{{if eq $created ""}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">All</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">All</a>
       <a class="filter-btn{{if eq $created "24h"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=24h&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">24h</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=24h&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">24h</a>
       <a class="filter-btn{{if eq $created "7d"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=7d&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">7d</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=7d&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">7d</a>
       <a class="filter-btn{{if eq $created "30d"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=30d&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">30d</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after=30d&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">30d</a>
     </div>
+
+    {{if or .OtherGalleries $scope}}
+    <div class="filter-group">
+      <span class="filter-label" title="A global tag is the same tag in every gallery">Scope</span>
+      <a class="filter-btn{{if not $scope}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope=&show_zero={{$zero}}">All</a>
+      <a class="filter-btn{{if eq $scope "global"}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope=global&show_zero={{$zero}}">Global</a>
+      <a class="filter-btn{{if eq $scope "local"}} active{{end}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope=local&show_zero={{$zero}}">Local</a>
+    </div>
+    {{end}}
 
     <div class="filter-group">
       <span class="filter-label">Zero-usage</span>
       <a class="filter-btn{{if and .ShowZero (not .ZeroOnly)}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero=1">Show</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero=1">Show</a>
       <a class="filter-btn{{if not .ShowZero}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero=0">Hide</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero=0">Hide</a>
       <a class="filter-btn{{if .ZeroOnly}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero=only">Only</a>
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero=only">Only</a>
     </div>
 
     {{if or .StaleTotal .FullyStaleTotal $stale}}
     <div class="filter-group">
       <span class="filter-label" title="A stale tag is one its source stopped listing for an image">Stale</span>
       <a class="filter-btn{{if eq $stale "has"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "has"}}{{else}}has{{end}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "has"}}{{else}}has{{end}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Tags a source stopped listing on at least one image">Has stale <span class="count-badge">{{.StaleTotal}}</span></a>
       <a class="filter-btn{{if eq $stale "full"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "full"}}{{else}}full{{end}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{if eq $stale "full"}}{{else}}full{{end}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Tags no source lists any more (safe to remove)">Fully stale <span class="count-badge">{{.FullyStaleTotal}}</span></a>
     </div>
     {{end}}
@@ -122,10 +136,10 @@
     <div class="filter-group">
       <span class="filter-label">Conflicts</span>
       <a class="filter-btn{{if eq $conflicts "1"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "1"}}{{else}}1{{end}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "1"}}{{else}}1{{end}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Tag names living in more than one category, unless marked distinct">Only conflicts <span class="count-badge">{{.ConflictsTotal}}</span></a>
       <a class="filter-btn{{if eq $conflicts "distinct"}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "distinct"}}{{else}}distinct{{end}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{if eq $conflicts "distinct"}}{{else}}distinct{{end}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Same-name tags marked as different things">Marked distinct <span class="count-badge">{{.DistinctTotal}}</span></a>
     </div>
     {{end}}
@@ -134,7 +148,7 @@
     <div class="filter-group">
       <span class="filter-label">Old spellings</span>
       <a class="filter-btn{{if .Folded}} active{{end}}"
-         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{if .Folded}}{{else}}1{{end}}&show_zero={{$zero}}"
+         href="/tags?q={{$prefix}}&sort={{$sort}}&order={{$order}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{if .Folded}}{{else}}1{{end}}&scope={{$scope}}&show_zero={{$zero}}"
          title="Tags an older version saved simplified (fate_grand_order for fate/grand order) while the correct spelling also exists">Only old spellings <span class="count-badge">{{.FoldedTotal}}</span></a>
     </div>
     {{end}}
@@ -165,6 +179,7 @@
     {{if eq $conflicts "1"}}<button type="button" id="btn-batch-distinct" class="btn-sm" title="Keep the selected same-name tags apart: they stop counting as conflicts">Mark distinct</button>
     {{else if eq $conflicts "distinct"}}<button type="button" id="btn-batch-undistinct" class="btn-sm" title="Count the selected tags as conflicts again">Unmark distinct</button>{{end}}
     {{if .Folded}}<button type="button" id="btn-batch-merge-folded" class="btn-sm">Merge into corrected spelling</button>{{end}}
+    {{if .OtherGalleries}}<button type="button" id="btn-batch-global" class="btn-sm" title="Share the selected tags with {{joinAnd .OtherGalleries}}">Make global…</button>{{end}}
     <button type="button" id="btn-batch-alias" class="btn-sm">Alias to…</button>
     <button type="button" id="btn-batch-imply" class="btn-sm">Imply…</button>
     <button type="button" id="btn-batch-clean" class="btn-sm">Clean names…</button>
@@ -184,13 +199,13 @@
     <thead hx-boost="true" hx-target="#tags-page" hx-select="#tags-page" hx-swap="outerHTML" hx-select-oob="#sidebar-inner" hx-push-url="true">
       <tr>
         <th class="tag-select-col"><input type="checkbox" id="tag-select-page" aria-label="Select page"></th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=name&order={{$nameOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Name{{if eq $shownSort "name"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=name&order={{$nameOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Name{{if eq $shownSort "name"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
         <th>Implies</th>
         <th>Category</th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=usage&order={{$usageOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Usage{{if eq $shownSort "usage"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=usage&order={{$usageOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Usage{{if eq $shownSort "usage"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
         <th>Applied by</th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=created&order={{$createdOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Created{{if eq $shownSort "created"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
-        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=last_used&order={{$lastOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&show_zero={{$zero}}">Last used{{if eq $shownSort "last_used"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=created&order={{$createdOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Created{{if eq $shownSort "created"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
+        <th><a class="th-sort" href="/tags?q={{$prefix}}&sort=last_used&order={{$lastOrder}}&cat={{$catID}}&origin={{$origin}}&used_by={{$usedBy}}&type={{$type}}&created_after={{$created}}&conflicts={{$conflicts}}&stale={{$stale}}&folded={{$folded}}&scope={{$scope}}&show_zero={{$zero}}">Last used{{if eq $shownSort "last_used"}}<span class="sort-arrow">{{if eq $shownOrder "asc"}}▲{{else}}▼{{end}}</span>{{end}}</a></th>
         <th>Action</th>
       </tr>
     </thead>
@@ -203,6 +218,7 @@
         <td class="tag-select-col"><input type="checkbox" class="tag-select" value="{{.ID}}" data-name="{{.Name}}" data-color="{{catColor .CategoryColor}}" data-category="{{.CategoryName}}"{{with index $.DistinctOf .ID}} data-distinct="{{range $i, $p := .}}{{if $i}} {{end}}{{$p.ID}}{{end}}"{{end}} aria-label="Select {{.Name}}"></td>
         <td class="tag-name-cell{{if and (not .IsAlias) (eq .CategoryName "rating")}} tag-name-builtin{{end}}"
             title="{{.Name}}{{if .IsAlias}} → {{.CanonicalName}}{{else if .Rejected}} → nothing{{end}}">
+          <span class="tag-name-line">
           {{if .IsAlias}}
           <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
           <span class="merge-arrow">→</span>
@@ -215,10 +231,12 @@
           <span class="alias-badge rejected-badge">rejected</span>
           {{else}}
           <a href="/tags/{{.ID}}?back={{urlQ $.BackQS}}" style="color:{{catColor .CategoryColor}}">{{.Name}}</a>
+          {{if .Global}}<span class="alias-badge" title="The same tag in every gallery">global</span>{{end}}
           {{with index $.DistinctOf .ID}}<span class="alias-badge" title="Marked distinct from {{range $i, $p := .}}{{if $i}}, {{end}}{{$p.Category}}:{{$tag.Name}}{{end}}">distinct</span>{{end}}
           {{if .FoldedInto}}<span class="merge-arrow">→</span> <span class="field-hint">{{.FoldedInto}}</span>{{end}}
           {{if eq .CategoryName "rating"}}<span class="field-hint">(built-in)</span>{{end}}
           {{end}}
+          </span>
         </td>
         <td class="tag-implied-cell"
             {{with index $imps .ID}}{{if le (len .) 5}}title="{{range $i, $im := .}}{{if $i}} {{end}}{{$im.ImpliedName}}{{end}}"{{end}}{{end}}>
@@ -298,7 +316,7 @@
   </div>
 
   {{$page := .Page}}
-  {{$tagsBase := printf "/tags?q=%s&sort=%s&order=%s&cat=%s&origin=%s&used_by=%s&type=%s&created_after=%s&conflicts=%s&stale=%s&folded=%s&show_zero=%s&page=" (urlQ .Prefix) (urlQ .Sort) (urlQ .Order) (urlQ .CategoryID) (urlQ .Origin) (urlQ .UsedBy) (urlQ .Type) (urlQ .CreatedAfter) $conflicts $stale $folded $zero}}
+  {{$tagsBase := printf "/tags?q=%s&sort=%s&order=%s&cat=%s&origin=%s&used_by=%s&type=%s&created_after=%s&conflicts=%s&stale=%s&folded=%s&scope=%s&show_zero=%s&page=" (urlQ .Prefix) (urlQ .Sort) (urlQ .Order) (urlQ .CategoryID) (urlQ .Origin) (urlQ .UsedBy) (urlQ .Type) (urlQ .CreatedAfter) $conflicts $stale $folded $scope $zero}}
   <div hx-boost="true" hx-target="#tags-page" hx-select="#tags-page" hx-swap="outerHTML" hx-select-oob="#sidebar-inner" hx-push-url="true">
   {{template "partials/pagination.html" (dict "Base" $tagsBase "Page" $page "Total" .TotalPages)}}
   </div>
@@ -306,6 +324,7 @@
 </div>
 
 {{template "partials/tag_rename_dialog.html" (dict "KeepAlias" true)}}
+{{if .OtherGalleries}}{{template "partials/tag_global_dialog.html" .}}{{end}}
 
 <div id="tag-implied-pop" class="tag-implied-pop" hidden></div>
 
@@ -367,7 +386,7 @@
   </div>
   <div class="field" style="position:relative">
     <label for="batch-imply-target">Implied tags</label>
-    {{template "multi_tag_suggest_input" dict "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest" "Placeholder" "tag names, category:name, or IDs" "ValsKey" "target"}}
+    {{template "webui/tags_input" tagsInput "Name" "target" "InputID" "batch-imply-target" "SuggestID" "batch-imply-suggest" "Placeholder" "tag names, category:name, or IDs" "ValsKey" "target"}}
   </div>
   <p style="color:var(--fg-dim);font-size:12px">Every image with these tags also gets the implied tags. Add applies them to images already tagged; Remove takes back what they added.</p>
   <div id="batch-imply-flash"></div>
@@ -403,7 +422,7 @@
     <p>Create tags. Separate names with spaces; a name may start with its category.</p>
     <div class="field" style="position:relative">
       <label for="tag-create-name">Tag names</label>
-      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-create-name" "SuggestID" "tag-create-suggest" "ValsKey" "name" "Required" true}}
+      {{template "webui/tags_input" tagsInput "Name" "name" "InputID" "tag-create-name" "SuggestID" "tag-create-suggest" "ValsKey" "name" "Required" true}}
       <div id="tag-create-preview" class="field-hint" data-cats="{{range .Categories}}{{.Name}}={{catColor .Color}} {{end}}"></div>
     </div>
     <div class="field">
@@ -442,7 +461,7 @@
     <p>Reject names. Each is removed from every image and dropped on arrival, whatever brings it, until you un-reject it. Separate names with spaces; a name may start with its category. <span class="status-badge status-ok">this gallery</span><span class="status-badge status-off">on arrival</span></p>
     <div class="field" style="position:relative">
       <label for="tag-reject-name">Tag names</label>
-      {{template "multi_tag_suggest_input" dict "Name" "name" "InputID" "tag-reject-name" "SuggestID" "tag-reject-suggest" "ValsKey" "name" "Required" true}}
+      {{template "webui/tags_input" tagsInput "Name" "name" "InputID" "tag-reject-name" "SuggestID" "tag-reject-suggest" "ValsKey" "name" "Required" true}}
     </div>
     <div class="field">
       <label for="tag-reject-cat">Category for names without one</label>
@@ -623,6 +642,9 @@ var tagClickRoutes = [
         onOK: tagBatchDone
       });
     }, "Each old spelling's images get its corrected tag, and the old name keeps working as an alias. This cannot be undone.", 'Merge');
+  }],
+  ['#btn-batch-global', function() {
+    openMakeGlobal(tagScopeParams(), tagScopeLabel(), tagBatchDone);
   }],
   ['#btn-create-alias', function() {
     document.getElementById('alias-create-name').value = '';
@@ -996,7 +1018,7 @@ function updateTagColor(sel) {
   if (!row || !color) return;
   // The row's own name leads the cell; an alias row's canonical keeps its
   // own colour.
-  var target = row.querySelector('.tag-name-cell').firstElementChild;
+  var target = row.querySelector('.tag-name-cell a');
   if (target) target.style.color = color;
 }
 

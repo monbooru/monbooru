@@ -35,6 +35,11 @@ type adjacencyCacheEntry struct {
 	expiresAt time.Time
 }
 
+type totalEntry struct {
+	n         int
+	expiresAt time.Time
+}
+
 type hiddenCountEntry struct {
 	n         int
 	overran   bool
@@ -50,6 +55,7 @@ type AdjacencyCache struct {
 	order      []string
 	generation uint64
 	hidden     map[string]hiddenCountEntry
+	totals     map[string]totalEntry
 
 	// One fan per key at a time: concurrent misses would each run the
 	// same full SELECT.
@@ -68,6 +74,7 @@ func NewAdjacencyCache() *AdjacencyCache {
 	return &AdjacencyCache{
 		entries:       map[string]adjacencyCacheEntry{},
 		hidden:        map[string]hiddenCountEntry{},
+		totals:        map[string]totalEntry{},
 		fanInFlight:   map[string]bool{},
 		fanOverBudget: map[string]time.Time{},
 	}
@@ -199,6 +206,30 @@ func (c *AdjacencyCache) set(key string, ids []int64, gen uint64) {
 	}
 }
 
+func (c *AdjacencyCache) total(key string) (int, bool) {
+	if c == nil || key == "" {
+		return 0, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.totals[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return 0, false
+	}
+	return entry.n, true
+}
+
+func (c *AdjacencyCache) setTotal(key string, n int, gen uint64) {
+	if c == nil || key == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen == c.generation {
+		c.totals[key] = totalEntry{n: n, expiresAt: time.Now().Add(adjacencyCacheTTL)}
+	}
+}
+
 func (c *AdjacencyCache) hiddenCount(key string) (hiddenCountEntry, bool) {
 	if c == nil {
 		return hiddenCountEntry{}, false
@@ -232,6 +263,7 @@ func (c *AdjacencyCache) Drop() {
 	c.generation++
 	clear(c.entries)
 	clear(c.hidden)
+	clear(c.totals)
 	c.order = nil
 	c.mu.Unlock()
 	c.dropFanHoldOffs(func(string, time.Time) bool { return true })
@@ -250,6 +282,9 @@ func (c *AdjacencyCache) Sweep() {
 	})
 	c.mu.Lock()
 	maps.DeleteFunc(c.hidden, func(_ string, entry hiddenCountEntry) bool {
+		return now.After(entry.expiresAt)
+	})
+	maps.DeleteFunc(c.totals, func(_ string, entry totalEntry) bool {
 		return now.After(entry.expiresAt)
 	})
 	c.mu.Unlock()

@@ -28,6 +28,7 @@ func Bootstrap(db *DB) error {
 	} else {
 		// A fresh library left at marker 0 by a later failure would be refused as too old.
 		b.execTx("bootstrapping schema", schemaSQL+fmt.Sprintf(";\nPRAGMA user_version = %d", MinUpgradeUserVersion))
+		db.Created = b.err == nil
 	}
 	b.exec("create idx_images_inbox_visible", `CREATE INDEX IF NOT EXISTS idx_images_inbox_visible ON images(is_inbox) WHERE is_missing = 0`)
 	if marker < 15 {
@@ -93,6 +94,40 @@ func Bootstrap(db *DB) error {
 				WHEN lower(md5) = NEW.md5 THEN 'match' ELSE 'differ' END
 			 WHERE image_id = NEW.id AND md5 != '';
 		END`)
+	// One row per http(s) URL an image's sources carry, so sourceurl:
+	// seeks a prefix instead of scanning the newline-joined originals.
+	b.backfillIfFreshTable("image_source_urls",
+		`CREATE TABLE IF NOT EXISTS image_source_urls (
+			key      TEXT    NOT NULL COLLATE NOCASE,
+			image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+			PRIMARY KEY (key, image_id)
+		) WITHOUT ROWID`,
+		`INSERT OR IGNORE INTO image_source_urls (image_id, key) `+sourceURLKeys("image_sources"),
+		"backfill image_source_urls")
+	b.exec("create idx_image_source_urls_image", `CREATE INDEX IF NOT EXISTS idx_image_source_urls_image ON image_source_urls(image_id)`)
+	// Triggers, not the write sites: url and original are written by many
+	// paths. A new row only adds its keys; a change or a removal rebuilds
+	// the image's, as another of its sources may share a key. One copy of
+	// sourceURLKeys each, as every write to image_sources compiles them. An
+	// upsert that rewrites the same url fires the update, hence its WHEN.
+	addRow := `INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT NEW.image_id AS image_id, NEW.url AS url, NEW.original AS original)")
+	rebuildImage := `DELETE FROM image_source_urls WHERE image_id = OLD.image_id;
+		INSERT OR IGNORE INTO image_source_urls (image_id, key) ` + sourceURLKeys("(SELECT image_id, url, original FROM image_sources WHERE image_id = OLD.image_id)")
+	if b.queryInt("probe the source url triggers", `SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'trigger' AND name LIKE 'trg_image_sources_urls_a_' AND sql NOT LIKE '%GROUP BY%'`) > 0 {
+		b.exec("drop the source url triggers", `DROP TRIGGER IF EXISTS trg_image_sources_urls_ai;
+			DROP TRIGGER IF EXISTS trg_image_sources_urls_au; DROP TRIGGER IF EXISTS trg_image_sources_urls_ad`)
+	}
+	for _, t := range []struct{ name, event, body string }{
+		{"trg_image_sources_urls_ai", "AFTER INSERT ON image_sources", addRow},
+		{"trg_image_sources_urls_au", "AFTER UPDATE OF url, original ON image_sources WHEN NEW.url IS NOT OLD.url OR NEW.original IS NOT OLD.original", rebuildImage},
+		{"trg_image_sources_urls_ad", "AFTER DELETE ON image_sources", rebuildImage},
+	} {
+		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
+		BEGIN
+			`+t.body+`;
+		END`)
+	}
 	// VIRTUAL: ALTER TABLE cannot add a STORED column, and the index stores it.
 	b.ensureColumn("images", "basename_lower",
 		`ALTER TABLE images ADD COLUMN basename_lower TEXT GENERATED ALWAYS AS (lower(basename(canonical_path))) VIRTUAL`)
@@ -241,6 +276,20 @@ func Bootstrap(db *DB) error {
 		ResetCategoryPositions, "backfill tag_categories.position")
 	b.ensureColumn("tags", "rejected", `ALTER TABLE tags ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`)
 	b.ensureColumn("tags", "rejected_drops", `ALTER TABLE tags ADD COLUMN rejected_drops INTEGER NOT NULL DEFAULT 0`)
+	b.ensureColumn("tags", "is_global", `ALTER TABLE tags ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0`)
+	b.exec("create idx_tags_global", `CREATE INDEX IF NOT EXISTS idx_tags_global ON tags(id) WHERE is_global = 1`)
+	// An earlier build's bodies inserted with OR IGNORE.
+	if b.queryInt("probe the global tag triggers", `SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND sql LIKE '%INSERT OR IGNORE INTO global_tag_%'`) > 0 {
+		for _, t := range globalTagTriggers() {
+			b.exec("drop "+t.name, `DROP TRIGGER IF EXISTS `+t.name)
+		}
+	}
+	for _, t := range globalTagTriggers() {
+		b.exec("create "+t.name, `CREATE TRIGGER IF NOT EXISTS `+t.name+` `+t.event+`
+		BEGIN
+			`+t.body+`;
+		END`)
+	}
 	// The ComfyTermsVersion its terms were derived under; 0 = never indexed.
 	b.ensureColumn("comfyui_metadata", "terms_version",
 		`ALTER TABLE comfyui_metadata ADD COLUMN terms_version INTEGER NOT NULL DEFAULT 0`)
@@ -369,6 +418,12 @@ func Bootstrap(db *DB) error {
 		BEGIN
 			DELETE FROM image_basename_alias_fts WHERE rowid = OLD.id;
 		END`)
+	b.backfillIfFreshTable("image_tagger_runs", `CREATE TABLE image_tagger_runs (
+			image_id    INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+			tagger_name TEXT    NOT NULL,
+			tagged_at   TEXT    NOT NULL,
+			PRIMARY KEY (image_id, tagger_name)
+		) WITHOUT ROWID`, backfillTaggerRunsSQL, "create image_tagger_runs")
 	// ANALYZE runs once per marker bump: over image_tags it can blow the
 	// start-up budget on a cold cache, and PRAGMA optimize covers the
 	// drift in between. 400 is SQLite's recommended analysis_limit; images
@@ -382,6 +437,75 @@ func Bootstrap(db *DB) error {
 	}
 	b.exec("pragma optimize", `PRAGMA optimize`)
 	return b.err
+}
+
+// An image whose stamp was cleared has new bytes: its old auto-tags are no
+// proof that a tagger read them.
+const backfillTaggerRunsSQL = `INSERT OR IGNORE INTO image_tagger_runs (image_id, tagger_name, tagged_at)
+	SELECT it.image_id, it.tagger_name, i.auto_tagged_at
+	FROM image_tags it JOIN images i ON i.id = it.image_id
+	WHERE it.is_auto = 1 AND it.tagger_name IS NOT NULL AND it.tagger_name != '' AND i.auto_tagged_at IS NOT NULL
+	GROUP BY it.image_id, it.tagger_name`
+
+type trigger struct{ name, event, body string }
+
+func globalTagTriggers() []trigger {
+	const quiet = `NOT EXISTS (SELECT 1 FROM global_tag_applying)`
+	// Not OR IGNORE: an upsert's update branch runs its triggers under its
+	// own conflict policy, so each insert skips a waiting record itself.
+	fresh := func(id string) string {
+		return ` AND NOT EXISTS (SELECT 1 FROM global_tag_changes WHERE tag_id = ` + id + `)`
+	}
+	gone := func(id, kind, name, category string) string {
+		return ` AND NOT EXISTS (SELECT 1 FROM global_tag_removals r
+			 WHERE r.tag_id = ` + id + ` AND r.kind = '` + kind + `' AND r.name = ` + name + ` AND r.category = ` + category + `)`
+	}
+	record := func(id string) string {
+		return `INSERT INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
+			 WHERE t.id = ` + id + ` AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet + fresh("t.id")
+	}
+	asKnown := `INSERT INTO global_tag_changes (tag_id, name, category)
+			SELECT OLD.id, OLD.name, c.name FROM tag_categories c WHERE c.id = OLD.category_id AND ` + quiet + fresh("OLD.id")
+	dropAlias := `INSERT INTO global_tag_removals (tag_id, kind, name, category)
+			SELECT t.id, 'alias', OLD.name, c.name FROM tags t, tag_categories c
+			 WHERE t.id = OLD.canonical_tag_id AND t.is_global = 1 AND c.id = OLD.category_id AND ` + quiet + gone("t.id", "alias", "OLD.name", "c.name")
+	dropEdge := `INSERT INTO global_tag_removals (tag_id, kind, name, category)
+			SELECT p.id, 'implies', v.name, c.name FROM tags p, tags v JOIN tag_categories c ON c.id = v.category_id
+			 WHERE p.id = OLD.parent_tag_id AND p.is_global = 1 AND v.id = OLD.implied_tag_id AND ` + quiet + gone("p.id", "implies", "v.name", "c.name")
+	return []trigger{
+		{"trg_tags_global_au", "AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id, is_global ON tags WHEN OLD.is_alias = 0 AND (OLD.is_global = 1 OR NEW.is_global = 1)", asKnown},
+		{"trg_tags_global_bd", "BEFORE DELETE ON tags WHEN OLD.is_global = 1 AND OLD.is_alias = 0", asKnown},
+		{"trg_tags_global_alias_ai", "AFTER INSERT ON tags WHEN NEW.is_alias = 1", record("NEW.canonical_tag_id")},
+		{"trg_tags_global_alias_au", "AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id ON tags WHEN OLD.is_alias = 1 OR NEW.is_alias = 1",
+			record("OLD.canonical_tag_id") + `;
+			` + record("NEW.canonical_tag_id")},
+		{"trg_tags_global_alias_gone_au", `AFTER UPDATE OF name, category_id, is_alias, canonical_tag_id ON tags WHEN OLD.is_alias = 1
+			AND (NEW.is_alias = 0 OR NEW.canonical_tag_id IS NOT OLD.canonical_tag_id OR NEW.name != OLD.name OR NEW.category_id != OLD.category_id)`, dropAlias},
+		{"trg_tags_global_alias_ad", "AFTER DELETE ON tags WHEN OLD.is_alias = 1", record("OLD.canonical_tag_id") + `;
+			` + dropAlias},
+		{"trg_tag_implications_global_ai", "AFTER INSERT ON tag_implications", record("NEW.parent_tag_id")},
+		{"trg_tag_implications_global_au", "AFTER UPDATE OF parent_tag_id, implied_tag_id ON tag_implications",
+			record("OLD.parent_tag_id") + `;
+			` + record("NEW.parent_tag_id") + `;
+			` + dropEdge},
+		{"trg_tag_implications_global_ad", "AFTER DELETE ON tag_implications", record("OLD.parent_tag_id") + `;
+			` + dropEdge},
+		{"trg_tag_notes_global_ai", "AFTER INSERT ON tag_notes", record("NEW.tag_id")},
+		{"trg_tag_notes_global_au", "AFTER UPDATE OF body, links ON tag_notes", record("NEW.tag_id")},
+		{"trg_tag_notes_global_ad", "AFTER DELETE ON tag_notes", record("OLD.tag_id")},
+		{"trg_tag_categories_global_au", "AFTER UPDATE OF name ON tag_categories WHEN NEW.name != OLD.name",
+			`INSERT INTO global_tag_changes (tag_id, name, category)
+			SELECT t.id, t.name, OLD.name FROM tags t
+			 WHERE t.category_id = NEW.id AND t.is_global = 1 AND t.is_alias = 0 AND ` + quiet + fresh("t.id")},
+	}
+}
+
+// BackfillTaggerRuns records, for rows loaded from a document that does
+// not carry the runs, each tagger that left a tag on a stamped image.
+func BackfillTaggerRuns(x Execer) error {
+	_, err := x.Exec(backfillTaggerRunsSQL)
+	return err
 }
 
 type bootstrapper struct {
@@ -472,6 +596,21 @@ func ratingRankExpr(imageIDCol string) string {
 				JOIN tag_categories tc ON tc.id = t.category_id
 				WHERE it.image_id = ` + imageIDCol + ` AND tc.name = 'rating'
 			), -1)`
+}
+
+// sourceURLKeys selects (image_id, key) for the url and each original line
+// of rows, which has image_id, url and original. Newlines become U+E000
+// before json_quote, which leaves it alone, so the split never meets an escape.
+func sourceURLKeys(rows string) string {
+	return `SELECT image_id, CASE
+			WHEN u LIKE 'https://www.%' THEN substr(u, 13)
+			WHEN u LIKE 'http://www.%' THEN substr(u, 12)
+			WHEN u LIKE 'https://%' THEN substr(u, 9)
+			ELSE substr(u, 8) END AS key
+		FROM (SELECT s.image_id, trim(j.value, ' ' || char(9, 13)) AS u FROM ` + rows + ` s,
+			json_each('[' || replace(json_quote(replace(s.url || char(10) || s.original, char(10), char(57344))), char(57344), '","') || ']') j)
+		WHERE (u LIKE 'http://%' OR u LIKE 'https://%') AND key != ''
+		GROUP BY image_id, key COLLATE NOCASE`
 }
 
 func pairsResweepBody(predA, predB string) string {

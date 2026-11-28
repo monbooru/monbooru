@@ -1,62 +1,55 @@
-# The base carries the Intel GPU user-mode stack (intel-opencl-icd,
-# intel-level-zero-gpu); the ORT wheel below bundles its own OpenVINO.
+# monbooru and ffmpeg on the OpenVINO monworker image.
+ARG MONWORKER_VERSION=1.0.3
 
-FROM golang:1.27.4-bookworm AS build
+FROM golang:1.27.4-trixie AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN . ./packaging/release-env.sh && \
-    CGO_ENABLED=1 go build -tags tagger \
+    CGO_ENABLED=0 go build \
     -ldflags="-s -w $LDFLAGS -X '$MOD.Package=docker' -X '$MOD.Variant=openvino'" \
     -o /monbooru ./cmd/monbooru
 
-FROM openvino/ubuntu22_runtime:2026.4.1
-USER root
-COPY --from=build /monbooru /usr/local/bin/monbooru
+FROM debian:trixie-slim AS assets
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl tar xz-utils \
+    && rm -rf /var/lib/apt/lists/* && \
+    install -d -o 1000 -g 1000 /idsrc/home
 
 ARG FFMPEG_BUILD=v8.1.3-mb4
 ARG FFMPEG_NAME=ffmpeg-8.1.3-mb4
 ARG FFMPEG_SHA256_LINUX64=b4f4b357683462fbdbeaadf98ada904afe80c725d3ce8c0e1e84f75d1bb2108c
-RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
-      ca-certificates curl xz-utils && \
-    curl -fsSL "https://github.com/monbooru/ffmpeg-builds/releases/download/${FFMPEG_BUILD}/${FFMPEG_NAME}-linux64.tar.xz" -o /tmp/ffmpeg.tar.xz && \
-    echo "${FFMPEG_SHA256_LINUX64}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
-    mkdir -p /tmp/ff && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 && \
-    cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /usr/local/bin/ && \
-    mkdir -p /usr/share/doc/ffmpeg && cp /tmp/ff/licenses/* /usr/share/doc/ffmpeg/ && \
-    apt-get purge -y curl xz-utils && apt-get autoremove -y && \
-    rm -rf /tmp/ff /tmp/ffmpeg.tar.xz /var/lib/apt/lists/*
+ARG FFMPEG_SHA256_LINUXARM64=10d3a2683f7d5b25aab903ce316ef4c627995108bf90cf8418f0ec9eae1d1213
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) FF_ARCH="linux64";    FF_SHA="${FFMPEG_SHA256_LINUX64}" ;; \
+      arm64) FF_ARCH="linuxarm64"; FF_SHA="${FFMPEG_SHA256_LINUXARM64}" ;; \
+      *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/monbooru/ffmpeg-builds/releases/download/${FFMPEG_BUILD}/${FFMPEG_NAME}-${FF_ARCH}.tar.xz" -o /tmp/ffmpeg.tar.xz && \
+    echo "${FF_SHA}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
+    mkdir -p /tmp/ff /opt/ffmpeg /opt/licenses/ffmpeg && \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 && \
+    cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /opt/ffmpeg/ && \
+    cp /tmp/ff/licenses/* /opt/licenses/ffmpeg/
 
-# Upstream ships no OpenVINO tarball, so the PyPI wheel is the only
-# prebuilt source. Pinned: an unpinned resolve follows the base's Python
-# and takes the newest cp310 wheel.
-ARG ORT_OPENVINO_VERSION=1.23.0
+FROM ghcr.io/monbooru/monworker:v${MONWORKER_VERSION}-openvino
 
-# Link the whole capi directory, not just libonnxruntime.so: the provider
-# library pulls in the wheel's bundled OpenVINO by soname.
-RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir --no-deps onnxruntime-openvino==${ORT_OPENVINO_VERSION} && \
-    PKG_DIR=$(python3 -c "import onnxruntime, os; print(os.path.dirname(onnxruntime.__file__))") && \
-    find "$PKG_DIR" -name "*.so*" -type f -exec ln -sf {} /usr/local/lib/ \; && \
-    ORT_FILE=$(find "$PKG_DIR" -name "libonnxruntime.so.*" | head -1) && \
-    ln -sf "$ORT_FILE" /usr/local/lib/libonnxruntime.so && \
-    ldconfig
+COPY --from=assets --chown=1000:1000 /idsrc/home /home/monbooru
+COPY --from=assets /opt/ffmpeg/ffmpeg /opt/ffmpeg/ffprobe /usr/local/bin/
+COPY --from=assets /opt/licenses                     /usr/share/doc/
+COPY --from=build  /monbooru                         /usr/local/bin/monbooru
 
-# uid 1000 is the base image's own openvino user, homed at /home/openvino;
-# HOME below moves it, so the directory has to exist and be owned first.
-RUN mkdir -p /home/monbooru && chown 1000:1000 /home/monbooru
-
-USER 1000:1000
-
-ENV HOME=/home/monbooru \
-    MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455 \
-    MONBOORU_CONTAINER=1
+ENV MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455 \
+    MONBOORU_CONTAINER=1 \
+    HOME=/home/monbooru
 
 EXPOSE 8455
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/monbooru", "healthcheck", "-config", "/config/monbooru.toml"]
+
+USER 1000:1000
 
 ENTRYPOINT ["/usr/local/bin/monbooru", "-config", "/config/monbooru.toml"]

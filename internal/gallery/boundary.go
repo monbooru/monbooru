@@ -1,7 +1,9 @@
 package gallery
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -113,6 +115,22 @@ func resolvePath(p string) string {
 }
 
 func (b *Boundary) Root() string { return b.root }
+
+var ErrRootUnreadable = errors.New("gallery path is unreadable")
+
+// RootReadable fails on a volume that is not mounted, not on an empty
+// folder.
+func RootReadable(root string) error {
+	f, err := os.Open(root)
+	if err == nil {
+		_, err = f.ReadDir(1)
+		_ = f.Close()
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%w: %v", ErrRootUnreadable, err)
+	}
+	return nil
+}
 
 func (b *Boundary) Excludes(path string) bool {
 	_, out := b.excluded(filepath.Clean(path))

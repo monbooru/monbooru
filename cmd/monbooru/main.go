@@ -27,10 +27,6 @@ func main() {
 	// Before anything prints: a Windows GUI build starts with no console.
 	desktop.AttachConsole()
 
-	if len(os.Args) >= 2 && os.Args[1] == "tagger-worker" {
-		runWorker(os.Args[2:])
-		return
-	}
 	if len(os.Args) >= 2 && os.Args[1] == "healthcheck" {
 		runHealthcheck(os.Args[2:])
 		return
@@ -154,6 +150,12 @@ func main() {
 
 	srv.StartWatchers()
 
+	// HTTP/2 without TLS too: a LAN address has none, and one booru client
+	// app speaks only HTTP/2 to a Danbooru site on some Android builds.
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	httpSrv := &http.Server{
 		Addr:    cfg.Server.BindAddress,
 		Handler: srv.Handler(),
@@ -161,6 +163,7 @@ func main() {
 		ReadHeaderTimeout: 30 * time.Second,
 		// No WriteTimeout: some responses run for minutes on a large library.
 		IdleTimeout: 120 * time.Second,
+		Protocols:   &protocols,
 	}
 
 	quit := make(chan os.Signal, 1)

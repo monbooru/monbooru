@@ -24,8 +24,8 @@
     {{if .DesktopProfile}}<a href="#desktop">Desktop</a>{{end}}
     <a href="#general">General</a>
     <a href="#galleries">Galleries</a>
-    <a href="#plugins">Plugins<span id="settings-pair-count" class="nav-count">{{with len .PairNotice.Items}} ({{.}}){{end}}</span></a>
-    <a href="#tagger">Tagger</a>
+    <a href="#plugins">Plugins<span id="settings-pair-count" class="nav-count">{{with .PluginsPending}} ({{.}}){{end}}</span></a>
+    <a href="#tagger">Tagger<span id="settings-worker-count" class="nav-count">{{with len .Workers.Pending}} ({{.}}){{end}}</span></a>
     <a href="#relations">Relations</a>
     <a href="#auth">Auth</a>
     <a href="#maintenance">Maintenance</a>
@@ -39,8 +39,6 @@
 {{$cfg  := .Config}}
 {{$galleries := .Galleries}}
 {{$active := .ActiveGallery}}
-{{$pluginPending := .PluginPending}}
-{{$pluginPaired := .PluginPaired}}
 {{$pluginRows := .PluginRows}}
 
 <div id="settings-page">
@@ -94,8 +92,7 @@
           <span class="field-hint">Uploads, and files sent by monloader or the API.</span>
           <div class="dest-row">
             <div class="dest-part">
-              <label for="default_upload_folder">folder</label>
-              <input type="text" name="default_upload_folder" id="default_upload_folder" value="{{$cfg.Gallery.DefaultUploadFolder}}" placeholder="(gallery root)">
+              {{template "webui/folder_picker" .UploadFolder}}
             </div>
             <span class="dest-sep" aria-hidden="true">/</span>
             <div class="dest-part">
@@ -107,12 +104,12 @@
             <span class="field-hint">Blank = the gallery root.</span>
             <span class="field-hint">Blank = the sender's name.</span>
           </div>
-          {{template "partials/name_tokens.html" (dict "Targets" "default_upload_folder default_upload_name" "Received" true)}}
+          {{template "partials/name_tokens.html" (dict "Targets" "default-upload-folder-input default_upload_name" "Received" true)}}
           <div id="upload-dest-preview"
                hx-get="/internal/name/preview"
-               hx-trigger="input delay:200ms from:#default_upload_folder, input delay:200ms from:#default_upload_name"
+               hx-trigger="input delay:200ms from:#default-upload-folder-input, change from:#default-upload-folder-input, input delay:200ms from:#default_upload_name"
                hx-target="this"
-               hx-vals='js:{scope: "upload", folder: document.getElementById("default_upload_folder").value, name: document.getElementById("default_upload_name").value}'></div>
+               hx-vals='js:{scope: "upload", folder: document.getElementById("default-upload-folder-input").value, name: document.getElementById("default_upload_name").value}'></div>
         </div>
         <div class="field">
           <label>
@@ -242,7 +239,7 @@
             <input type="text" name="gallery_path" id="gallery-add-path" required>
             {{if .DesktopProfile}}
             <button type="button" class="btn-sm dir-picker-open" data-into="gallery-add-path"
-                    hx-get="/internal/browse?into=gallery-add-path" hx-target="#dir-picker-body">Browse</button>
+                    hx-get="/internal/browse?into=gallery-add-path" hx-vals='js:{path: document.getElementById("gallery-add-path").value}' hx-target="#dir-picker-body">Browse</button>
             {{end}}
           </div>
         </div>
@@ -499,8 +496,7 @@
     {{template "webui/settings_section_header" dict "Title" "Plugins"}}
     <div id="flash-plugins"></div>
     <div class="settings-sub">
-      <h4>Pairing requests</h4>
-      {{template "partials/plugin_pairing.html" (dict "Pending" $pluginPending "Paired" $pluginPaired "PairKey" .PairNotice.Key)}}
+      {{template "partials/plugin_pairing.html" .PluginPairing}}
     </div>
     <div class="settings-sub">
       <div class="settings-sub-head">
@@ -517,19 +513,44 @@
       <p class="field-hint">To add a theme, put its folder in <code>{{.ThemesDir}}</code>.</p>
     </div>
   </section>
+  <script>
+  // Counted from the seconds the server sent, not its clock, which the
+  // browser's may not match. The panel's poll renders it afresh every 3 s.
+  setInterval(function() {
+    document.querySelectorAll('#plugin-pairing [data-left]').forEach(function(el) {
+      if (!el.closesAt) el.closesAt = Date.now() + Number(el.dataset.left) * 1000;
+      var left = Math.max(0, Math.round((el.closesAt - Date.now()) / 1000));
+      el.textContent = 'Closes in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    });
+  }, 1000);
+  </script>
 
   <section id="tagger" class="settings-section">
     <div class="settings-section-header">
       <h3>Auto-Tagger</h3>
-      <p class="field-hint">Settings for the local tagging models.</p>
-      {{template "partials/tagger_mode_badge.html" (dict "Provider" $cfg.Tagger.ExecutionProvider)}}
+      <p class="field-hint">Settings for the workers and the tagging models.</p>
+      {{template "partials/tagger_mode_badge.html" (dict "Provider" .TaggerProvider "None" .Workers.None)}}
     </div>
     <div id="flash-tagger" data-action-flash role="status"></div>
     {{$taggers := .Taggers}}
     {{$rows := .TaggerRows}}
+    {{template "partials/tagger_workers.html" .Workers}}
+    {{template "partials/worker_add_dialog.html" .Workers}}
+    {{if not .Workers.None}}
+    <form hx-post="/settings/tagger/jobs" hx-target="#flash-tagger" hx-swap="innerHTML">
+      <div class="settings-sub">
+        <h4>Jobs</h4>
+        <div class="settings-cols">
+          {{template "partials/range_field.html" dict "Name" "prepare_parallel" "Label" "Images prepared at once" "Min" 0 "Max" .CPUCount "Step" 1 "Value" $cfg.Tagger.PrepareParallel "ZeroLabel" "auto"}}
+        </div>
+        <div class="settings-actions"><button type="submit">Save</button></div>
+      </div>
+    </form>
+    {{end}}
+    {{if .LocalRunning}}
     <form hx-post="/settings/tagger" hx-target="#flash-tagger" hx-swap="innerHTML">
       <div class="settings-sub">
-        <h4>Workers / GPU</h4>
+        <h4>Local worker</h4>
         <div class="settings-cols">
           <div class="field">
             <label>Execution provider</label>
@@ -541,12 +562,15 @@
             </div>
             <p class="field-hint">{{if $pin}}Set by {{$pin}} in the environment.{{else}}Providers need a matching ONNX Runtime library.{{end}}</p>
           </div>
-          {{template "partials/range_field.html" dict "Name" "parallel" "Label" "Parallel workers" "Min" 1 "Max" 16 "Step" 1 "Value" $cfg.Tagger.Parallel "Ticks" (list 1 2 4 8 12 16) "Hint" "Images tagged in parallel."}}
-          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Unload the model after (minutes idle)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "0 unloads it right after each run."}}
+          {{template "partials/range_field.html" dict "Name" "parallel" "Label" "Parallel images" "Min" 1 "Max" 16 "Step" 1 "Value" $cfg.Tagger.Parallel "Ticks" (list 1 2 4 8 12 16) "Hint" "Images tagged at once."}}
+          {{template "partials/range_field.html" dict "Name" "cpu_threads" "Label" "CPU threads" "Min" 0 "Max" .CPUCount "Step" 1 "Value" $cfg.Tagger.CPUThreads "Hint" "0 uses every core."}}
+          {{template "partials/range_field.html" dict "Name" "idle_release_after_minutes" "Label" "Unload the model after (minutes idle)" "Min" 0 "Max" 60 "Step" 1 "Value" $cfg.Tagger.IdleReleaseAfterMinutes "Ticks" (list 0 15 30 45 60) "Hint" "0 unloads it half a minute after each run."}}
         </div>
         <div class="settings-actions"><button type="submit">Save</button></div>
       </div>
     </form>
+    {{end}}
+    {{if not .Workers.None}}
     <div class="settings-sub">
       <h4>Taggers list</h4>
       {{if $rows}}
@@ -606,7 +630,7 @@
                         hx-post="/settings/tagger/{{$r.Name}}/enable" hx-target="#flash-tagger" hx-swap="innerHTML">Enable</button>
                 {{end}}
                 {{template "tagger_reset_button" (dict "Name" $r.Name "Differs" $r.Differs)}}
-                {{if not $r.Enabled}}
+                {{if and $r.LocalFolder (not $r.Enabled)}}
                 <button type="button" class="btn-sm tagger-act-delete btn-danger"
                         hx-post="/settings/tagger/{{$r.Name}}/delete" hx-target="#flash-tagger" hx-swap="innerHTML"
                         hx-confirm="Delete tagger {{$r.Name}}?"
@@ -622,10 +646,11 @@
       </table>
       </div>
       {{else}}
-      <p class="field-hint">No tagger subfolders found in <code>{{$cfg.Paths.ModelPath}}</code>.</p>
+      <p class="field-hint">No tagger in the workers' models folders.</p>
       {{end}}
       <p class="field-hint" id="tagger-registry">More taggers: see <code>TAGGERS.md</code> in the <a href="{{.PluginsRepoURL}}" target="_blank" rel="noopener">monbooru-plugins</a> registry.</p>
     </div>
+    {{end}}
     {{range $rows}}{{if and .Installed (not .Malformed)}}
     <dialog id="tagger-config-{{.Name}}" class="tagger-config-dialog">
       <h4 class="dlg-title">{{.Name}}{{template "webui/dialog_x"}}</h4>
@@ -661,9 +686,18 @@
     {{else}}
     <dialog id="tagger-cmd-dialog">
       <p class="dlg-title"><span id="tagger-cmd-name"></span> <span class="dlg-title-sub">- <span id="tagger-cmd-desc"></span></span>{{template "webui/dialog_x"}}</p>
-      <p class="field-hint">Run the command below on a host with internet access, then reload the Settings page.</p>
+      {{$targets := .InstallTargets}}
+      {{if gt (len $targets) 1}}
+      <div class="field"><label>Worker</label><div class="radio-grid">
+        {{range $i, $t := $targets}}<label><input type="radio" name="tagger-cmd-worker" data-where="{{$t.Where}}" data-dir="{{$t.Dir}}"{{if eq $i 0}} checked{{end}}> {{$t.Name}}</label>
+        {{end}}
+      </div></div>
+      {{end}}
+      {{with index $targets 0}}
+      <p class="field-hint">Run the command below on <span id="tagger-cmd-where">{{.Where}}</span>, then reload the Settings page.</p>
+      {{end}}
       <p class="field-hint" id="tagger-cmd-gated" hidden>This model is login-gated on Hugging Face: accept its terms on the model page while logged in, then <code>export HF_TOKEN=&lt;your access token&gt;</code> before running.</p>
-      <p class="code-block-label"><strong>Direct host install</strong> <span class="field-hint">(run inside <code>{{$cfg.Paths.ModelPath}}</code>)</span>
+      <p class="code-block-label"><strong>Direct host install</strong> <span class="field-hint">(run inside <code id="tagger-cmd-dir">{{(index $targets 0).Dir}}</code>)</span>
         <button type="button" class="btn-sm code-block-copy" id="tagger-cmd-host-copy" title="Copy command">Copy</button>
         <span class="copy-flash" hidden>copied</span>
       </p>
@@ -869,13 +903,18 @@
       <div class="settings-sub">
         <h4>API Tokens</h4>
         <p class="field-hint">For scripts and apps that talk to monbooru. A token is shown once, when you create it.</p>
-        {{template "webui/auth_tokens" (dict "Tokens" $cfg.Auth.Tokens)}}
+        {{template "webui/auth_tokens" (dict "Tokens" $cfg.Auth.Tokens "RevokeNotes" .TokenRevokeNotes)}}
         <form hx-post="/settings/auth/tokens" hx-target="#flash-auth" hx-swap="innerHTML" style="margin-top:8px"
               hx-on:token-created="this.reset()">
           <input type="text" name="name" placeholder="token name" maxlength="64" required>
           <button type="submit">Create token</button>
         </form>
       </div>
+    </div>
+    <div class="settings-sub" style="margin-top:16px">
+      <h4>Danbooru compatible endpoint</h4>
+      <p class="field-hint">For booru client apps such as LoliSnatcher or Boorusama: turn on the galleries to share, then add an address as a Danbooru site, one per gallery. Login and API key can stay empty.</p>
+      {{template "partials/booru_endpoints.html" (dict "View" .BooruEndpoints)}}
     </div>
   </section>
 
@@ -950,7 +989,7 @@
           <table class="maintenance-table">
             <tbody>
               {{template "maintenance_row" dict "Title" "Vacuum database" "Desc" "Shrink the database file after deleting many images" "URL" "/settings/maintenance/vacuum-db" "Verb" "Vacuum" "Mark" "long job" "Confirm" "Compact the SQLite database now?" "ConfirmDanger" "Holds a database lock for the duration of the VACUUM; other jobs and queries will wait." "ConfirmOK" "Vacuum"}}
-              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, including a loaded tagger model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
+              {{template "maintenance_row" dict "Title" "Free memory" "Desc" "Release memory monbooru holds, and the local worker's model" "URL" "/settings/maintenance/free-memory" "Verb" "Free"}}
             </tbody>
           </table>
           </div>
@@ -1077,9 +1116,6 @@
           <label><input type="checkbox" name="remove_orphans"{{if $sched.RemoveOrphans}} checked{{end}}> Remove orphaned thumbnails</label>
         </div>
         <div class="field">
-          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
-        </div>
-        <div class="field">
           <label><input type="checkbox" name="find_relation_pairs"{{if $sched.FindRelationPairs}} checked{{end}}> Find relation pairs</label>
         </div>
         {{if .MonloaderPaired}}
@@ -1089,6 +1125,42 @@
         </div>
         <div class="field">
           <label class="peer-accent{{if not .MonloaderUsable}} label-off{{end}}"{{if not .MonloaderUsable}} title="{{monloaderOffReason .MonloaderConn}}"{{end}}><input type="checkbox" name="lookup_booru"{{if $sched.LookupBooru}} checked{{end}}> Look up unsourced images on online boorus</label>
+        </div>
+        {{end}}
+      </div>
+      {{$at := .ScheduleAutotag}}
+      <div class="schedule-autotag">
+        <div class="field">
+          <label class="tagger-accent"><input type="checkbox" name="run_auto_taggers"{{if $sched.RunAutoTaggers}} checked{{end}}> Run enabled auto-taggers</label>
+        </div>
+        {{if $at.Show}}
+        <div class="schedule-autotag-opts{{if not $sched.RunAutoTaggers}} scope-off{{end}}" data-scope-col="run_auto_taggers">
+          <input type="hidden" name="autotag_opts" value="1">
+          <div class="settings-cols">
+            {{if $at.ShowTaggers}}
+            <div class="field">
+              <label>Taggers</label>
+              <input type="hidden" name="autotag_taggers_drawn" value="1">
+              <label><input type="checkbox" name="every_autotag_taggers" value="on" data-scope-every="autotag_taggers"{{if $at.EveryTagger}} checked{{end}}> All enabled taggers</label>
+              {{range $at.Taggers}}<label><input type="checkbox" name="on_autotag_taggers" value="{{.Name}}"{{if or $at.EveryTagger .On}} checked{{end}}{{if $at.EveryTagger}} disabled{{end}}> {{.Name}}</label>
+              {{end}}
+            </div>
+            {{end}}
+            {{if $at.ShowWorkers}}
+            <div class="field">
+              <label>Workers</label>
+              <input type="hidden" name="autotag_workers_drawn" value="1">
+              <label><input type="radio" name="autotag_worker_mode" value="any"{{if $at.AnyWorker}} checked{{end}}> Any worker <span class="field-hint">paired ones first, this machine when none is up</span></label>
+              <label><input type="radio" name="autotag_worker_mode" value="named"{{if not $at.AnyWorker}} checked{{end}}> These workers</label>
+              <div class="schedule-autotag-workers">
+                {{range $at.Workers}}<label><input type="checkbox" name="autotag_worker" value="{{.Name}}"{{if .On}} checked{{end}}{{if $at.AnyWorker}} disabled{{end}}> {{.Name}} <span class="field-hint">{{.Hint}}</span></label>
+                {{end}}
+              </div>
+              <span class="field-hint">With none of them up, the run skips auto-tagging and says so above.</span>
+            </div>
+            {{end}}
+          </div>
+          <label class="schedule-max" for="autotag_max_images">At most <input type="number" id="autotag_max_images" name="autotag_max_images" min="1" step="1" inputmode="numeric" class="schedule-max-input" value="{{with $at.MaxImages}}{{.}}{{end}}"> images a run <span class="field-hint">empty for no limit</span></label>
         </div>
         {{end}}
       </div>
@@ -1150,6 +1222,12 @@
       });
       return;
     }
+    if (box.name === 'autotag_worker_mode') {
+      form.querySelectorAll('input[name="autotag_worker"]').forEach(function(b) {
+        b.disabled = box.value === 'any';
+      });
+      return;
+    }
     form.querySelectorAll('[data-scope-col="' + box.name + '"]').forEach(function(c) {
       c.classList.toggle('scope-off', !box.checked);
     });
@@ -1162,48 +1240,18 @@
     {{template "webui/settings_section_header" dict "Title" "Stats"}}
     <div class="stats-cols">
     {{template "webui/memory_table" $stats.Mem}}
-    {{$tg := $stats.Tagger}}
-    <div class="settings-sub">
-      <h4>Auto-tagger</h4>
-      <div class="table-scroll">
-      <table class="stats-table">
-        <tbody>
-          {{if $tg.Loaded}}
-          <tr><th>Mode</th><td>{{providerLabel $tg.Provider}}</td></tr>
-          <tr><th>Status</th><td>
-            {{if $tg.InUse}}running
-            {{else}}idle {{schedDuration $tg.IdleFor}}
-              {{if $tg.IdleReleaseAfter}}
-                {{$remain := minusDuration $tg.IdleReleaseAfter $tg.IdleFor}}
-                {{if gt (int64Duration $remain) 0}}(releases in {{schedDuration $remain}}){{else}}(release pending){{end}}
-              {{end}}
-            {{end}}
-          </td></tr>
-          <tr><th>Models</th><td>{{range $i, $n := $tg.Sessions}}{{if $i}}, {{end}}{{$n}}{{end}}</td></tr>
-          {{if $tg.WorkerRSS}}
-          <tr><th>Worker PID</th><td>{{$tg.WorkerPID}}</td></tr>
-          <tr><th class="stats-d1">Worker memory (RSS)</th><td>{{humanBytes $tg.WorkerRSS}}</td></tr>
-          <tr><th class="stats-d2">Worker native (ONNX + CGO)</th><td>{{humanBytes $tg.WorkerAnon}}</td></tr>
-          <tr><th class="stats-d2">Worker code &amp; libs</th><td>{{humanBytes $tg.WorkerFile}}</td></tr>
-          {{end}}
-          {{else}}
-          <tr><th>Status</th><td>not loaded</td></tr>
-          {{end}}
-        </tbody>
-      </table>
-      </div>
-    </div>
+    {{template "partials/tagger_stats.html" $stats.Tagger}}
     <div class="settings-sub">
       <h4>Database size per gallery</h4>
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Gallery</th><th>DB path</th><th>Size</th></tr></thead>
         <tbody>
           {{range $stats.Galleries}}
           <tr>
-            <td><strong>{{.Name}}</strong></td>
-            <td class="stats-path"><code>{{.DBPath}}</code></td>
-            <td>{{humanBytes .DBSize}}</td>
+            <td class="stack-head"><strong>{{.Name}}</strong></td>
+            <td class="stats-path" data-label="DB path"><code>{{.DBPath}}</code></td>
+            <td data-label="Size">{{humanBytes .DBSize}}</td>
           </tr>
           {{end}}
         </tbody>
@@ -1214,16 +1262,16 @@
       <h4>Filesystem free space</h4>
       {{if $stats.Mounts}}
       <div class="table-scroll">
-      <table class="stats-table">
+      <table class="stats-table stack-table">
         <thead><tr><th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th>Used %</th></tr></thead>
         <tbody>
           {{range $stats.Mounts}}
           <tr>
-            <td>{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
-            <td>{{humanBytes .UsedSize}}</td>
-            <td>{{humanBytes .FreeSize}}</td>
-            <td>{{humanBytes .TotalSize}}</td>
-            <td>{{.UsedPct}}%</td>
+            <td class="stack-head">{{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}}</td>
+            <td data-label="Used">{{humanBytes .UsedSize}}</td>
+            <td data-label="Free">{{humanBytes .FreeSize}}</td>
+            <td data-label="Total">{{humanBytes .TotalSize}}</td>
+            <td data-label="Used %">{{.UsedPct}}%</td>
           </tr>
           {{end}}
         </tbody>

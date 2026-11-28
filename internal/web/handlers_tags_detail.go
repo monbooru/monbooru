@@ -22,6 +22,7 @@ type tagDetailData struct {
 	Tag            *models.Tag
 	Categories     []models.TagCategory
 	IsRating       bool
+	OtherGalleries []string
 	Canonical      *models.Tag
 	Aliases        []models.Tag
 	SameName       []models.Tag
@@ -57,10 +58,11 @@ func (s *Server) tagDetailHandler(w http.ResponseWriter, r *http.Request) {
 	cats, _ := s.tagSvc().ListCategories()
 
 	data := tagDetailData{
-		baseData:   s.base(r, "tags", tag.Name+" - "+s.booruName()),
-		Tag:        tag,
-		Categories: cats,
-		IsRating:   tag.CategoryName == "rating",
+		baseData:       s.base(r, "tags", tag.Name+" - "+s.booruName()),
+		Tag:            tag,
+		Categories:     cats,
+		IsRating:       tag.CategoryName == "rating",
+		OtherGalleries: sideNames(s.globalSides(), s.activeGallery()),
 	}
 	if backRaw := r.URL.Query().Get("back"); backRaw != "" {
 		if bq, err := url.ParseQuery(backRaw); err == nil {

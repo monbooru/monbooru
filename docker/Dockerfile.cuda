@@ -1,73 +1,55 @@
-# The runtime carries only the CUDA and cuDNN libraries the tagger's CUDA
-# execution provider loads; the binary still runs on CPU.
+# monbooru and ffmpeg on the CUDA monworker image.
+ARG MONWORKER_VERSION=1.0.3
 
-FROM golang:1.27.4-bookworm AS build
+FROM golang:1.27.4-trixie AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN . ./packaging/release-env.sh && \
-    CGO_ENABLED=1 go build -tags tagger \
+    CGO_ENABLED=0 go build \
     -ldflags="-s -w $LDFLAGS -X '$MOD.Package=docker' -X '$MOD.Variant=cuda'" \
     -o /monbooru ./cmd/monbooru
 
-FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu22.04 AS cuda
+FROM debian:trixie-slim AS assets
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl tar xz-utils \
+    && rm -rf /var/lib/apt/lists/* && \
+    install -d -o 1000 -g 1000 /idsrc/home
 
-ARG ORT_VERSION=1.21.0
-ARG ORT_SHA256_LINUX_X64_GPU=ef37a33ba75e457aebfd0d7b342ab20424aa6126bc5f565d247f1201b66996cf
 ARG FFMPEG_BUILD=v8.1.3-mb4
 ARG FFMPEG_NAME=ffmpeg-8.1.3-mb4
 ARG FFMPEG_SHA256_LINUX64=b4f4b357683462fbdbeaadf98ada904afe80c725d3ce8c0e1e84f75d1bb2108c
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl xz-utils && \
-    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
-      -o /tmp/ort.tgz && \
-    echo "${ORT_SHA256_LINUX_X64_GPU}  /tmp/ort.tgz" | sha256sum -c - && \
-    tar -xzf /tmp/ort.tgz -C /tmp && \
-    mkdir -p /out/ort /out/cublas /out/cuda /out/cudnn /out/bin /out/doc/onnxruntime /out/doc/ffmpeg && \
-    cp -P /tmp/onnxruntime-linux-x64-gpu-${ORT_VERSION}/lib/libonnxruntime*.so* /out/ort/ && \
-    cp /tmp/onnxruntime-linux-x64-gpu-${ORT_VERSION}/LICENSE \
-       /tmp/onnxruntime-linux-x64-gpu-${ORT_VERSION}/ThirdPartyNotices.txt /out/doc/onnxruntime/ && \
-    cd /usr/local/cuda/lib64 && \
-    cp -L libcublas.so.12 libcublasLt.so.12 /out/cublas/ && \
-    cp -L libcudart.so.12 libcufft.so.11 libcurand.so.10 libnvJitLink.so.12 libnvrtc.so.12 \
-          "libnvrtc-builtins.so.${CUDA_VERSION%.*}" /out/cuda/ && \
-    cp -L /usr/lib/x86_64-linux-gnu/libcudnn*.so.9 /out/cudnn/ && \
-    curl -fsSL "https://github.com/monbooru/ffmpeg-builds/releases/download/${FFMPEG_BUILD}/${FFMPEG_NAME}-linux64.tar.xz" -o /tmp/ffmpeg.tar.xz && \
-    echo "${FFMPEG_SHA256_LINUX64}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
-    mkdir -p /tmp/ff && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 && \
-    cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /out/bin/ && \
-    cp /tmp/ff/licenses/* /out/doc/ffmpeg/
+ARG FFMPEG_SHA256_LINUXARM64=10d3a2683f7d5b25aab903ce316ef4c627995108bf90cf8418f0ec9eae1d1213
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) FF_ARCH="linux64";    FF_SHA="${FFMPEG_SHA256_LINUX64}" ;; \
+      arm64) FF_ARCH="linuxarm64"; FF_SHA="${FFMPEG_SHA256_LINUXARM64}" ;; \
+      *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/monbooru/ffmpeg-builds/releases/download/${FFMPEG_BUILD}/${FFMPEG_NAME}-${FF_ARCH}.tar.xz" -o /tmp/ffmpeg.tar.xz && \
+    echo "${FF_SHA}  /tmp/ffmpeg.tar.xz" | sha256sum -c - && \
+    mkdir -p /tmp/ff /opt/ffmpeg /opt/licenses/ffmpeg && \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ff --strip-components=1 && \
+    cp /tmp/ff/bin/ffmpeg /tmp/ff/bin/ffprobe /opt/ffmpeg/ && \
+    cp /tmp/ff/licenses/* /opt/licenses/ffmpeg/
 
-FROM ubuntu:22.04
+FROM ghcr.io/monbooru/monworker:v${MONWORKER_VERSION}-cuda
 
-COPY --from=cuda /out/cudnn/ /usr/lib/
-COPY --from=cuda /out/cublas/ /usr/lib/
-COPY --from=cuda /out/cuda/ /usr/lib/
-COPY --from=cuda /out/ort/ /usr/lib/
-COPY --from=cuda /out/bin/ /usr/local/bin/
-COPY --from=cuda /out/doc/ /usr/share/doc/
-COPY --from=build /monbooru /usr/local/bin/monbooru
+COPY --from=assets --chown=1000:1000 /idsrc/home /home/monbooru
+COPY --from=assets /opt/ffmpeg/ffmpeg /opt/ffmpeg/ffprobe /usr/local/bin/
+COPY --from=assets /opt/licenses                     /usr/share/doc/
+COPY --from=build  /monbooru                         /usr/local/bin/monbooru
 
-RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
-    ldconfig
+ENV MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455 \
+    MONBOORU_CONTAINER=1 \
+    HOME=/home/monbooru
 
-# Build a uid/gid 1000 "monbooru" account
-RUN groupadd --gid 1000 monbooru && \
-    useradd --uid 1000 --gid 1000 --home-dir /home/monbooru --create-home monbooru
-USER 1000:1000
-
-ENV NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
-
-ENV MONBOORU_SERVER_BIND_ADDRESS=0.0.0.0:8455
-ENV MONBOORU_CONTAINER=1
 EXPOSE 8455
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/monbooru", "healthcheck", "-config", "/config/monbooru.toml"]
+
+USER 1000:1000
 
 ENTRYPOINT ["/usr/local/bin/monbooru", "-config", "/config/monbooru.toml"]

@@ -1,5 +1,68 @@
 # Changelog
 
+## [v1.25.0] - 2026-11-28
+### Added
+- A tag can be made global: it keeps the same name, category, aliases, implications and note in every gallery, and an edit in one gallery reaches the others. ([#108](https://github.com/monbooru/monbooru/issues/108), thanks @CeareDelafont and @spry-key for the suggestion)
+  - API: a tag carries `global`, and `GET /api/v1/tags` takes `scope=global` or `scope=local`.
+- The auto-tagger now runs on monworker, a separate program: either on the same machine, started and managed by monbooru (except for the `-lite` monbooru variants), or on any number of other machines paired via Settings > Auto-Tagger > Workers. ([#145](https://github.com/monbooru/monbooru/issues/145), thanks @IkariDevGIT and @Mar2ck for testing)
+  - A `latest-lite` Docker image with no worker, for users who don't need tagging or only use a remote monworker.
+  - During a batch auto-tag you can select the workers that share the images.
+  - A worker can be added in serverless mode by its address and token, and marked on demand (monbooru leaves it alone until a job that uses it starts).
+  - Frames go as PNG to a worker off the local network, smaller and faster than raw images and with the same accuracy.
+  - In the scheduled auto-tag, it is possible to set the available taggers, workers, a limit of images a run, and each tagger catches up on the images it has not read.
+  - A CPU threads setting limits the cores the worker uses, and a new "Images prepared at once" field sets how many images monbooru preprocesses at once.
+- The lightbox and the slideshow are merged into one media viewer: `v` opens it on an image with zoom and pan, and slideshow features. ([#152](https://github.com/monbooru/monbooru/issues/152), thanks @RustyNova016 for the suggestion)
+- In Settings > Authentication you can create a Danbooru compatible endpoint, which is a read-only address per gallery that booru client apps such as Boorusama, LoliSnatcher, Grabber, etc. can browse. ([#153](https://github.com/monbooru/monbooru/issues/153), thanks @IkariDevGIT for the code, @IZA09 for the suggestion and testing, @Schw1 for testing)
+- Tag suggestions show the aliases. ([#156](https://github.com/monbooru/monbooru/issues/156), thanks @Stitcher-Frame for the suggestion)
+- Search groups terms with parentheses and priorities, like in `( cat OR dog ) beach`. ([#178](https://github.com/monbooru/monbooru/issues/178), thanks @IkariDevGIT for the code)
+- The upload form has a Folder field, with a folder tree, suggestions and a new folder button. ([#180](https://github.com/monbooru/monbooru/issues/180), thanks @IkariDevGIT for the code)
+- You can use pinch to zoom in the viewer, and zoom and pan on video like on images. ([#187](https://github.com/monbooru/monbooru/issues/187), thanks @IkariDevGIT for the code)
+- The Relations comparison zooms and pans both images together. ([#194](https://github.com/monbooru/monbooru/issues/194), thanks @IkariDevGIT for the code)
+- `sourceurl:` finds images by a source or credited URL, as a prefix or with a wildcard `*`. ([#197](https://github.com/monbooru/monbooru/issues/197), thanks @IkariDevGIT for the code)
+- `[copy sources]` copies the sources of duplicates onto the original. ([#198](https://github.com/monbooru/monbooru/issues/198), thanks @IkariDevGIT for the code)
+- The search time shows beside the match count. ([#203](https://github.com/monbooru/monbooru/issues/203), thanks @IkariDevGIT for the code)
+- The viewer's Backdrop (background opacity) setting can now be changed. ([#221](https://github.com/monbooru/monbooru/issues/221), thanks @IkariDevGIT for the suggestion)
+- The bar of the viewer and of the manga reader can be hidden with `b`. ([#233](https://github.com/monbooru/monbooru/issues/233), thanks @cobalt-technicals for the suggestion)
+- The viewer gets video and volume controls. ([#235](https://github.com/monbooru/monbooru/issues/235), thanks @cobalt-technicals for the suggestion)
+- API: `GET /api/v1/folders` and `GET /api/v1/folders/search` list and search a gallery's folders. ([#238](https://github.com/monbooru/monbooru/pull/238), thanks @IkariDevGIT for the code)
+- The Rename / move dialogs and the default upload folder in Settings use the same folder picker. ([#246](https://github.com/monbooru/monbooru/issues/246), thanks @IkariDevGIT for the code)
+- API: `GET /api/v1/tags/suggest` suggests tags for a typed word, the way the tag fields do. ([#257](https://github.com/monbooru/monbooru/pull/257), thanks @IkariDevGIT for the code)
+- The manga reader lets you zoom a page in place, with the wheel, a pinch or `+` and `-`.
+- Settings > Plugins can accept pairings for 10 minutes, approving monloader and workers as they ask; a new install does so for its first ten minutes, and so does the desktop app for a monloader or a worker on the same machine.
+- The image page has an Open in a new tab button.
+- API: `POST /api/v1/pair/check` tells a paired app whether the pairing still holds.
+
+### Changed
+- AND now binds tighter than OR: `cat OR dog beach` means `cat OR ( dog beach )`. ([#178](https://github.com/monbooru/monbooru/issues/178))
+- With no worker, the Auto-Tagger section shows a message instead of listing taggers that cannot run. ([#210](https://github.com/monbooru/monbooru/issues/210), thanks @RustyNova016 for the suggestion)
+- `w` no longer starts the slideshow: `v` opens the viewer and `s` starts the slideshow there. The viewer does not go fullscreen by itself.
+- A tagger's mappings are kept in the data folder, so the models folder can be read-only or on another machine. The first start copies them there.
+- The lite downloads carry ffmpeg, and differ from the bundled ones only by the fact monworker is not included.
+- Settings > Stats lists every worker in its Auto-tagger block.
+- The tag provenance graph draws one `all sites` lane for monloader's global tag rules for all sites, and shows the condition of a blacklist line; needs monloader v1.15.0.
+- monbooru holds less memory on a large library.
+- A repeated search and the first `tagged:` or `autotagged:` search after a change show faster on a large library.
+- On a phone the top bar and the footer stay on one line, links and small buttons are easier to tap, and dialogs, tables and Settings fit the screen better.
+- A job that fails is written to the log.
+
+### Fixed
+- In the Relations review session, closing the duplicate dialog no longer saves the decision. ([#224](https://github.com/monbooru/monbooru/issues/224), thanks @sslxqii-sudo for the code, @IkariDevGIT for the report)
+- Deletes, uploads, moves and file replacements are refused while the gallery folder cannot be read, such as an unmounted volume; the API answers 503 `gallery_unavailable`.
+- A refused upload keeps the staged files.
+- A tag edited right after an auto-tag job ends is no longer undone on screen.
+- A tag named `not`, `or` or `and` is quoted when picked from the suggestions.
+- Invert is disabled while every match is selected.
+- The tag page says when monloader rejects the token, instead of unreachable.
+- Pairing requests stay in the order they came.
+- Browse opens on the folder typed in the field, on the desktop app.
+
+### Removed
+- The `tagger` build tag and the `tagger-worker` subcommand: a build from source is `make build`, with a monworker beside it or on `PATH` to tag.
+- `MONBOORU_TAGGER_BACKEND`, and `model_file` and `tags_file` of a tagger entry, are no longer read.
+
+Co-authored-by: IkariDevGIT <90197782+IkariDevGIT@users.noreply.github.com>
+Co-authored-by: sslxqii-sudo <267515549+sslxqii-sudo@users.noreply.github.com>
+
 ## [v1.24.1] - 2026-11-16
 ### Added
 - Every token under API Tokens now has a Revoke button; revoking a paired one removes its pairing.

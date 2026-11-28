@@ -136,10 +136,13 @@ config:
 ---
 flowchart TD
     size{{"How big is it?"}}
-    size -->|"a small fix, or an issue marked help wanted"| branch
+    size -->|"a small fix"| branch
+    size -->|"an issue marked help wanted"| claim["`**Comment on the issue to take it**
+    a maintainer assigns it to you; on any other issue, ask first.`"]
     size -->|"anything bigger, a new dependency, or changes across many templates or handlers"| ask["`**Open an issue first**
     say what and why, wait for it to be marked accepted or help wanted`"]
-    ask --> branch["`**Write it on a branch of your fork, off dev**
+    ask --> claim
+    claim --> branch["`**Write it on a branch of your fork, off dev**
     follow the existing style, reuse the patterns the code already has, and follow any instructions given in the issue`"]
     branch --> self["`**Read every line of your diff and test it live**
     make test has to pass`"]
@@ -152,7 +155,7 @@ flowchart TD
     review -->|"reimplemented"| redone["`Closed and redone on my side, still credited in the changelog → Credit`"]
 
     class ship hub;
-    class ask,branch,self,pr,declined,redone step;
+    class ask,claim,branch,self,pr,declined,redone step;
     class size,review ask;
 
     classDef hub  fill:#9d2235,stroke:#ef8f99,stroke-width:3px,color:#ffffff;
@@ -311,7 +314,7 @@ config:
 flowchart LR
     ship(["`**Your report, request or code ships**`"]) --> log["`**Credited in that release's changelog**
     a thanks line linking the issue or pull request; a merged pull request keeps you as its author on dev`"]
-    log -->|"credited in several releases: a long-standing contributor"| ack(["`**A line in the README Acknowledgements**`"])
+    log -->|"outstanding contributions"| ack(["`**A line in the README Acknowledgements**`"])
 
     class ship,ack hub;
     class log step;

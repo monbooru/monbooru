@@ -19,14 +19,7 @@
 {{define "dest_row"}}
       <div class="dest-row">
         <div class="dest-part">
-          <label for="{{.Prefix}}-folder">folder</label>
-          <input type="text" name="folder" id="{{.Prefix}}-folder" autocomplete="off"
-                 hx-get="/internal/folders/suggest"
-                 hx-trigger="input changed delay:200ms"
-                 hx-target="#{{.Prefix}}-suggest"
-                 hx-vals='js:{prefix: document.getElementById("{{.Prefix}}-folder").value}'
-                 onkeydown="handleSuggestKey(event, '{{.Prefix}}-suggest', '{{.Prefix}}-folder')">
-          <div id="{{.Prefix}}-suggest" class="suggest-dropdown folder-suggest-dropdown"></div>
+          {{template "webui/folder_picker" .Folder}}
         </div>
         <span class="dest-sep" aria-hidden="true">/</span>
         <div class="dest-part">
@@ -48,7 +41,7 @@
                hx-trigger="input changed delay:200ms"
                hx-target="#{{.SuggestID}}"
                hx-vals='js:{prefix: document.getElementById("{{.InputID}}").value}'
-               onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
+               onkeydown="handleSuggestKey(event, '{{.SuggestID}}')">
         <div id="{{.SuggestID}}" class="suggest-dropdown series-suggest-dropdown"></div>
       </div>
 {{end}}
@@ -57,23 +50,11 @@
       <div class="series-input-wrap">
         <input type="text" name="{{.Name}}" id="{{.InputID}}"
                placeholder="tag name, category:name, or ID" {{if .Required}}required {{end}}autocomplete="off"
-               hx-get="/internal/tags/suggest"
+               hx-get="{{tagSuggestRoute}}"
                hx-trigger="input changed delay:200ms"
                hx-target="#{{.SuggestID}}"
                hx-include="this"
-               onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
+               onkeydown="handleSuggestKey(event, '{{.SuggestID}}')">
         <div id="{{.SuggestID}}" class="suggest-dropdown tag-suggest-dropdown"></div>
       </div>
-{{end}}
-
-{{define "multi_tag_suggest_input"}}
-      <input type="text" name="{{.Name}}" id="{{.InputID}}"{{with .Class}} class="{{.}}"{{end}} data-multi-tags="1"
-             placeholder="{{.Placeholder}}" {{if .Required}}required {{end}}autocomplete="off"
-             hx-get="/internal/tags/suggest"
-             hx-trigger="input changed delay:200ms"
-             hx-target="#{{.SuggestID}}"
-             hx-swap="innerHTML"
-             hx-vals='js:{ {{.ValsKey}}: wordAtCaret(document.getElementById("{{.InputID}}")).word}'
-             onkeydown="handleSuggestKey(event, '{{.SuggestID}}', '{{.InputID}}')">
-      <div id="{{.SuggestID}}" class="suggest-dropdown tag-suggest-dropdown"></div>
 {{end}}

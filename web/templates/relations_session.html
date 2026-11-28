@@ -64,7 +64,9 @@
     {{- $secondSide = "A" -}}
   {{- end -}}
   <section class="session-pair" data-a="{{.Pair.A.ID}}" data-b="{{.Pair.B.ID}}"
-           data-a-type="{{.Pair.A.FileType}}" data-b-type="{{.Pair.B.FileType}}">
+           data-a-type="{{.Pair.A.FileType}}" data-b-type="{{.Pair.B.FileType}}"
+           data-left-a-orig="{{.Pair.LeftAOriginalID}}" data-left-a-tags="{{.Pair.LeftAHasTags}}" data-left-a-sources="{{.Pair.LeftAHasSources}}"
+           data-left-b-orig="{{.Pair.LeftBOriginalID}}" data-left-b-tags="{{.Pair.LeftBHasTags}}" data-left-b-sources="{{.Pair.LeftBHasSources}}">
     <div class="session-cells">
       <div class="session-cell" data-side="{{$firstSide}}">
         <h4 class="session-role" data-role="left">Left</h4>
@@ -130,7 +132,7 @@
       {{if .TagPairs}}<input type="hidden" name="detector" value="{{.Detector}}">{{end}}
 
       <div class="session-buttons">
-        <button type="submit" name="type" value="duplicate"
+        <button type="button" id="session-btn-duplicate"
                 data-prompt-sentence="{right} is the same image as {left} ({left} is the original)."
                 title="Right is the same image as left (1)">1 Same image (Duplicate)</button>
         <button type="submit" name="type" value="alternate"
@@ -167,25 +169,34 @@
         <span class="compare-caption">Right <span class="mono-small" id="compare-caption-right-id">#?</span></span>
       </div>
       <div class="compare-stage" id="compare-stage">
-        <div class="compare-slot compare-slot-left"  id="compare-slot-left"></div>
-        <div class="compare-slot compare-slot-right" id="compare-slot-right"></div>
+        <div class="compare-slot" id="compare-slot-left"></div>
+        <div class="compare-slot" id="compare-slot-right"></div>
         <div class="compare-divider" id="compare-divider" aria-hidden="true">
           <span class="compare-divider-handle">&#x21d4;</span>
         </div>
       </div>
       <div class="dialog-actions">
+        <span class="field-hint">Scroll or pinch to zoom, drag to pan, double-click or double-tap to reset.</span>
         <button type="button" id="compare-close">Close</button>
       </div>
     </dialog>
 
     <dialog id="session-postdecide-delete-dialog">
-      <h4 class="dlg-title"><span id="postdecide-dup-id">#?</span> has been marked as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
+      <h4 class="dlg-title">Mark <span id="postdecide-dup-id">#?</span> as a duplicate of <span id="postdecide-original-id">#?</span>{{template "webui/dialog_x"}}</h4>
       <p>Delete <span id="postdecide-dup-id-body">#?</span> from the gallery now?</p>
       <p class="field-hint">The original stays; the duplicate leaves the gallery and its file is removed from disk. This cannot be undone.</p>
-      <label id="postdecide-copy-tags-label" hidden>
-        <input type="checkbox" id="postdecide-copy-tags">
-        Copy unique tags onto the original first
-      </label>
+      <div class="field" id="postdecide-copy-tags-label" hidden>
+        <label>
+          <input type="checkbox" id="postdecide-copy-tags">
+          Copy unique tags onto the original first
+        </label>
+      </div>
+      <div class="field" id="postdecide-copy-sources-label" hidden>
+        <label>
+          <input type="checkbox" id="postdecide-copy-sources">
+          Copy unique sources onto the original first
+        </label>
+      </div>
       <div id="postdecide-flash"></div>
       <div class="dialog-actions">
         <button type="button" id="postdecide-keep" class="btn-sm" autofocus>Keep file</button>
@@ -313,6 +324,7 @@
     if (capL) capL.textContent = '#' + leftID;
     if (capR) capR.textContent = '#' + rightID;
     setSplit(50);
+    resetZoom();
     compareDlg.showModal();
   }
   if (compareBtn) compareBtn.addEventListener('click', openCompare);
@@ -333,93 +345,257 @@
   function trackSplit(evt) {
     if (!compareStage) return;
     var rect = compareStage.getBoundingClientRect();
-    var x = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
-    setSplit((x / rect.width) * 100);
+    setSplit((evt.clientX - rect.left) / rect.width * 100);
   }
+
+  // One transform for both images keeps them aligned under the split.
+  var zoom = 1, panX = 0, panY = 0;
+  function applyZoom() {
+    // Keep the images covering the stage.
+    var w = compareStage.clientWidth, h = compareStage.clientHeight;
+    panX = Math.min(0, Math.max(w - w * zoom, panX));
+    panY = Math.min(0, Math.max(h - h * zoom, panY));
+    var transform = zoom > 1 ? 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')' : '';
+    [slotLeft, slotRight].forEach(function(slot) {
+      if (slot.firstElementChild) slot.firstElementChild.style.transform = transform;
+    });
+    compareStage.classList.toggle('zoomed', zoom > 1);
+  }
+  function resetZoom() {
+    zoom = 1;
+    applyZoom();
+  }
+  // Zooms around a stage point, so the image under it stays put.
+  function setZoom(next, x, y) {
+    next = Math.min(16, Math.max(1, next));
+    panX = x - (x - panX) * next / zoom;
+    panY = y - (y - panY) * next / zoom;
+    zoom = next;
+    applyZoom();
+  }
+  function stagePoint(e) {
+    var rect = compareStage.getBoundingClientRect();
+    return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+  }
+  function zoomOnWheel(e) {
+    e.preventDefault();
+    if (!e.deltaY) return;
+    var p = stagePoint(e);
+    // A 100px wheel notch is about 1.2x; deltaMode 1 counts lines.
+    var dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    setZoom(zoom * Math.exp(-dy * 0.0018), p.x, p.y);
+  }
+
+  // Zoomed in, one finger or the mouse pans and the split moves by its
+  // handle; two fingers pinch.
+  var points = {}, drag = null, lastTap = 0;
+  function pinchOf() {
+    var p = Object.values(points);
+    return {
+      x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2,
+      dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+    };
+  }
+  function startDrag(e) {
+    if (e.button !== 0) return;
+    compareStage.setPointerCapture(e.pointerId);
+    var p = points[e.pointerId] = stagePoint(e);
+    if (Object.keys(points).length === 2) {
+      drag = {pinch: pinchOf()};
+      return;
+    }
+    var pan = zoom > 1 && !e.target.closest('.compare-divider-handle');
+    var touch = e.pointerType === 'touch';
+    drag = {pan: pan, x: p.x - panX, y: p.y - panY, x0: p.x, y0: p.y, touch: touch, moved: false};
+    if (!pan && !touch) trackSplit(e);
+  }
+  function moveDrag(e) {
+    if (!drag || !points[e.pointerId]) return;
+    var p = points[e.pointerId] = stagePoint(e);
+    drag.moved = true;
+    if (drag.pinch) {
+      var now = pinchOf();
+      panX += now.x - drag.pinch.x;
+      panY += now.y - drag.pinch.y;
+      setZoom(zoom * now.dist / drag.pinch.dist, now.x, now.y);
+      drag.pinch = now;
+    } else if (drag.pan) {
+      panX = p.x - drag.x;
+      panY = p.y - drag.y;
+      applyZoom();
+    } else if (!drag.touch || drag.split || Math.hypot(p.x - drag.x0, p.y - drag.y0) >= 10) {
+      drag.split = true;
+      trackSplit(e);
+    }
+  }
+  function endDrag(e) {
+    if (e.type === 'pointerup' && drag && drag.touch && !drag.pan && !drag.pinch && !drag.split) trackSplit(e);
+    delete points[e.pointerId];
+    // A double-click never fires for a finger, so a double tap resets here.
+    if (e.type === 'pointerup' && e.pointerType === 'touch' && drag && !drag.moved && !drag.pinch) {
+      if (e.timeStamp - lastTap < 300) resetZoom();
+      lastTap = e.timeStamp;
+    }
+    var rest = Object.values(points);
+    drag = rest.length === 1 && zoom > 1 ? {pan: true, x: rest[0].x - panX, y: rest[0].y - panY, moved: true} : null;
+  }
+
   if (compareStage) {
-    var dragging = false;
-    compareStage.addEventListener('mousedown', function(e) { dragging = true; trackSplit(e); });
-    compareStage.addEventListener('mousemove', function(e) { if (dragging) trackSplit(e); });
-    document.addEventListener('mouseup', function() { dragging = false; });
-    compareStage.addEventListener('touchstart', function(e) { trackSplit(e); }, {passive: true});
-    compareStage.addEventListener('touchmove',  function(e) { trackSplit(e); }, {passive: true});
+    compareStage.addEventListener('wheel', zoomOnWheel, {passive: false});
+    compareStage.addEventListener('pointerdown', startDrag);
+    compareStage.addEventListener('pointermove', moveDrag);
+    compareStage.addEventListener('pointerup', endDrag);
+    compareStage.addEventListener('pointercancel', endDrag);
+    compareStage.addEventListener('dblclick', resetZoom);
   }
 
   var postdecideDlg = document.getElementById('session-postdecide-delete-dialog');
   var pdFlash = document.getElementById('postdecide-flash');
-  var pdState = { dupID: 0, originalID: 0, groupID: 0 };
-  window.onSessionDecideResponse = function(evt) {
-    var detail = evt.detail || {};
-    var xhr = detail.xhr;
-    if (!detail.successful || !xhr) return;
-    if (xhr.getResponseHeader('X-Relations-Post-Decision') === 'duplicate-cleanup') {
-      pdState.dupID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-ID') || '0', 10);
-      pdState.originalID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-OriginalID') || '0', 10);
-      pdState.groupID = parseInt(xhr.getResponseHeader('X-Relations-Duplicate-GroupID') || '0', 10);
-      var hasUnique = xhr.getResponseHeader('X-Relations-Duplicate-HasUniqueTags') === '1';
-      var dupHeaderEl = document.getElementById('postdecide-dup-id');
-      var dupBodyEl = document.getElementById('postdecide-dup-id-body');
-      var origEl = document.getElementById('postdecide-original-id');
-      var copyLabel = document.getElementById('postdecide-copy-tags-label');
-      var copyBox = document.getElementById('postdecide-copy-tags');
-      if (dupHeaderEl) dupHeaderEl.textContent = '#' + pdState.dupID;
-      if (dupBodyEl) dupBodyEl.textContent = '#' + pdState.dupID;
-      if (origEl) origEl.textContent = '#' + pdState.originalID;
-      if (copyBox) copyBox.checked = false;
-      if (copyLabel) copyLabel.hidden = !hasUnique;
-      if (pdFlash) pdFlash.innerHTML = '';
-      if (postdecideDlg) postdecideDlg.showModal();
-      return;
-    }
-    if (xhr.status === 204) {
-      window.location.reload();
-    }
-  };
-  function pdDone() {
-    if (postdecideDlg) postdecideDlg.close();
-    window.location.reload();
+  var btnDuplicate = document.getElementById('session-btn-duplicate');
+  var decideSent = false;
+  var decideRedirect = null;
+
+  function openDuplicateDialog() {
+    if (!postdecideDlg || !pair) return;
+    decideSent = false;
+    decideRedirect = null;
+    var leftID = currentLeftID();
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+    var rightID = (leftID === aID) ? bID : aID;
+    var isLeftA = (leftID === aID);
+    var origID = isLeftA ? pair.dataset.leftAOrig : pair.dataset.leftBOrig;
+    var hasTags = isLeftA ? (pair.dataset.leftATags === 'true') : (pair.dataset.leftBTags === 'true');
+    var hasSources = isLeftA ? (pair.dataset.leftASources === 'true') : (pair.dataset.leftBSources === 'true');
+
+    var dupHeaderEl = document.getElementById('postdecide-dup-id');
+    var dupBodyEl = document.getElementById('postdecide-dup-id-body');
+    var origEl = document.getElementById('postdecide-original-id');
+    if (dupHeaderEl) dupHeaderEl.textContent = '#' + rightID;
+    if (dupBodyEl) dupBodyEl.textContent = '#' + rightID;
+    if (origEl) origEl.textContent = '#' + (origID || leftID);
+
+    var copyTagsLabel = document.getElementById('postdecide-copy-tags-label');
+    var copyTagsBox = document.getElementById('postdecide-copy-tags');
+    if (copyTagsBox) copyTagsBox.checked = false;
+    if (copyTagsLabel) copyTagsLabel.hidden = !hasTags;
+
+    var copySourcesLabel = document.getElementById('postdecide-copy-sources-label');
+    var copySourcesBox = document.getElementById('postdecide-copy-sources');
+    if (copySourcesBox) copySourcesBox.checked = false;
+    if (copySourcesLabel) copySourcesLabel.hidden = !hasSources;
+
+    if (pdFlash) pdFlash.innerHTML = '';
+    postdecideDlg.showModal();
   }
-  // A refused copy answers 200 with an error body, so the body decides.
-  function pdCopyTags(next) {
-    var copyBox = document.getElementById('postdecide-copy-tags');
-    if (!copyBox || !copyBox.checked || pdState.groupID <= 0) { next(); return; }
-    postForm('/relations/dup-group/' + pdState.groupID + '/copy-tags', {}, {
+
+  if (btnDuplicate) {
+    btnDuplicate.addEventListener('click', openDuplicateDialog);
+  }
+
+  function submitDuplicateDecision(deleteNow) {
+    var leftID = currentLeftID();
+    var aID = pair.dataset.a, bID = pair.dataset.b;
+
+    var formOrder = form.querySelector('input[name="order"]');
+    var formDetector = form.querySelector('input[name="detector"]');
+
+    var params = {
+      a: aID,
+      b: bID,
+      left: leftID,
+      order: formOrder ? formOrder.value : '',
+      type: 'duplicate'
+    };
+    if (formDetector) params.detector = formDetector.value;
+
+    decideSent = true;
+    postForm('/relations/session/decide', params, {
       hx: true, flashId: 'postdecide-flash',
       onOK: function(res) {
-        res.text().then(function(t) {
-          if (t.indexOf('flash-err') !== -1) { pdFlash.innerHTML = t; return; }
-          next();
+        var redir = res.headers.get('HX-Redirect');
+        if (redir) decideRedirect = redir;
+
+        if (res.status !== 204) {
+          res.text().then(function(t) {
+            if (pdFlash) pdFlash.innerHTML = t;
+          });
+          return;
+        }
+
+        var groupID = parseInt(res.headers.get('X-Relations-Duplicate-GroupID') || '0', 10);
+        var dupID = parseInt(res.headers.get('X-Relations-Duplicate-ID') || '0', 10);
+
+        function pdDone() {
+          if (postdecideDlg) postdecideDlg.close();
+        }
+
+        // A refused copy answers 200 with an error body, so the body decides.
+        function pdCopy(what, next) {
+          var box = document.getElementById('postdecide-copy-' + what);
+          if (!box || !box.checked || groupID <= 0) { next(); return; }
+          postForm('/relations/dup-group/' + groupID + '/copy-' + what, {}, {
+            hx: true, flashId: 'postdecide-flash',
+            onOK: function(copyRes) {
+              copyRes.text().then(function(t) {
+                if (t.indexOf('flash-err') !== -1) {
+                  if (pdFlash) pdFlash.innerHTML = t;
+                  return;
+                }
+                next();
+              });
+            }
+          });
+        }
+
+        function pdCopyChecked(next) {
+          pdCopy('tags', function() { pdCopy('sources', next); });
+        }
+
+        pdCopyChecked(function() {
+          if (!deleteNow) {
+            pdDone();
+            return;
+          }
+          postForm('/relations/duplicates/marked/delete-one', {image_id: String(dupID)}, {
+            hx: true, flashId: 'postdecide-flash',
+            onOK: function(delRes) {
+              // A raw fetch does not process HX-Trigger, so the flash is
+              // stashed for the reload by hand.
+              var f = JSON.parse(delRes.headers.get('HX-Trigger') || '{}')['action-flash'];
+              if (f) stashActionFlash(f.text, f.kind);
+              pdDone();
+            }
+          });
         });
-      },
+      }
     });
   }
+
   var pdKeep = document.getElementById('postdecide-keep');
   if (pdKeep) pdKeep.addEventListener('click', function() {
-    // Keep honours the copy box too: it is a choice about the tags, not
-    // the file.
-    pdCopyTags(pdDone);
+    submitDuplicateDecision(false);
   });
   var pdDelete = document.getElementById('postdecide-delete');
   if (pdDelete) pdDelete.addEventListener('click', function() {
-    pdCopyTags(function() {
-      postForm('/relations/duplicates/marked/delete-one', {image_id: String(pdState.dupID)}, {
-        hx: true, flashId: 'postdecide-flash',
-        onOK: function(res) {
-          // A raw fetch does not process HX-Trigger, so the flash is stashed
-          // for the reload by hand.
-          var f = JSON.parse(res.headers.get('HX-Trigger') || '{}')['action-flash'];
-          if (f) stashActionFlash(f.text, f.kind);
-          pdDone();
-        },
-      });
+    submitDuplicateDecision(true);
+  });
+
+  if (postdecideDlg) {
+    postdecideDlg.addEventListener('cancel', function(e) {
+      e.preventDefault();
+      postdecideDlg.close();
     });
-  });
-  // Esc keeps the file but, as a cancel, skips the tag copy.
-  if (postdecideDlg) postdecideDlg.addEventListener('cancel', function(e) {
-    e.preventDefault();
-    postdecideDlg.close();
-    window.location.reload();
-  });
+    postdecideDlg.addEventListener('close', function() {
+      if (decideSent) {
+        decideSent = false;
+        if (decideRedirect) {
+          window.location.href = decideRedirect;
+        } else {
+          window.location.reload();
+        }
+      }
+    });
+  }
   if (postdecideDlg) postdecideDlg.addEventListener('keydown', function(e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var tag = e.target.tagName;
@@ -432,6 +608,20 @@
       if (pdKeep) pdKeep.click();
     }
   });
+
+  window.onSessionDecideResponse = function(evt) {
+    var detail = evt.detail || {};
+    var xhr = detail.xhr;
+    if (!detail.successful || !xhr) return;
+    if (xhr.status === 204) {
+      var hxRedirect = xhr.getResponseHeader('HX-Redirect');
+      if (hxRedirect) {
+        window.location.href = hxRedirect;
+      } else {
+        window.location.reload();
+      }
+    }
+  };
 
   document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
@@ -450,7 +640,12 @@
     else if (e.key === 'c' || e.key === 'C') { openCompare(); return; }
     else if (e.key === 'Escape') { e.preventDefault(); window.location.href = '/relations'; return; }
     if (btnIndex < 0) return;
-    var btn = form.querySelectorAll('button[type="submit"]')[btnIndex];
+    if (btnIndex === 0) {
+      e.preventDefault();
+      openDuplicateDialog();
+      return;
+    }
+    var btn = form.querySelectorAll('button[type="submit"]')[btnIndex - 1];
     if (btn) btn.click();
   });
 })();

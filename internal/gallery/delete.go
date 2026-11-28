@@ -178,6 +178,7 @@ func RemoveImageArtifacts(thumbnailsPath string, id int64, fileType string) {
 	_ = os.Remove(ThumbnailPath(thumbnailsPath, id))
 	_ = os.Remove(hoverPath(thumbnailsPath, id))
 	_ = os.Remove(viewRenditionPath(thumbnailsPath, id))
+	_ = os.Remove(midRenditionPath(thumbnailsPath, id))
 	if fileType == "" || fileType == "cbz" {
 		removeMangaCache(thumbnailsPath, id)
 	}

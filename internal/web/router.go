@@ -30,6 +30,7 @@ import (
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/gallery"
+	"github.com/monbooru/monbooru/internal/globaltags"
 	"github.com/monbooru/monbooru/internal/jobs"
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/metadata"
@@ -82,7 +83,11 @@ type Server struct {
 	configPath string
 	cfgMu      sync.RWMutex // guards cfg reads/writes and config.Save calls
 	jobs       *jobs.Manager
+	global     globalTagState
 	pairs      *peer.Store
+	pool       *tagger.Pool
+	local      *localWorker
+	syncMu     sync.Mutex // held by syncWorkers, so the last config written is the last applied
 	sessions   *session.Store
 	loginRL    *session.Backoff
 	tmpl       *template.Template
@@ -110,6 +115,8 @@ type Server struct {
 	themeWarn *themeWarnings
 
 	peers *plugins.Peers
+
+	win pairWindow
 
 	downloads downloadList
 }
@@ -166,6 +173,7 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	}
 	s.peers = plugins.NewPeers(s.pluginCallbackURL, s.done)
 	s.ml = monloader.NewLink(s.monloaderLink, jobManager)
+	jobManager.OnEnd(func() { s.applyGlobalChanges(true) })
 
 	applyRelationsConfig(cfg.Relations)
 	gallery.MetaTagsEnabled.Store(cfg.Gallery.AutoMetaTags)
@@ -199,12 +207,26 @@ func NewServer(cfg *config.Config, configPath string, jobManager *jobs.Manager, 
 	go s.sched.Run()
 
 	go s.runPluginProbes()
+	tagger.MoveDispatchOverlays(cfg.Paths.ModelPath, cfg.Paths.DataPath)
+	s.pool = tagger.NewPool(filepath.Join(cfg.Paths.DataPath, "workers"))
+	s.local = newLocalWorker()
+	s.syncWorkers()
+	tagger.SetPool(s.pool)
+	poolCtx, stopPool := context.WithCancel(context.Background())
+	go func() {
+		<-s.done
+		stopPool()
+	}()
+	go s.pool.Run(poolCtx, workerRefresh)
 	s.seedThemesDir()
 	plugins.EnsureDir(s.pluginsDir())
 	s.peers.StartManaged(s.effectivePlugins())
+	s.openWindowOnNewInstall()
 
 	return s, nil
 }
+
+const workerRefresh = 30 * time.Second
 
 // Long enough that a paused browse skips the rebuild, short enough that a
 // finished one frees the memory.
@@ -251,20 +273,6 @@ func (s *Server) runMemoryReclaim() {
 			s.ml.Fetches.Prune()
 			s.ml.ReconcileAll(s.allContexts())
 			debug.FreeOSMemory()
-			s.cfgMu.RLock()
-			mins := s.cfg.Tagger.IdleReleaseAfterMinutes
-			s.cfgMu.RUnlock()
-			if mins > 0 {
-				before := desktop.ProcStatus("self", "VmRSS")
-				if tagger.ReleaseIdle(time.Duration(mins) * time.Minute) {
-					after := desktop.ProcStatus("self", "VmRSS")
-					if before > 0 && after > 0 && before > after {
-						logx.Infof("memory reclaim: released idle auto-tagger session (-%s)", webui.HumanBytes(int64(before-after)))
-					} else {
-						logx.Infof("memory reclaim: released idle auto-tagger session")
-					}
-				}
-			}
 		case <-s.done:
 			return
 		}
@@ -333,6 +341,16 @@ func (rt *routes) free(pattern string, h http.HandlerFunc) { rt.add(pattern, mod
 func (s *Server) StartWatchers() {
 	s.set.StartBackground()
 	s.turnUpgradedThumbs()
+	sides := s.globalSides()
+	globaltags.Reset(sides)
+	if globaltags.Any(sides) {
+		for _, side := range sides {
+			if !globaltags.Any([]globaltags.Side{side}) {
+				s.queueGlobalPull(side.Name)
+			}
+		}
+	}
+	s.applyGlobalChanges(false)
 }
 
 func (s *Server) background(name string) library.Background {
@@ -344,7 +362,7 @@ func (s *Server) Handler() http.Handler {
 	rt := s.newRoutes()
 	s.registerRoutes(rt)
 
-	var h http.Handler = rt.mux
+	h := s.globalTagsMiddleware(rt.mux)
 	h = s.sessions.Guard(pluginMountOrigin(h), isPluginMount)
 	h = s.setupMiddleware(h)
 	h = s.sessions.Gate(h, sessionCookie, s.authEnabled, isOpenPath)
@@ -461,6 +479,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("DELETE /tags/{id}", s.deleteTagHandler)
 	rt.read("POST /tags/{id}/reject", s.rejectTagPost)
 	rt.read("POST /tags/{id}/unreject", s.unrejectTagPost)
+	rt.read("POST /tags/global", s.makeTagsGlobalPost)
+	rt.read("POST /tags/global/check", s.makeTagsGlobalCheck)
+	rt.read("POST /tags/{id}/local", s.makeTagLocalPost)
 	rt.read("PATCH /tags/{id}/category", s.changeTagCategory)
 	rt.read("GET /tags/{id}/implications", s.implicationsDialogHandler)
 	rt.read("POST /tags/{id}/implications", s.addImplicationPost)
@@ -497,12 +518,16 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /settings/general/ignore", s.settingsIgnorePost)
 	rt.free("POST /settings/monloader", s.settingsMonloaderPost)
 	rt.free("POST /settings/tagger", s.settingsTaggerPost)
+	rt.free("POST /settings/tagger/jobs", s.settingsTaggerJobsPost)
 	rt.free("POST /settings/auth/password", s.settingsPasswordPost)
 	rt.free("POST /settings/auth/remove-password", s.settingsRemovePasswordPost)
 	rt.free("POST /settings/auth/tokens", s.settingsTokenCreate)
 	rt.free("DELETE /settings/auth/tokens/{id}", s.settingsTokenRevoke)
 	rt.free("GET /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesGet)
 	rt.free("POST /settings/auth/tokens/{id}/privileges", s.settingsTokenPrivilegesPost)
+	rt.free("POST /settings/auth/booru-endpoint", s.settingsBooruEndpointCreate)
+	rt.free("DELETE /settings/auth/booru-endpoint", s.settingsBooruEndpointRemove)
+	rt.free("POST /settings/auth/booru-gallery", s.settingsBooruGalleryPost)
 	rt.read("PATCH /settings/categories/{id}", s.updateCategoryPatch)
 	rt.free("POST /settings/schedule", s.settingsSchedulePost)
 	rt.free("POST /settings/schedule/run", s.settingsScheduleRunPost)
@@ -542,6 +567,8 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("POST /relations/session/decide", s.sessionDecidePost)
 	rt.read("POST /relations/dup-group/{id}/copy-tags", s.copyTagsToOriginalPost)
 	rt.read("GET /relations/dup-group/{id}/copy-tags/preview", s.copyTagsToOriginalPreview)
+	rt.read("POST /relations/dup-group/{id}/copy-sources", s.copySourcesToOriginalPost)
+	rt.read("GET /relations/dup-group/{id}/copy-sources/preview", s.copySourcesToOriginalPreview)
 	rt.read("POST /settings/relations", s.settingsRelationsPost)
 	rt.read("POST /settings/maintenance/re-extract-metadata", s.reExtractMetadataPost)
 	rt.read("POST /settings/maintenance/rebuild-thumbnails", s.rebuildThumbnailsPost)
@@ -563,6 +590,14 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.read("GET /images/{id}/relations", s.imageRelationsPage)
 	rt.read("POST /settings/maintenance/vacuum-db", s.vacuumDBPost)
 	rt.read("POST /settings/maintenance/free-memory", s.freeMemoryPost)
+	rt.free("POST /settings/workers/local/enable", s.taggerLocalWorkerPost(true))
+	rt.free("POST /settings/workers/local/disable", s.taggerLocalWorkerPost(false))
+	rt.free("POST /settings/workers/add", s.taggerWorkerAddPost)
+	rt.free("POST /settings/workers/{name}/pause", s.taggerWorkerPausePost(true))
+	rt.free("POST /settings/workers/{name}/resume", s.taggerWorkerPausePost(false))
+	rt.free("POST /settings/workers/{name}/remove", s.taggerWorkerRemovePost)
+	rt.free("GET /internal/workers", s.taggerWorkersGet)
+	rt.free("GET /internal/tagger-stats", s.taggerStatsGet)
 	rt.free("POST /settings/tagger/{name}/enable", s.settingsTaggerEnablePost)
 	rt.free("POST /settings/tagger/{name}/disable", s.settingsTaggerDisablePost)
 	rt.free("POST /settings/tagger/{name}/delete", s.settingsTaggerDeletePost)
@@ -605,13 +640,14 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("GET /tags/{id}/ptr-lookup-preview", s.tagPtrLookupPreview)
 	rt.free("GET /tags/{id}/ptr-lookup-search", s.tagPtrLookupSearch)
 	rt.read("POST /tags/{id}/ptr-lookup", s.ptrLookupTagPost)
-	rt.read("GET /internal/tags/suggest", s.tagSuggest)
+	rt.read("GET "+tagSuggestRoute, s.tagSuggest)
 	rt.read("GET /internal/search/suggest", s.searchSuggest)
 	rt.read("GET /internal/search/ids", s.searchIDs)
 	rt.read("POST /internal/search/ids", s.searchIDs)
 	rt.read("GET /internal/search/count", s.galleryCount)
-	rt.read("GET /internal/folders/suggest", s.foldersSuggest)
 	rt.read("GET /internal/folders/children", s.folderChildren)
+	rt.read("GET "+folderPickerRoute+"/level", s.folderPickerLevel)
+	rt.read("GET "+folderPickerRoute+"/suggest", s.folderPickerSuggest)
 	rt.read("GET /internal/collection/suggest", s.collectionSuggest)
 	rt.read("GET /internal/source/suggest", s.sourceSuggest)
 	rt.read("GET /internal/name/preview", s.namePreview)
@@ -633,9 +669,11 @@ func (s *Server) registerRoutes(rt *routes) {
 	rt.free("POST /api/v1/pair/request", s.pairRequest)
 	rt.free("GET /api/v1/pair/status", s.pairStatus)
 	rt.free("POST /api/v1/pair/remove", s.pairTeardown)
+	rt.free("POST /api/v1/pair/check", s.pairCheck)
 	rt.free("GET /internal/plugins/pairing", s.pluginPairingFragment)
 	rt.free("POST /settings/plugins/pair/{id}/approve", s.pluginPairApprove)
 	rt.free("POST /settings/plugins/pair/{id}/deny", s.pluginPairDeny)
+	rt.free("POST /settings/plugins/pair/window", s.pairWindowPost)
 	rt.free("POST /settings/plugins/{name}/remove", s.pluginPairRemove)
 	rt.free("POST /settings/plugins/{name}/pause", s.pluginPause)
 	rt.free("POST /settings/plugins/{name}/start", s.pluginStart)
@@ -653,7 +691,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	api.New(s.cfgSnapshot, s.jobs, s.apiResolver, Version).WithGalleryLock(func() func() {
 		s.set.RLock()
 		return s.set.RUnlock
-	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).Mount(apiMux)
+	}).WithFetchStatus(s.ml.Fetches.Record).WithMemoryMark(autotagMemoryMark).WithDone(s.done).WithFavicon(func() string {
+		return themeFaviconURL(s.activeTheme())
+	}).Mount(apiMux)
 	// The exact pairing routes above answer ahead of this subtree, so
 	// they skip notePeerAddress: none of them may move a peer.
 	apiHandler := s.notePeerAddress(apiMux.ServeHTTP)
@@ -663,6 +703,9 @@ func (s *Server) registerRoutes(rt *routes) {
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		rt.read(method+" /api/v1/", apiHandler)
 	}
+	// Read-only and keyed by its path, so no peer to note. Free: the layer
+	// takes the gallery lock itself.
+	rt.free("GET "+api.BooruPrefix, apiMux.ServeHTTP)
 }
 
 func (s *Server) allContexts() []*library.Gallery {
@@ -680,10 +723,11 @@ func (s *Server) apiResolver(name string) (*library.Gallery, bool) {
 
 func isNoisyPath(path string) bool {
 	switch path {
-	case "/internal/job/status", "/internal/monloader-status", "/health":
+	case "/internal/job/status", "/internal/monloader-status", "/health",
+		"/internal/workers", "/internal/tagger-stats", "/internal/plugins/pairing", "/api/v1/pair/status":
 		return true
 	}
-	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/")
+	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/thumbnails/") || api.IsBooruFile(path)
 }
 
 // Stamped by the outermost middleware so the footer's load time covers
@@ -700,10 +744,11 @@ func requestStartFromContext(ctx context.Context) time.Time {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(context.WithValue(r.Context(), requestStartKey{}, time.Now()))
+		path := api.RedactBooruPath(r.URL.Path)
 		if isNoisyPath(r.URL.Path) {
-			logx.Debugf("%s %s", r.Method, r.URL.Path)
+			logx.Debugf("%s %s", r.Method, path)
 		} else {
-			logx.Infof("%s %s", r.Method, r.URL.Path)
+			logx.Infof("%s %s", r.Method, path)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -789,6 +834,7 @@ type baseData struct {
 	// unreachable link reports no PTR, so it counts as present.
 	MonloaderPTRPresent bool
 	PairNotice          webui.PairNotice
+	AutoPairNotice      autoPairNotice
 }
 
 // main.js writes it; the name and the "collapsed" value must match.
@@ -883,6 +929,7 @@ func (s *Server) base(r *http.Request, nav, title string) baseData {
 		ActiveRating:        active,
 		RequestStart:        requestStartFromContext(r.Context()),
 		PairNotice:          s.pairNotice(),
+		AutoPairNotice:      s.autoPairNotice(),
 	}
 }
 
@@ -924,7 +971,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 	// SQLite reuses the highest id once its row is deleted, so a
 	// thumbnail URL can come back with new bytes.
-	setGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
+	api.SetGalleryScopedCache(w, r.PathValue("gallery"), file, fullPath)
 	http.ServeFile(w, r, fullPath)
 }
 
@@ -938,6 +985,12 @@ func (s *Server) modelPath() string {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg.Paths.ModelPath
+}
+
+func (s *Server) dataPath() string {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.Paths.DataPath
 }
 
 func (s *Server) authEnabled() bool {
@@ -1047,6 +1100,7 @@ func cloneConfig(cfg *config.Config) *config.Config {
 	c.Plugins = slices.Clone(c.Plugins)
 	c.Auth.Tokens = slices.Clone(c.Auth.Tokens)
 	c.Tagger.Taggers = slices.Clone(c.Tagger.Taggers)
+	c.Workers = slices.Clone(c.Workers)
 	return &c
 }
 
@@ -1178,6 +1232,7 @@ func (s *Server) planMangaPage(
 	}
 	page, err := ensure(s.thumbnailsPath(), canonPath, id, n)
 	if err != nil {
+		logx.Warnf("page %d of image %s: %v", n, idStr, err)
 		http.NotFound(w, r)
 		return "", false
 	}
@@ -1193,7 +1248,7 @@ func (s *Server) planMangaPage(
 	}
 	// The archive's mtime, not the page's: every hit touches the page to keep
 	// it cached, which would make each ETag new.
-	setGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), fmt.Sprintf("%s-%d%s", idStr, n, cacheSuffix), canonPath)
 	return page, true
 }
 
@@ -1237,21 +1292,17 @@ func (s *Server) planImageBytes(w http.ResponseWriter, r *http.Request, scaled b
 			w.Header().Add("Vary", "Accept")
 		}
 		if past || (negotiated && !acceptsMediaType(r.Header.Get("Accept"), gallery.MIMEForFileType(fileType))) {
-			maxDim := 0
-			if past {
-				maxDim = gallery.ViewMaxDim
-			}
-			rendition, err := gallery.EnsureViewRendition(canonPath, cx.ThumbnailsPath, id, fileType, maxDim)
+			rendition, err := gallery.ViewRenditionFor(canonPath, cx.ThumbnailsPath, id, fileType, int(width.Int64), int(height.Int64))
 			if err != nil {
 				logx.Warnf("view rendition for image %s: %v", idStr, err)
 			} else {
-				setGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
+				api.SetGalleryScopedCache(w, s.activeGallery(), idStr+"-view", rendition)
 				w.Header().Set("Content-Type", "image/jpeg")
 				return rendition, true
 			}
 		}
 	}
-	setGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
+	api.SetGalleryScopedCache(w, s.activeGallery(), idStr, canonPath)
 	if ct := gallery.MIMEForFileType(fileType); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
@@ -1273,17 +1324,6 @@ func acceptsMediaType(accept, mediaType string) bool {
 	return false
 }
 
-// The gallery is in the tag because /images/{id} URLs repeat across galleries,
-// and the mtime is in nanoseconds so two rewrites in a second differ.
-func setGalleryScopedCache(w http.ResponseWriter, gallery, id, path string) {
-	w.Header().Set("Cache-Control", "private, no-cache")
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%d"`, gallery, id, info.ModTime().UnixNano()))
-}
-
 func (s *Server) RestartRequested() bool { return s.restart.Load() }
 
 // QuitRequested closes on a Quit or a Restart; RestartRequested tells
@@ -1296,29 +1336,48 @@ func (s *Server) Close() {
 	default:
 		close(s.done)
 	}
-	// Otherwise ReleaseAll waits out a running auto-tag chunk.
 	s.jobs.Cancel()
 	const jobWait = 5 * time.Second
 	if !s.jobs.WaitIdle(jobWait) {
 		logx.Warnf("shutdown: a job was still running %s after its cancel", jobWait)
 	}
 	s.peers.StopAll()
-	tagger.ReleaseAll()
 	s.set.Close()
 }
 
 func (s *Server) withConfig(fn func(*config.Config) error) error {
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
 	before := cloneConfig(s.cfg)
 	if err := fn(s.cfg); err != nil {
 		*s.cfg = *before
+		s.cfgMu.Unlock()
 		return err
 	}
 	if err := config.Save(s.cfg, s.configPath); err != nil {
 		*s.cfg = *before
+		s.cfgMu.Unlock()
 		logx.Errorf("config save: %v", err)
 		return err
 	}
+	s.cfgMu.Unlock()
+	// Outside the lock: stopping the local worker waits for it to exit.
+	s.syncWorkers()
 	return nil
+}
+
+func (s *Server) syncWorkers() {
+	if s.pool == nil {
+		return
+	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	cfg := s.cfgSnapshot()
+	defs := make([]tagger.WorkerDef, 0, len(cfg.Workers)+1)
+	if s.local != nil && s.local.apply(s.peers.Supervisor, cfg) {
+		defs = append(defs, s.local.def())
+	}
+	for _, w := range cfg.Workers {
+		defs = append(defs, tagger.WorkerDef{Name: w.Name, URL: w.URL, Token: w.Token, Gateway: w.GatewayToken, Paused: w.Paused, OnDemand: w.OnDemand})
+	}
+	s.pool.Set(defs)
 }

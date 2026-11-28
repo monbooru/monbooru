@@ -8,17 +8,11 @@ import (
 
 	"github.com/monbooru/monbooru/internal/db"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
 // A form is a tag as the tag language spells it: category:name, or the
-// bare name for general.
-
-func FormName(category, name string) string {
-	if category != "general" {
-		return category + ":" + name
-	}
-	return name
-}
+// bare name for general (contract.TagForm).
 
 // Form is a typed spelling read against the catalog. A prefix before the
 // first colon that names a category, in any case, splits off; any other
@@ -35,20 +29,23 @@ var ErrEmptyFormName = errors.New("empty tag name after category prefix")
 // SplitForm answers a failed category read with the error: reading the
 // form as general would file character:foo as a general tag.
 func SplitForm(database *db.DB, form string) (Form, error) {
-	form = strings.TrimSpace(form)
-	idx := strings.Index(form, ":")
-	if idx <= 0 {
-		return Form{Name: form}, nil
+	var id int64
+	var lookupErr error
+	category, name, ok := contract.CutTagCategory(form, func(c string) bool {
+		var found bool
+		id, found, lookupErr = CategoryIDByName(database, c)
+		return found
+	})
+	switch {
+	case lookupErr != nil:
+		return Form{}, lookupErr
+	case ok:
+		return Form{CategoryID: id, Category: category, Name: name}, nil
 	}
-	category := strings.ToLower(form[:idx])
-	id, ok, err := CategoryIDByName(database, category)
-	if err != nil {
-		return Form{}, err
+	if prefix, _, cut := strings.Cut(name, ":"); cut && prefix != "" {
+		return Form{Name: name, Namespace: prefix}, nil
 	}
-	if !ok {
-		return Form{Name: form, Namespace: form[:idx]}, nil
-	}
-	return Form{CategoryID: id, Category: category, Name: form[idx+1:]}, nil
+	return Form{Name: name}, nil
 }
 
 // ParseForm reads a prefix that names no category as part of a general
@@ -202,7 +199,7 @@ func (s *Service) PlainForms(ids []int64) ([]TagForm, error) {
 			var f TagForm
 			var name, cat string
 			err := rows.Scan(&f.ID, &name, &cat)
-			f.Form = FormName(cat, name)
+			f.Form = contract.TagForm(cat, name)
 			return f, err
 		},
 			`SELECT t.id, t.name, c.name FROM tags t JOIN tag_categories c ON c.id = t.category_id
@@ -224,8 +221,8 @@ func (s *Service) AliasForms(tagIDs []int64) (byTag map[string][]string, byAlias
 	byTag, byAlias = map[string][]string{}, map[string]string{}
 	for _, list := range byCanonical {
 		for _, a := range list {
-			form := FormName(a.CategoryName, a.Name)
-			canonical := FormName(a.CanonicalCategoryName, a.CanonicalName)
+			form := contract.TagForm(a.CategoryName, a.Name)
+			canonical := contract.TagForm(a.CanonicalCategoryName, a.CanonicalName)
 			byTag[canonical] = append(byTag[canonical], form)
 			byAlias[form] = canonical
 			byAlias[LegacyFold(form)] = canonical
@@ -239,10 +236,10 @@ func (s *Service) AliasForms(tagIDs []int64) (byTag map[string][]string, byAlias
 func StorageForms(imageTags []models.ImageTag, ledger map[int64][]TagSource) (storage, context []string) {
 	for _, t := range imageTags {
 		if t.IsImplied || t.Category == "rating" || derivedOnly(t, ledger[t.TagID]) {
-			context = append(context, FormName(t.Category, t.TagName))
+			context = append(context, contract.TagForm(t.Category, t.TagName))
 			continue
 		}
-		storage = append(storage, FormName(t.Category, t.TagName))
+		storage = append(storage, contract.TagForm(t.Category, t.TagName))
 	}
 	return storage, context
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/monbooru/monbooru/internal/library"
 	"github.com/monbooru/monbooru/internal/models"
 	"github.com/monbooru/monbooru/internal/shared/contract"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 func (h *Handler) serveImageFile(w http.ResponseWriter, r *http.Request) {
@@ -19,15 +21,23 @@ func (h *Handler) serveImageFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if path, ok := fileOf(w, g, id); ok {
+		http.ServeFile(w, r, path)
+	}
+}
+
+// The ...Of helpers set the headers and answer what they cannot serve, so
+// the caller only streams the path.
+func fileOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
 	canonPath, fileType, ok := containedCanonical(w, g, id)
 	if !ok || !canonicalOnDisk(w, canonPath) {
-		return
+		return "", false
 	}
 	if ct := gallery.MIMEForFileType(fileType); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Content-Disposition", gallery.ContentDispositionFor(canonPath))
-	http.ServeFile(w, r, canonPath)
+	return canonPath, true
 }
 
 func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +68,18 @@ func (h *Handler) serveImageStill(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, frame)
 }
 
+// SetGalleryScopedCache: the gallery is in the tag because /images/{id}
+// URLs repeat across galleries, and the mtime is in nanoseconds so two
+// rewrites in a second differ.
+func SetGalleryScopedCache(w http.ResponseWriter, gallery, id, path string) {
+	w.Header().Set("Cache-Control", "private, no-cache")
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%s-%s-%d"`, gallery, id, info.ModTime().UnixNano()))
+}
+
 func containedCanonical(w http.ResponseWriter, g *library.Gallery, id int64) (canonPath, fileType string, ok bool) {
 	err := g.DB.Read.QueryRow(
 		`SELECT canonical_path, file_type FROM images WHERE id = ?`, id,
@@ -85,12 +107,18 @@ func (h *Handler) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if path, ok := thumbnailOf(w, g, id); ok {
+		http.ServeFile(w, r, path)
+	}
+}
+
+func thumbnailOf(w http.ResponseWriter, g *library.Gallery, id int64) (string, bool) {
 	thumbPath := filepath.Join(g.ThumbnailsPath, strconv.FormatInt(id, 10)+".jpg")
 	if _, err := os.Stat(thumbPath); err != nil {
 		contract.WriteError(w, http.StatusNotFound, "not_found", "thumbnail not found")
-		return
+		return "", false
 	}
-	http.ServeFile(w, r, thumbPath)
+	return thumbPath, true
 }
 
 func (h *Handler) serveMangaPage(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +152,7 @@ func (h *Handler) serveMangaPagePath(
 	}
 	page, err := ensure(g.ThumbnailsPath, canonPath, id, n)
 	if err != nil {
+		logx.Warnf("api: page %d of image %d: %v", n, id, err)
 		contract.WriteError(w, http.StatusNotFound, "not_found", "page not found")
 		return
 	}

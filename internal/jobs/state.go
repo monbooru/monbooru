@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/shared/logx"
 )
 
 var ErrJobRunning = errors.New("a job is already running")
@@ -29,6 +30,13 @@ type Manager struct {
 	lane     *Reservation
 	viewed   bool
 	finished uint64
+	onEnd    func()
+}
+
+func (m *Manager) OnEnd(f func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onEnd = f
 }
 
 // Reservation is a hold on the job lane; only its own Release frees it.
@@ -155,8 +163,13 @@ func (m *Manager) CompletePartial(summary string) {
 	m.end(func(st *models.JobState) { st.Summary, st.Message, st.Partial = summary, "", true })
 }
 
+// Fail ends the job on errMsg, which the log keeps too: the status line
+// goes once read.
 func (m *Manager) Fail(errMsg string) {
-	m.end(func(st *models.JobState) { st.Error = errMsg })
+	m.end(func(st *models.JobState) {
+		st.Error = errMsg
+		logx.Warnf("jobs: %s failed: %s", st.JobType, errMsg)
+	})
 }
 
 func (m *Manager) end(set func(*models.JobState)) {
@@ -172,6 +185,9 @@ func (m *Manager) end(set func(*models.JobState)) {
 	set(m.state)
 	m.finished++
 	m.armDismiss(dismissDelay)
+	if m.onEnd != nil {
+		go m.onEnd()
+	}
 }
 
 func (m *Manager) Get() *models.JobState {

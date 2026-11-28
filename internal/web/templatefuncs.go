@@ -41,9 +41,15 @@ func templateFuncs() template.FuncMap {
 			}
 			return r
 		},
-		// template.CSS to pass the style-attribute sanitizer;
-		// categoryColor admits only a validated colour.
-		"catColor":   func(color string) template.CSS { return template.CSS(categoryColor(color)) },
+		"tagSuggestRoute": func() string { return tagSuggestRoute },
+		"tagsInput": func(pairs ...any) map[string]any {
+			m := map[string]any{"Route": tagSuggestRoute}
+			for i := 0; i+1 < len(pairs); i += 2 {
+				k, _ := pairs[i].(string)
+				m[k] = pairs[i+1]
+			}
+			return m
+		},
 		"catDefault": tags.DefaultCategoryColor,
 		// template.URL, or html/template would re-escape each % and
 		// double-encode the link.
@@ -140,14 +146,10 @@ func templateFuncs() template.FuncMap {
 			}
 			return d.Round(time.Millisecond).String()
 		},
-		"minusDuration": func(a, b time.Duration) time.Duration {
-			return a - b
-		},
-		"int64Duration": func(d time.Duration) int64 {
-			return int64(d)
-		},
-		"plural":      models.Plural,
-		"abbrevCount": abbrevCount,
+		"plural":       models.Plural,
+		"joinAnd":      joinAnd,
+		"globalCounts": globalCounts,
+		"searchTime":   searchTime,
 		// Always quoted: a term may carry spaces the parser would split on.
 		"comfySearch": func(term string) string {
 			if term == "" {
@@ -292,24 +294,29 @@ func monloaderOffReason(conn string) string {
 	return cmp.Or(monloaderOffReasons[conn], "monloader is not responding")
 }
 
-// At most four glyphs; the unit promotes at 999500 because anything
-// higher rounds to "1000k".
-func abbrevCount(n int) string {
-	switch {
-	case n < 1000:
-		return strconv.Itoa(n)
-	case n < 999500:
-		return abbrevUnit(n, 1000, "k")
-	default:
-		return abbrevUnit(n, 1000000, "M")
+// Three significant digits, as a cached search takes well under a
+// millisecond; the unit promotes at 999.5 ms, which rounds to "1000".
+func searchTime(d time.Duration) string {
+	if d < 999500*time.Microsecond {
+		return threeDigits(float64(d)/float64(time.Millisecond)) + " ms"
 	}
+	return threeDigits(d.Seconds()) + " s"
 }
 
-func abbrevUnit(n, div int, suffix string) string {
-	if tenths := (n*10 + div/2) / div; tenths < 100 {
-		return fmt.Sprintf("%d.%d%s", tenths/10, tenths%10, suffix)
+// Fixed-point rather than %g, which turns a long search into "1.23e+03".
+func threeDigits(v float64) string {
+	dec := 2
+	for x := v; x >= 10 && dec > 0; x /= 10 {
+		dec--
 	}
-	return fmt.Sprintf("%d%s", (n+div/2)/div, suffix)
+	for x := v; x > 0 && x < 1; x *= 10 {
+		dec++
+	}
+	s := strconv.FormatFloat(v, 'f', dec, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s
 }
 
 func groupByOriginStale[T, G any](items []T, origin func(T) string, stale func(T) bool, newGroup func(T) *G, add func(*G, T)) []G {
@@ -355,13 +362,4 @@ func derefOr[T any](p *T) T {
 		return zero
 	}
 	return *p
-}
-
-// Keyed on the colour, not the category, so a theme can remap the shipped
-// palette while an operator's own colour falls through.
-func categoryColor(color string) string {
-	if !tags.IsValidCategoryColor(color) {
-		return tags.SafeCategoryColor(color)
-	}
-	return "var(--cat-" + strings.ToLower(strings.TrimPrefix(color, "#")) + "," + color + ")"
 }

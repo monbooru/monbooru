@@ -2,7 +2,9 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/shared/contract"
 )
 
@@ -27,4 +29,58 @@ func (h *Handler) listGalleries(w http.ResponseWriter, r *http.Request) {
 		out = append(out, contract.Gallery{Name: gc.Name, Images: images, Tags: tags, Active: gc.Name == activeName})
 	}
 	contract.WriteJSON(w, http.StatusOK, out)
+}
+
+// Folders come from the images, so an empty folder on disk is not listed;
+// a send to a folder that does not exist yet still creates it.
+func (h *Handler) folderTree(w http.ResponseWriter, r *http.Request) ([]gallery.FolderNode, bool) {
+	g, ok := h.resolveGallery(w, r)
+	if !ok {
+		return nil, false
+	}
+	tree, err := g.FolderTreeUnder(nil)
+	if err != nil {
+		contract.WriteError(w, http.StatusInternalServerError, "internal_error", "could not read the folders of gallery "+g.Name)
+		return nil, false
+	}
+	return tree, true
+}
+
+func FolderOf(n *gallery.FolderNode) contract.Folder {
+	return contract.Folder{Path: n.Path, Name: n.Name, Images: n.Count, Folders: len(n.Children)}
+}
+
+func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
+	tree, ok := h.folderTree(w, r)
+	if !ok {
+		return
+	}
+	path := strings.Trim(r.URL.Query().Get("path"), "/")
+	node := gallery.FindFolder(tree, path)
+	if node == nil {
+		contract.WriteError(w, http.StatusNotFound, contract.CodeFolderNotFound, "folder not found: "+path)
+		return
+	}
+	offset, limit := parsePage(r, contract.FolderPageSize, contract.FolderPageSize)
+	page := node.ChildrenPage(offset, limit)
+	out := make([]contract.Folder, len(page))
+	for i := range page {
+		out[i] = FolderOf(&page[i])
+	}
+	writePage(w, offset/limit+1, limit, len(node.Children), out)
+}
+
+func (h *Handler) searchFolders(w http.ResponseWriter, r *http.Request) {
+	tree, ok := h.folderTree(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	_, limit := contract.PageParams("", q.Get("limit"), contract.FolderSearchLimit, contract.FolderSearchMax)
+	found := gallery.SearchFolders(tree, q.Get("q"), limit)
+	out := make([]contract.Folder, len(found))
+	for i, n := range found {
+		out[i] = FolderOf(n)
+	}
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
 }

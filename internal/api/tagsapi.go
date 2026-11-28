@@ -3,6 +3,7 @@ package api
 import (
 	"cmp"
 	"net/http"
+	"strings"
 
 	"github.com/monbooru/monbooru/internal/shared/contract"
 	"github.com/monbooru/monbooru/internal/tags"
@@ -16,6 +17,7 @@ type tagResponse struct {
 	UsageCount int    `json:"usage_count"`
 	IsAlias    bool   `json:"is_alias"`
 	Rejected   bool   `json:"rejected"`
+	Global     bool   `json:"global"`
 	Origin     string `json:"origin"`
 	LastUsedAt string `json:"last_used_at,omitempty"`
 }
@@ -60,6 +62,27 @@ func (h *Handler) getTag(w http.ResponseWriter, r *http.Request) {
 	contract.WriteJSON(w, http.StatusOK, tagDetailResponse{tagResponse: toTagResponse(t), Note: note.Body, Links: note.Links, DistinctFrom: distinct})
 }
 
+func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
+	g, ok := h.resolveGallery(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	_, limit := contract.PageParams("", q.Get("limit"), contract.TagSuggestLimit, contract.TagSuggestMax)
+	out := []contract.TagSuggestion{}
+	if typed := strings.TrimSpace(q.Get("q")); typed != "" {
+		found, category, err := g.TagSvc.SuggestTyped(typed, limit)
+		if serverError(w, err) {
+			return
+		}
+		tags.QualifySuggestions(found, category, nil)
+		for _, t := range found {
+			out = append(out, contract.TagSuggestion{Name: t.Name, Category: t.CategoryName, Color: t.CategoryColor, UsageCount: t.UsageCount, Alias: t.ViaAlias})
+		}
+	}
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"results": out})
+}
+
 func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 	g, ok := h.resolveGallery(w, r)
 	if !ok {
@@ -82,6 +105,7 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 		UsedBy:    q.Get("used_by"),
 		Type:      q.Get("type"),
 		ShowZero:  q.Get("show_zero") != "0",
+		Scope:     q.Get("scope"),
 	}
 
 	if filter.Type != "" && filter.Type != "tag" && filter.Type != "alias" && filter.Type != "rejected" {

@@ -44,6 +44,7 @@ type Config struct {
 	// Omitted when empty: TOML refuses a hand-added [[plugin]] block once
 	// `plugin = []` is written.
 	Plugins []PluginConfig `toml:"plugin,omitempty"`
+	Workers []WorkerConfig `toml:"worker,omitempty"`
 
 	// Unexported so the encoder never writes them.
 	portableBase string
@@ -241,6 +242,9 @@ type Gallery struct {
 	GalleryPath    string `toml:"gallery_path"`
 	DBPath         string `toml:"-"`
 	ThumbnailsPath string `toml:"-"`
+	// Answers at its Danbooru compatible address; off until Settings turns
+	// it on.
+	Booru bool `toml:"booru,omitempty"`
 }
 
 type GalleryConfig struct {
@@ -258,7 +262,15 @@ type TaggerConfig struct {
 	// Read only to migrate old configs, and never written back.
 	UseCUDA           bool   `toml:"use_cuda,omitempty"`
 	ExecutionProvider string `toml:"execution_provider"`
-	Parallel          int    `toml:"parallel"`
+	// LocalWorker runs the monworker found beside monbooru or on PATH.
+	LocalWorker bool `toml:"local_worker"`
+	Parallel    int  `toml:"parallel"`
+	// CPUThreads bounds the threads the local worker's models use, and
+	// the frames monbooru prepares at once; 0 is every core.
+	CPUThreads int `toml:"cpu_threads"`
+	// PrepareParallel is how many images a job prepares at once; 0 leaves
+	// it to the slots of the workers that take the job.
+	PrepareParallel int `toml:"prepare_parallel"`
 	// 0 disables the cache: each run loads the model fresh.
 	IdleReleaseAfterMinutes int                  `toml:"idle_release_after_minutes"`
 	Aggregation             TaggerAggregationCfg `toml:"aggregation"`
@@ -294,6 +306,22 @@ func ExecutionProviderLabel(name string) string {
 		}
 	}
 	return name
+}
+
+type WorkerConfig struct {
+	Name   string `toml:"name"`
+	URL    string `toml:"url"`
+	Token  string `toml:"token"`
+	Paused bool   `toml:"paused,omitempty"`
+	// GatewayToken is the key of a gateway in front of the worker, which
+	// takes the bearer; the worker's token then goes in its own header.
+	GatewayToken string `toml:"gateway_token,omitempty"`
+	// Manual is a worker added by address and token: no pairing brought
+	// it, so none is ended when it is removed.
+	Manual bool `toml:"manual,omitempty"`
+	// OnDemand is a worker billed while it runs: never polled, and called
+	// only by a job that names it.
+	OnDemand bool `toml:"on_demand,omitempty"`
 }
 
 type TaggerAggregationCfg struct {
@@ -390,6 +418,47 @@ type ScheduleConfig struct {
 	// Writers replace the map and its lists rather than write through
 	// them: a config copy shares them.
 	Galleries map[string][]string `toml:"galleries,omitempty"`
+	// Replaced, never written through, for the same reason.
+	Autotag *ScheduleAutotag `toml:"autotag,omitempty"`
+}
+
+// ScheduleAutotag narrows the scheduled auto-tag phase. An empty list
+// leaves that choice open: the pool picks the workers, every enabled
+// tagger of the gallery runs.
+type ScheduleAutotag struct {
+	Workers   []string `toml:"workers,omitempty"`
+	Taggers   []string `toml:"taggers,omitempty"`
+	MaxImages int      `toml:"max_images,omitempty"`
+}
+
+func (sc ScheduleConfig) AutotagOptions() ScheduleAutotag {
+	if sc.Autotag == nil {
+		return ScheduleAutotag{}
+	}
+	return *sc.Autotag
+}
+
+// SetAutotagOptions keeps no table for options that narrow nothing.
+func (sc *ScheduleConfig) SetAutotagOptions(o ScheduleAutotag) {
+	if len(o.Workers) == 0 && len(o.Taggers) == 0 && o.MaxImages <= 0 {
+		sc.Autotag = nil
+		return
+	}
+	o.MaxImages = max(o.MaxImages, 0)
+	sc.Autotag = &o
+}
+
+// LocalWorkerName is the pairing label of the worker monbooru runs itself.
+const LocalWorkerName = "local"
+
+// DropWorkerRefs takes a removed worker out of the schedule's list.
+func (cfg *Config) DropWorkerRefs(name string) {
+	o := cfg.Schedule.AutotagOptions()
+	if !slices.Contains(o.Workers, name) {
+		return
+	}
+	o.Workers = dropFrom(o.Workers, name)
+	cfg.Schedule.SetAutotagOptions(o)
 }
 
 func (sc ScheduleConfig) EffectiveMode() string {
@@ -568,6 +637,13 @@ func load(path, base string, seed func(*Config)) (*Config, error) {
 	}
 
 	migrateTaggerProvider(cfg)
+	if !fresh && migrateLocalWorker(cfg, path) {
+		if err := Save(cfg, path); err != nil {
+			logx.Warnf("config: local_worker = true not written, kept for this run: %v", err)
+		} else {
+			logx.Infof("config: local_worker = true written: the taggers now run on the local worker")
+		}
+	}
 	applyEnvOverrides(cfg)
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -609,6 +685,39 @@ func resolveIn(cfg *Config, base string) {
 	for i := range cfg.Galleries {
 		cfg.Galleries[i].GalleryPath = fsx.AbsIn(cfg.Galleries[i].GalleryPath, base)
 	}
+}
+
+// A config from before the worker with no local_worker key and an enabled
+// tagger or a model in the models folder, which ran with no entry, gets
+// local_worker = true; one without stays off like a new install.
+func migrateLocalWorker(cfg *Config, path string) bool {
+	if cfg.Tagger.LocalWorker || !slices.ContainsFunc(cfg.Tagger.Taggers, func(t TaggerInstance) bool { return t.Enabled }) && !holdsModel(cfg) {
+		return false
+	}
+	var keys struct {
+		Tagger map[string]any `toml:"tagger"`
+	}
+	if _, err := toml.DecodeFile(path, &keys); err != nil {
+		return false
+	}
+	if _, set := keys.Tagger["local_worker"]; set {
+		return false
+	}
+	cfg.Tagger.LocalWorker = true
+	return true
+}
+
+// Read before the environment is applied, so it takes the variable itself.
+func holdsModel(cfg *Config) bool {
+	dir := cfg.Paths.ModelPath
+	if v := os.Getenv("MONBOORU_PATHS_MODEL_PATH"); v != "" {
+		dir = v
+	}
+	if dir == "" {
+		return false
+	}
+	found, _ := filepath.Glob(filepath.Join(dir, "*", "*.onnx"))
+	return len(found) > 0
 }
 
 // A use_cuda = true config with no execution_provider migrates to "cuda".
@@ -806,6 +915,7 @@ func applyEnvOverrides(cfg *Config) {
 			pinEnv(cfg, "tagger.execution_provider", "MONBOORU_TAGGER_USE_CUDA", provider, "cuda")
 		}
 	}
+	envOverride(cfg, "tagger.local_worker", func(c *Config) *bool { return &c.Tagger.LocalWorker }, strconv.ParseBool)
 	envOverride(cfg, "auth.enable_password", func(c *Config) *bool { return &c.Auth.EnablePassword }, strconv.ParseBool)
 	envOverride(cfg, "auth.password_hash", func(c *Config) *string { return &c.Auth.PasswordHash }, parseString)
 	envOverride(cfg, "auth.session_lifetime_days", func(c *Config) *int { return &c.Auth.SessionLifetimeDays }, strconv.Atoi)
@@ -919,6 +1029,10 @@ func validate(cfg *Config) error {
 	if cfg.Relations.DefaultDistance < 0 || cfg.Relations.DefaultDistance > MaxPhashDistance {
 		cfg.Relations.DefaultDistance = defaultRelationsDistance
 	}
+	if cfg.Tagger.PrepareParallel < 0 {
+		logx.Warnf("config: tagger.prepare_parallel %d is negative; using 0", cfg.Tagger.PrepareParallel)
+		cfg.Tagger.PrepareParallel = 0
+	}
 	if cfg.Tagger.Parallel < 1 {
 		cfg.Tagger.Parallel = defaultTaggerParallel
 	}
@@ -933,6 +1047,7 @@ func validate(cfg *Config) error {
 	dropInvalidCORSOrigins(cfg)
 	dropInvalidIgnorePatterns(cfg)
 	dropInvalidScheduleGalleries(cfg)
+	dropInvalidScheduleWorkers(cfg)
 	return nil
 }
 
@@ -962,6 +1077,22 @@ func dropInvalidScheduleGalleries(cfg *Config) {
 			delete(cfg.Schedule.Galleries, action)
 		}
 	}
+}
+
+func dropInvalidScheduleWorkers(cfg *Config) {
+	o := cfg.Schedule.AutotagOptions()
+	kept := slices.DeleteFunc(slices.Clone(o.Workers), func(name string) bool {
+		known := name == LocalWorkerName || slices.ContainsFunc(cfg.Workers, func(w WorkerConfig) bool { return w.Name == name })
+		if !known {
+			logx.Warnf("config: dropping schedule.autotag worker %q: no such worker", name)
+		}
+		return !known
+	})
+	if o.MaxImages < 0 {
+		logx.Warnf("config: schedule.autotag max_images %d is negative; no limit", o.MaxImages)
+	}
+	o.Workers = kept
+	cfg.Schedule.SetAutotagOptions(o)
 }
 
 // Browsers send an origin with no path and no trailing slash, so anything

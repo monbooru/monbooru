@@ -2,18 +2,22 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monbooru/monbooru/internal/config"
 	"github.com/monbooru/monbooru/internal/gallery"
 	"github.com/monbooru/monbooru/internal/models"
+	"github.com/monbooru/monbooru/internal/peer"
 	"github.com/monbooru/monbooru/internal/schedule"
 	"github.com/monbooru/monbooru/internal/shared/apitoken"
 	"github.com/monbooru/monbooru/internal/shared/desktop"
@@ -35,11 +39,17 @@ type settingsData struct {
 	TaggerRows         []taggerRow
 	ScheduleStatus     schedule.Status
 	ScheduleScope      scheduleScope
+	ScheduleAutotag    scheduleAutotag
 	Stats              statsData
 	ExecutionProviders []struct{ Name, Label string }
+	Workers            workersData
+	LocalRunning       bool
+	TaggerProvider     string
+	InstallTargets     []installTarget
+	CPUCount           int
 	ScheduleModes      []scheduleModeRow
-	PluginPending      []pendingOffer
-	PluginPaired       int
+	PluginPairing      map[string]any
+	PluginsPending     int
 	PluginRows         []pluginRowView
 	PluginsDir         string
 	Themes             themeCluster
@@ -49,13 +59,24 @@ type settingsData struct {
 	Desktop            desktop.Integration
 	DesktopPower       webui.DesktopPower
 	PluginsRepoURL     string
+	BooruEndpoints     booruEndpointsView
+	TokenRevokeNotes   map[string]string
+	UploadFolder       webui.FolderPicker
 }
 
 func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
+	// The page carries the Plugins section, whose table lists what the
+	// notice announces.
+	s.win.markSeen()
 	base := s.base(r, "settings", "Settings - "+s.booruName())
-	modelPath := s.modelPath()
-	catalog := tagger.LoadCatalog(modelPath)
-	s.reconcileTaggers(catalog)
+	panel := s.pairViewData()
+	delete(panel, "Notice")
+	// The install dialog says to reload this page once the files are in.
+	glance, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	tagger.CurrentPool().Glance(glance)
+	cancel()
+	catalog := tagger.LoadCatalog()
+	s.reconcileTaggers()
 	cfg := s.cfgSnapshot()
 	taggers := tagger.AvailableTaggers(cfg)
 	taggerByName := map[string]tagger.TaggerStatus{}
@@ -67,30 +88,28 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 	catalogNames := map[string]bool{}
 	for _, e := range catalog {
 		catalogNames[e.Name] = true
-		target := filepath.Join(modelPath, e.Name)
-		get := e.Missing(target)
 		row := taggerRow{}
 		if t, installed := taggerByName[e.Name]; installed {
-			row = s.installedTaggerRow(t, totalGalleries, modelPath, &e)
-			if !t.Missing || t.Malformed {
-				get.Files = nil
-			}
+			row = s.installedTaggerRow(t, totalGalleries, &e)
 		}
 		row.Name = e.Name
-		row.Files, row.TargetDir = get.Files, target
 		row.Supported = true
 		row.Description = e.Description
 		row.Gated = e.Gated
-		row.HostCommand = get.HostCommand()
+		row.HostCommand = e.Command
+		if e.Command != "" {
+			row.Files, row.TargetDir = e.Files, filepath.Join(s.modelPath(), e.Name)
+		}
 		supportedRows = append(supportedRows, row)
 	}
 	for _, t := range taggers {
 		if catalogNames[t.Name] {
 			continue
 		}
-		unsupportedRows = append(unsupportedRows, s.installedTaggerRow(t, totalGalleries, modelPath, nil))
+		unsupportedRows = append(unsupportedRows, s.installedTaggerRow(t, totalGalleries, nil))
 	}
 	taggerRows := append(supportedRows, unsupportedRows...)
+	workers := s.workersView()
 	s.renderTemplate(w, "settings.html", settingsData{
 		baseData:           base,
 		Galleries:          s.galleryRowsWithSnapshot(s.activeGallery(), base.VisibleCount, base.TagCount),
@@ -99,11 +118,17 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		TaggerRows:         taggerRows,
 		ScheduleStatus:     s.sched.Status(),
 		ScheduleScope:      scheduleScopeView(cfg, taggers, base.MonloaderPaired),
+		ScheduleAutotag:    scheduleAutotagView(cfg, taggers, tagger.CurrentPool().Workers()),
 		Stats:              s.gatherStats(),
 		ExecutionProviders: config.ExecutionProviders,
+		Workers:            workers,
+		LocalRunning:       s.local.running(),
+		TaggerProvider:     s.taggerProvider(cfg),
+		InstallTargets:     s.installTargets(cfg, workers),
+		CPUCount:           runtime.NumCPU(),
 		ScheduleModes:      scheduleModeRows(),
-		PluginPending:      s.pendingOffers(),
-		PluginPaired:       s.pairedPeerCount(),
+		PluginPairing:      panel,
+		PluginsPending:     panel["PluginsPending"].(int),
 		PluginRows:         s.pluginRows(),
 		PluginsDir:         s.pluginsDir(),
 		Themes:             s.themeCluster(),
@@ -113,6 +138,9 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 		Desktop:            s.desktopIntegration(),
 		DesktopPower:       s.desktopPower(r),
 		PluginsRepoURL:     pluginsRepoURL(RepoURL),
+		BooruEndpoints:     s.booruEndpoints(r),
+		TokenRevokeNotes:   tokenRevokeNotes(),
+		UploadFolder:       s.folderPicker("default-upload").WithValue(cfg.Gallery.DefaultUploadFolder),
 	})
 }
 
@@ -135,6 +163,11 @@ func (s *Server) settingsSchedulePost(w http.ResponseWriter, r *http.Request) {
 	if !config.IsValidScheduleMode(mode) {
 		mode = config.ScheduleAtTime
 	}
+	autotag, refusal := scheduleAutotagForm(r)
+	if refusal != "" {
+		writeInlineFlash(w, "err", refusal)
+		return
+	}
 	if err := s.withConfig(func(c *config.Config) error {
 		c.Schedule.Time = timeVal
 		c.Schedule.Mode = mode
@@ -149,6 +182,7 @@ func (s *Server) settingsSchedulePost(w http.ResponseWriter, r *http.Request) {
 			c.Schedule.LookupBooru = r.FormValue("lookup_booru") == "on"
 		}
 		c.Schedule.Galleries = scheduleGalleriesForm(r, c.Schedule.Galleries, c.Galleries)
+		autotag(c)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -191,6 +225,105 @@ func scheduleGalleriesForm(r *http.Request, lists map[string][]string, galleries
 		return nil
 	}
 	return out
+}
+
+type scheduleAutotag struct {
+	Show        bool
+	ShowTaggers bool
+	EveryTagger bool
+	Taggers     []scheduleChoice
+	ShowWorkers bool
+	AnyWorker   bool
+	Workers     []scheduleChoice
+	MaxImages   int
+}
+
+type scheduleChoice struct {
+	Name string
+	Hint string
+	On   bool
+}
+
+// Each group shows once there are two to choose from, or while a list is
+// set, which would otherwise narrow the run unseen.
+func scheduleAutotagView(cfg *config.Config, taggers []tagger.TaggerStatus, workers []tagger.WorkerView) scheduleAutotag {
+	o := cfg.Schedule.AutotagOptions()
+	v := scheduleAutotag{EveryTagger: len(o.Taggers) == 0, AnyWorker: len(o.Workers) == 0, MaxImages: o.MaxImages}
+	for _, t := range taggers {
+		if t.Enabled {
+			v.Taggers = append(v.Taggers, scheduleChoice{Name: t.Name, On: slices.Contains(o.Taggers, t.Name)})
+		}
+	}
+	for _, w := range workers {
+		hint := fmt.Sprintf("%d at once", max(1, w.Info.Slots))
+		if w.Info.Provider != "" {
+			hint = config.ExecutionProviderLabel(w.Info.Provider) + ", " + hint
+		}
+		switch {
+		case w.Local:
+			hint += ", this machine"
+		case w.OnDemand:
+			hint += ", on demand"
+		case w.Paused:
+			hint += ", paused"
+		case !w.Up:
+			hint += ", offline"
+		}
+		v.Workers = append(v.Workers, scheduleChoice{Name: w.Name, Hint: hint, On: slices.Contains(o.Workers, w.Name)})
+	}
+	v.ShowTaggers = len(v.Taggers) > 1 || !v.EveryTagger
+	v.ShowWorkers = len(v.Workers) > 1 || !v.AnyWorker
+	v.Show = len(v.Taggers) > 0
+	return v
+}
+
+// scheduleAutotagForm reads the auto-tag block and returns the write to
+// apply, or why the form is refused; a group the page did not draw keeps
+// its list.
+func scheduleAutotagForm(r *http.Request) (func(*config.Config), string) {
+	if r.FormValue("autotag_opts") == "" {
+		return func(*config.Config) {}, ""
+	}
+	on := r.FormValue("run_auto_taggers") == "on"
+	taggersDrawn, workersDrawn := r.FormValue("autotag_taggers_drawn") != "", r.FormValue("autotag_workers_drawn") != ""
+	everyTagger := r.FormValue("every_autotag_taggers") == "on"
+	anyWorker := r.FormValue("autotag_worker_mode") != "named"
+	pickedTaggers, pickedWorkers := r.Form["on_autotag_taggers"], r.Form["autotag_worker"]
+	if on && taggersDrawn && !everyTagger && len(pickedTaggers) == 0 {
+		return nil, "Tick a tagger."
+	}
+	if on && workersDrawn && !anyWorker && len(pickedWorkers) == 0 {
+		return nil, "Tick a worker."
+	}
+	maxImages := 0
+	if v := strings.TrimSpace(r.FormValue("autotag_max_images")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, "The image limit must be a number above 0, or empty."
+		}
+		maxImages = n
+	}
+	return func(c *config.Config) {
+		o := c.Schedule.AutotagOptions()
+		o.MaxImages = maxImages
+		switch {
+		case !taggersDrawn:
+		case everyTagger:
+			o.Taggers = nil
+		case len(pickedTaggers) > 0:
+			o.Taggers = slices.Clone(pickedTaggers)
+		}
+		switch {
+		case !workersDrawn:
+		case anyWorker:
+			o.Workers = nil
+		case len(pickedWorkers) > 0:
+			o.Workers = slices.DeleteFunc(slices.Clone(pickedWorkers), func(name string) bool {
+				return name != config.LocalWorkerName && peer.FindWorker(c, name) == nil
+			})
+		}
+		c.Schedule.SetAutotagOptions(o)
+	}, ""
 }
 
 type scheduleScope struct {
@@ -514,6 +647,7 @@ func (s *Server) settingsTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	var removed bool
 	if err := s.withConfig(func(c *config.Config) error {
 		removed = c.Auth.Tokens.Remove(id)
+		closeBooruEndpointIfGone(c)
 		return nil
 	}); err != nil {
 		writeInlineFlash(w, "err", "Could not save: "+err.Error())
@@ -533,9 +667,11 @@ func (s *Server) renderAuthTokensOOB(w http.ResponseWriter, r *http.Request) {
 	tokens := slices.Clone(s.cfg.Auth.Tokens)
 	s.cfgMu.RUnlock()
 	s.renderTemplate(w, "webui/auth_tokens", map[string]any{
-		"Tokens": tokens,
-		"OOB":    true,
+		"Tokens":      tokens,
+		"RevokeNotes": tokenRevokeNotes(),
+		"OOB":         true,
 	})
+	s.renderBooruEndpointsOOB(w, r)
 }
 
 func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Request) {
@@ -559,9 +695,10 @@ func (s *Server) settingsTokenPrivilegesGet(w http.ResponseWriter, r *http.Reque
 		config.ScopeDelete: "delete - destructive actions",
 	}
 	s.renderTemplate(w, "webui/token_privileges_dialog", map[string]any{
-		"ID":     id,
-		"Scopes": webui.ScopeRows(config.AllScopes, scopes, descs),
-		"Paired": paired,
+		"ID":        id,
+		"Scopes":    webui.ScopeRows(config.AllScopes, scopes, descs),
+		"Paired":    paired,
+		"ManagedBy": s.tokenManagedBy(id),
 	})
 }
 
@@ -572,6 +709,10 @@ func (s *Server) settingsTokenPrivilegesPost(w http.ResponseWriter, r *http.Requ
 	id := r.PathValue("id")
 	if s.tokenPeer(id) != "" {
 		writeInlineFlash(w, "err", "This token is managed by a pairing; its privileges can't be changed.")
+		return
+	}
+	if by := s.tokenManagedBy(id); by != "" {
+		writeInlineFlash(w, "err", "This token is managed by "+by+"; its privileges can't be changed.")
 		return
 	}
 	scopes := apitoken.Filter(r.Form["scope"], config.AllScopes)

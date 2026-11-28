@@ -55,5 +55,11 @@ func (s *Server) slideshowItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	start = max(min(start, len(play)-1), 0)
-	contract.WriteJSON(w, http.StatusOK, map[string]any{"ids": play, "videos": videos, "start": start})
+	silent, err := gallery.SilentVideos(cx.DB, videos)
+	if err != nil {
+		logx.Errorf("slideshow: %v", err)
+		flashStatus(w, http.StatusInternalServerError, "Search error.")
+		return
+	}
+	contract.WriteJSON(w, http.StatusOK, map[string]any{"ids": play, "videos": videos, "silent": silent, "start": start})
 }

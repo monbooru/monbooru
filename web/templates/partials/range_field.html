@@ -3,12 +3,12 @@
 {{$max := .Max}}{{if gt .Value .Max}}{{$max = .Value}}{{end}}
 <div class="field range-row">
   <label for="{{.Name}}">{{.Label}}</label>
-  <output id="{{.Name}}_out">{{.Value}}</output>
+  <output id="{{.Name}}_out">{{if and .ZeroLabel (eq .Value 0)}}{{.ZeroLabel}}{{else}}{{.Value}}{{end}}</output>
   <div class="range-slider-row">
     <span class="range-bound range-bound-min">{{$min}}</span>
     <input type="range" name="{{.Name}}" id="{{.Name}}"
            min="{{$min}}" max="{{$max}}" step="{{.Step}}" value="{{.Value}}" list="{{.Name}}_ticks"
-           oninput="document.getElementById('{{.Name}}_out').value=this.value"{{if .Pinned}} disabled{{end}}>
+           oninput="document.getElementById('{{.Name}}_out').value={{if .ZeroLabel}}this.value === '0' ? this.dataset.zero : {{end}}this.value"{{with .ZeroLabel}} data-zero="{{.}}"{{end}}{{if .Pinned}} disabled{{end}}>
     <span class="range-bound range-bound-max">{{$max}}</span>
   </div>
   <datalist id="{{.Name}}_ticks">

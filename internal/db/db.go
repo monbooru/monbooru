@@ -96,6 +96,8 @@ type DB struct {
 	// UnturnedThumbs is set by Bootstrap on a library last opened before
 	// thumbnails were turned by their EXIF orientation.
 	UnturnedThumbs bool
+	// Created is set by Bootstrap on a library it made from nothing.
+	Created bool
 	// Two passes each holding part of one pool would wait on each other
 	// forever.
 	eachConn sync.Mutex
@@ -112,7 +114,7 @@ func Open(path string) (*DB, error) {
 		"&_pragma=synchronous(normal)" +
 		"&_pragma=cache_size(-1024)" +
 		"&_pragma=temp_store(memory)" +
-		"&_pragma=mmap_size(67108864)"
+		"&_pragma=mmap_size(0)"
 
 	rd, err := sql.Open("sqlite", dsn)
 	if err != nil {

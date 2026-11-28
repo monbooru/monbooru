@@ -98,7 +98,7 @@ func PruneOrphanThumbnails(ctx context.Context, database *db.DB, thumbnailsPath 
 }
 
 func thumbnailOwner(name string) (int64, bool) {
-	for _, suffix := range []string{"_hover.webp", "_view.jpg", ".jpg"} {
+	for _, suffix := range []string{"_hover.webp", "_view.jpg", "_mid.jpg", ".jpg"} {
 		if idStr, ok := strings.CutSuffix(name, suffix); ok {
 			id, err := strconv.ParseInt(idStr, 10, 64)
 			return id, err == nil

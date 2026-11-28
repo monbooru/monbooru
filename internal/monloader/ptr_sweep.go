@@ -102,7 +102,7 @@ func ptrAliasForms(svc *tags.Service, ids []int64) (map[int64][]string, error) {
 	forms := make(map[int64][]string, len(aliases))
 	for id, rows := range aliases {
 		for _, a := range rows {
-			forms[id] = append(forms[id], tags.FormName(a.CategoryName, a.Name))
+			forms[id] = append(forms[id], contract.TagForm(a.CategoryName, a.Name))
 		}
 	}
 	return forms, nil
@@ -495,7 +495,7 @@ func (l *Link) ptrImpliedBySupport(ctx context.Context, svc *tags.Service, chunk
 			return nil, err
 		}
 		for _, r := range rows {
-			form := tags.FormName(r.ImpliedCategoryName, r.ImpliedName)
+			form := contract.TagForm(r.ImpliedCategoryName, r.ImpliedName)
 			if _, swept := inChunk[form]; r.Origin == contract.SourcePTR && !swept && !slices.Contains(results[c.id].Implications, form) {
 				byTarget[form] = append(byTarget[form], edge{c.id, r.ImpliedID, c.name})
 			}

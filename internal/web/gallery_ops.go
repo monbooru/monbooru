@@ -194,11 +194,13 @@ func (s *Server) settingsGalleriesPost(w http.ResponseWriter, r *http.Request) {
 		if switchErr := s.switchGallery(name); switchErr != nil {
 			logx.Infof("gallery %q: post-add switch skipped: %v", name, switchErr)
 		}
+		s.queueGlobalPull(name)
 		writeInlineFlash(w, "ok", "Gallery "+name+" added and now active."+nesting)
 		return
 	}
 	leftOut, err := s.importGallery(name, format, file)
 	if err != nil {
+		s.queueGlobalPull(name)
 		writeInlineFlash(w, "err", "Gallery created. Import failed: "+err.Error())
 		return
 	}

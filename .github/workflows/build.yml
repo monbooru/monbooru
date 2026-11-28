@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: true
+      variants:
+        description: The image variants to build, space-separated, among cpu cuda openvino lite; empty builds all
+        required: false
+        type: string
+        default: ''
     secrets:
       GHCR_LEGACY_TOKEN:
         required: false
@@ -36,21 +41,60 @@ env:
   GO_VERSION: '1.27.4'
   GO_SHA256_LINUX_AMD64: '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840'
   GO_SHA256_LINUX_ARM64: '3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92'
-  ORT_VERSION: '1.21.0'
-  DIRECTML_VERSION: '1.15.4'
+  MONWORKER_VERSION: '1.0.3'
+  MONWORKER_SHA256_LINUX_AMD64: '992ec424c1a9b57b23d6295e24128e3da54acdb230d36c879a69239f539b43c0'
+  MONWORKER_SHA256_LINUX_ARM64: 'cac99b344551a96a03553ba288cec9b92f61ea91f49f1068a54c534ec50d8dd0'
+  MONWORKER_SHA256_WINDOWS_AMD64: 'acf082b35099ee71ea146974b8bc74832745291b8c96e685a85cea4e6fe12939'
   FFMPEG_BUILD: 'v8.1.3-mb4'
   FFMPEG_NAME: 'ffmpeg-8.1.3-mb4'
-  ORT_SHA256_LINUX_X64: '7485c7e7aac6501b27e353dcbe068e45c61ab51fbaf598d13970dfae669d20bf'
-  ORT_SHA256_LINUX_AARCH64: '4508084bde1232ee1ab4b6fad2155be0ea2ccab1c1aae9910ddb3fb68a60805e'
-  ORT_DML_SHA256_WIN_X64: 'f1f7dd0b6a568ff6e79be3822d591faffb3ae0f7f0aaf58ee3d7bd1d9f0e6edc'
-  DIRECTML_SHA256: '4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9'
   FFMPEG_SHA256_LINUX64: 'b4f4b357683462fbdbeaadf98ada904afe80c725d3ce8c0e1e84f75d1bb2108c'
   FFMPEG_SHA256_LINUXARM64: '10d3a2683f7d5b25aab903ce316ef4c627995108bf90cf8418f0ec9eae1d1213'
   FFMPEG_SHA256_WIN64: '11891c37401d1f8322a83effc48be2154bf4ad63a2ec7f28f43a74374c6176e7'
 
 jobs:
+  plan:
+    name: The variants to build
+    if: inputs.docker
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      builds: ${{ steps.plan.outputs.BUILDS }}
+      manifests: ${{ steps.plan.outputs.MANIFESTS }}
+    env:
+      VARIANTS: ${{ inputs.variants }}
+      BUILDS: |
+        [
+          {"variant": "cpu", "dockerfile": "docker/Dockerfile", "arch": "amd64", "runner": "ubuntu-latest"},
+          {"variant": "cpu", "dockerfile": "docker/Dockerfile", "arch": "arm64", "runner": "ubuntu-24.04-arm"},
+          {"variant": "cuda", "dockerfile": "docker/Dockerfile.cuda", "arch": "amd64", "runner": "ubuntu-latest"},
+          {"variant": "openvino", "dockerfile": "docker/Dockerfile.openvino", "arch": "amd64", "runner": "ubuntu-latest"},
+          {"variant": "lite", "dockerfile": "docker/Dockerfile.lite", "arch": "amd64", "runner": "ubuntu-latest"},
+          {"variant": "lite", "dockerfile": "docker/Dockerfile.lite", "arch": "arm64", "runner": "ubuntu-24.04-arm"}
+        ]
+      MANIFESTS: |
+        [
+          {"variant": "cpu", "suffix": ""},
+          {"variant": "cuda", "suffix": "-cuda"},
+          {"variant": "openvino", "suffix": "-openvino"},
+          {"variant": "lite", "suffix": "-lite"}
+        ]
+    steps:
+      - name: Keep the variants asked for
+        id: plan
+        run: |
+          want=$(jq -Rc 'split(" ") | map(select(. != ""))' <<< "$VARIANTS")
+          unknown=$(jq -r --argjson want "$want" '$want - map(.variant) | join(" ")' <<< "$MANIFESTS")
+          if [ -n "$unknown" ]; then
+            echo "::error::No such image variant: $unknown"
+            exit 1
+          fi
+          keep='map(select(($want | length) == 0 or (.variant as $v | $want | index($v) != null)))'
+          echo "BUILDS=$(jq -c --argjson want "$want" "$keep" <<< "$BUILDS")" >> "$GITHUB_OUTPUT"
+          echo "MANIFESTS=$(jq -c --argjson want "$want" "$keep" <<< "$MANIFESTS")" >> "$GITHUB_OUTPUT"
+
   docker:
     if: inputs.docker
+    needs: plan
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -58,23 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - variant: cpu
-            dockerfile: docker/Dockerfile
-            arch: amd64
-            runner: ubuntu-latest
-          - variant: cpu
-            dockerfile: docker/Dockerfile
-            arch: arm64
-            runner: ubuntu-24.04-arm
-          - variant: cuda
-            dockerfile: docker/Dockerfile.cuda
-            arch: amd64
-            runner: ubuntu-latest
-          - variant: openvino
-            dockerfile: docker/Dockerfile.openvino
-            arch: amd64
-            runner: ubuntu-latest
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -95,11 +123,11 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: linux/${{ matrix.arch }}
-          load: ${{ matrix.variant == 'cpu' || matrix.variant == 'openvino' }}
+          load: ${{ matrix.variant != 'cuda' }}
           tags: smoke-test
 
       - name: Smoke test ${{ matrix.arch }}
-        if: matrix.variant == 'cpu' || matrix.variant == 'openvino'
+        if: matrix.variant != 'cuda'
         run: |
           docker run --rm --entrypoint /usr/local/bin/monbooru smoke-test \
             -hash-password smoke-test
@@ -137,20 +165,14 @@ jobs:
   manifest:
     if: inputs.docker && inputs.image_tags != ''
     runs-on: ubuntu-latest
-    needs: docker
+    needs: [plan, docker]
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - variant: cpu
-            suffix: ""
-          - variant: cuda
-            suffix: "-cuda"
-          - variant: openvino
-            suffix: "-openvino"
+        include: ${{ fromJSON(needs.plan.outputs.manifests) }}
     steps:
       - name: Lowercase image name
         id: img
@@ -209,98 +231,22 @@ jobs:
             ghcr.io/${{ steps.img.outputs.NAME }}:${1}${{ matrix.suffix }} \
             || echo "::warning::The push to the legacy namespace failed; ghcr.io/leqwin/monbooru keeps its old tags."
 
-  lite:
-    name: Lite binaries and installer
-    if: inputs.binaries
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-
-      - name: Install Go
-        run: |
-          ./packaging/install-go.sh "${GO_VERSION}" "${GO_SHA256_LINUX_AMD64}"
-
-      - name: Build
-        run: ./packaging/build-binaries.sh lite
-
-      - name: Build the installer
-        run: ./packaging/build-installer.sh lite
-
-      - name: Upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: binaries-lite
-          path: dist/*
-          if-no-files-found: error
-
-  bundled-linux:
-    name: Bundled Linux (${{ matrix.arch }})
+  binaries:
+    name: Binaries ${{ matrix.os }} ${{ matrix.arch }}
     if: inputs.binaries
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    container: node:24-bookworm@sha256:8fa96264f302f58bbb13aa7339c541547b56975766ce956c875da149452a3e40
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+          - {os: linux, arch: amd64, runner: ubuntu-latest}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm}
+          - {os: windows, arch: amd64, runner: ubuntu-latest}
     env:
-      GOOS: linux
+      GOOS: ${{ matrix.os }}
       GOARCH: ${{ matrix.arch }}
-    steps:
-      - name: Install the build tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl file gcc git libc6-dev tar xz-utils
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-
-      - name: Let git read the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install Go
-        run: |
-          sha=$GO_SHA256_LINUX_AMD64
-          [ "${{ matrix.arch }}" = arm64 ] && sha=$GO_SHA256_LINUX_ARM64
-          ./packaging/install-go.sh "${GO_VERSION}" "$sha" "${{ matrix.arch }}"
-
-      - name: Fetch the bundled tools
-        run: ./packaging/fetch-tools.sh
-
-      - name: Build
-        run: ./packaging/build-binaries.sh bundled
-
-      - name: Build the AppImage
-        run: ./packaging/build-appimage.sh
-
-      - name: Upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: binaries-bundled-linux-${{ matrix.arch }}
-          path: dist/*
-          if-no-files-found: error
-
-  bundled-windows:
-    name: Bundled Windows and installer
-    if: inputs.binaries
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      GOOS: windows
-      GOARCH: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -310,25 +256,37 @@ jobs:
       - name: Install the build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-mingw-w64-x86-64-win32 unzip zip
-          ./packaging/install-go.sh "${GO_VERSION}" "${GO_SHA256_LINUX_AMD64}"
+          sudo apt-get install -y --no-install-recommends unzip zip
+          host=amd64
+          sha=$GO_SHA256_LINUX_AMD64
+          if [ "${{ matrix.runner }}" = ubuntu-24.04-arm ]; then
+            host=arm64
+            sha=$GO_SHA256_LINUX_ARM64
+          fi
+          ./packaging/install-go.sh "${GO_VERSION}" "$sha" "$host"
 
       - name: Fetch the bundled tools
         run: ./packaging/fetch-tools.sh
 
-      - name: Build
-        env:
-          CC: x86_64-w64-mingw32-gcc-win32
-        run: ./packaging/build-binaries.sh bundled
+      - name: Build the lite and bundled archives
+        run: |
+          ./packaging/build-binaries.sh lite
+          ./packaging/build-binaries.sh bundled
 
-      - name: Build the installer
-        run: ./packaging/build-installer.sh bundled
+      - name: Build the installers
+        if: matrix.os == 'windows'
+        run: |
+          ./packaging/build-installer.sh lite
+          ./packaging/build-installer.sh bundled
+
+      - name: Build the AppImage
+        if: matrix.os == 'linux'
+        run: ./packaging/build-appimage.sh
 
       - name: Upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: binaries-bundled-windows
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 

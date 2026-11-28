@@ -89,6 +89,9 @@ func ApplyReplacedFile(h Handle, imageID int64, stagedPath, newSHA, newMD5, newT
 		); err != nil {
 			return fmt.Errorf("update images row: %w", err)
 		}
+		if _, err := tx.Exec(`DELETE FROM image_tagger_runs WHERE image_id = ?`, imageID); err != nil {
+			return fmt.Errorf("forget tagger runs: %w", err)
+		}
 		if err := rewroteBytesTx(tx, imageID, true, sdMeta, comfyMeta); err != nil {
 			return err
 		}

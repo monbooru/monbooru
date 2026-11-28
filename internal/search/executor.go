@@ -18,7 +18,7 @@ import (
 
 type Query struct {
 	Expr        Expr
-	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity"
+	Sort        string // "newest" | "filesize" | "random" | "order" | "similarity" | "id"
 	Order       string // "asc" | "desc"
 	RandomSeed  int64
 	Page        int // 1-based
@@ -49,6 +49,7 @@ func (q Query) listKey(src Source) string {
 
 func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, error) {
 	database := src.DB
+	src.heldTalliesOnly = q.DeferCount
 	started := time.Now()
 	gen := src.Cache.gen()
 	key := q.listKey(src)
@@ -168,6 +169,10 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			break
 		}
 		if q.DeferCount {
+			if n, ok := src.Cache.total(key); ok {
+				total = n
+				break
+			}
 			counted, deferred = false, true
 			break
 		}
@@ -237,7 +242,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 			from = cmp.Or(q.After, q.Before)
 		}
 		residual, residualArgs := buildWherePerRow(q.Expr, src)
-		w := newTagWalk(database, walkLegs, up, walkStart(from, up))
+		w := newTagWalk(database, walkLegs, up, idBoundStart(q.Expr, up, walkStart(from, up)))
 		if images, walked, err = walkPage(ctx, database, w, residual, residualArgs, limit); err != nil {
 			return nil, err
 		}
@@ -268,6 +273,9 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 		switch {
 		case len(images) < limit && (len(images) > 0 || offset == 0) && !reverse:
 			total = offset + len(images)
+			if total == 0 {
+				src.Cache.setTotal(key, 0, gen)
+			}
 		case len(images) == 0:
 			// A page past the end needs the total to clamp to.
 			if total, err = exactTotal(ctx, src, q.Expr, where, args); err != nil {
@@ -288,7 +296,7 @@ func Execute(ctx context.Context, src Source, q Query) (*models.SearchResult, er
 				ids[i] = img.ID
 			}
 			src.Cache.set(key, ids, gen)
-		} else if page == 1 && src.Cache.tryAcquireBackgroundFan(key) {
+		} else if _, filled := src.Cache.get(key); page == 1 && !filled && src.Cache.tryAcquireBackgroundFan(key) {
 			if idBounded {
 				unbound()
 			}
@@ -359,13 +367,26 @@ func pageStart(ids []int64, q Query, page, limit int) int {
 }
 
 // Count is the total an Execute under DeferCount left unknown: the cached
-// list's length once a fan has filled it, else the exact COUNT.
+// list's length once a fan has filled it, a fast count whose tally the
+// page did not wait for, else the exact COUNT.
 func Count(ctx context.Context, src Source, q Query) (int, error) {
-	if ids, ok := src.Cache.get(q.listKey(src)); ok {
+	key := q.listKey(src)
+	if ids, ok := src.Cache.get(key); ok {
 		return len(ids), nil
 	}
+	if n, ok := src.Cache.total(key); ok {
+		return n, nil
+	}
+	if n, bound, ok := fastTotal(src, q.Expr, containsMissingFilter(q.Expr)); ok && !bound {
+		return n, nil
+	}
+	gen := src.Cache.gen()
 	where, args := exactCountWhere(src, q.Expr)
-	return exactTotal(ctx, src, q.Expr, where, args)
+	n, err := exactTotal(ctx, src, q.Expr, where, args)
+	if err == nil {
+		src.Cache.setTotal(key, n, gen)
+	}
+	return n, err
 }
 
 func scanImageRow(rows *sql.Rows) (models.Image, error) { return models.ScanImageRow(rows) }
@@ -1092,11 +1113,27 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                SELECT i.id AS image_id FROM images i WHERE %[1]s LIMIT ?
 	            ),
 	            cand AS (
-	                SELECT id, category_id, usage_count
-	                FROM tags
-	                WHERE is_alias = 0
-	                  AND name LIKE ? ESCAPE '\'
-	                  %[2]s
+	                SELECT id, category_id, usage_count,
+	                       CASE WHEN MAX(own) = 1 THEN '' ELSE MIN(via_alias) END AS via_alias
+	                FROM (SELECT * FROM (
+	                          SELECT id, category_id, usage_count, 1 AS own, '' AS via_alias
+	                          FROM tags
+	                          WHERE is_alias = 0
+	                            AND name LIKE ? ESCAPE '\'
+	                            %[2]s
+	                          ORDER BY usage_count DESC
+	                          LIMIT ?)
+	                      UNION ALL
+	                      SELECT * FROM (
+	                          SELECT c.id, c.category_id, c.usage_count, 0 AS own, MIN(a.name) AS via_alias
+	                          FROM ` + tags.AliasMatchFrom + `
+	                          WHERE a.is_alias = 1 AND c.is_alias = 0
+	                            AND a.name LIKE ? ESCAPE '\'
+	                            %[4]s
+	                          GROUP BY c.id
+	                          ORDER BY c.usage_count DESC
+	                          LIMIT ?))
+	                GROUP BY id
 	                ORDER BY usage_count DESC
 	                LIMIT ?
 	            ),
@@ -1108,8 +1145,8 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	                  AND %[3]s
 	                GROUP BY it.tag_id
 	            )
-	            SELECT id, name, cat, color, combo FROM (
-	                SELECT c.id, t.name, tc.name AS cat, tc.color, c.usage_count,
+	            SELECT id, name, cat, color, combo, via_alias FROM (
+	                SELECT c.id, t.name, tc.name AS cat, tc.color, c.usage_count, c.via_alias,
 	                    c.usage_count > ? AND (SELECT COUNT(*) FROM ctx) > ? AS sampled, MAX(
 	                    COALESCE(own.n, 0),
 	                    (SELECT COUNT(*) FROM image_tags it
@@ -1123,31 +1160,35 @@ func SuggestTagsWithFilter(src Source, expr Expr, prefix, categoryName string, l
 	            ORDER BY sampled DESC, combo DESC, usage_count DESC
 	            LIMIT ?`
 
-	catClause := ""
+	catClause, aliasCatClause := "", ""
 	catArgs := []any{}
 	if categoryName != "" {
 		catClause = "AND category_id = (SELECT id FROM tag_categories WHERE name = ?)"
+		aliasCatClause = "AND a.category_id = (SELECT id FROM tag_categories WHERE name = ?)"
 		catArgs = []any{categoryName}
 	}
 
 	return tags.SuggestTwoPass(db.EscapeLike(prefix), limit, func(pat, notLike string, n int) ([]models.Tag, error) {
-		extra := catClause
-		qargs := make([]any, 0, 7+len(args)+len(ownArgs)+len(catArgs))
+		extra, aliasExtra := catClause, aliasCatClause
+		qargs := make([]any, 0, 12+len(args)+len(ownArgs)+2*len(catArgs))
 		qargs = append(qargs, args...)
 		// One row past the cap tells a sample from the whole context.
 		qargs = append(qargs, suggestContextCap+1)
-		qargs = append(qargs, pat)
-		qargs = append(qargs, catArgs...)
+		leg := make([]any, 0, 3+len(catArgs))
+		leg = append(leg, pat)
+		leg = append(leg, catArgs...)
 		if notLike != "" {
 			extra = extra + ` AND name NOT LIKE ? ESCAPE '\'`
-			qargs = append(qargs, notLike)
+			aliasExtra = aliasExtra + ` AND a.name NOT LIKE ? ESCAPE '\'`
+			leg = append(leg, notLike)
 		}
+		leg = append(leg, suggestCandidateCap)
+		qargs = append(qargs, leg...)
+		qargs = append(qargs, leg...)
 		qargs = append(qargs, suggestCandidateCap, suggestContextCap, suggestContextCap)
 		qargs = append(qargs, ownArgs...)
 		qargs = append(qargs, suggestContextCap, suggestContextCap, n)
-		return db.QueryAll(database.Read, db.ScanRow(func(t *models.Tag) []any {
-			return []any{&t.ID, &t.Name, &t.CategoryName, &t.CategoryColor, &t.UsageCount}
-		}), fmt.Sprintf(baseSQL, where, extra, ownWhere), qargs...)
+		return db.QueryAll(database.Read, tags.ScanSuggestion, fmt.Sprintf(baseSQL, where, extra, ownWhere, aliasExtra), qargs...)
 	})
 }
 
@@ -1206,6 +1247,9 @@ func buildOrder(sort, order string, randomSeed int64) string {
 		// total.
 		dir := sqlDir(order, "ASC")
 		return "ORDER BY i.series " + dir + ", i.series_order IS NULL, i.series_order " + dir + ", i.id " + dir
+	case "id":
+		// The Danbooru layer pages by id, as Danbooru does.
+		return "ORDER BY i.id " + sqlDir(order, "DESC")
 	case "random":
 		if randomSeed != 0 {
 			// %d emits only digits, so the seed interpolation is

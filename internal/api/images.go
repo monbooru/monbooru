@@ -288,6 +288,10 @@ func (h *Handler) replaceImageFile(w http.ResponseWriter, r *http.Request) {
 		h.refuse(w, g, id, "the file sits in a folder this gallery leaves out", http.StatusConflict, "conflict", "the image's file is not this gallery's: "+err.Error())
 		return
 	}
+	if err := gallery.RootReadable(g.Boundary().Root()); err != nil {
+		h.refuse(w, g, id, "the gallery folder cannot be read", http.StatusServiceUnavailable, "gallery_unavailable", "gallery path is unreadable")
+		return
+	}
 	if !isMultipart(r.Header.Get("Content-Type")) {
 		contract.WriteError(w, http.StatusBadRequest, "invalid_request", "multipart body required")
 		return
@@ -1037,6 +1041,10 @@ func (h *Handler) createImage(w http.ResponseWriter, r *http.Request) {
 		}
 		landed, err = g.LandInPlace(r.Context(), in.imgPath, spec)
 	}
+	if errors.Is(err, gallery.ErrRootUnreadable) {
+		contract.WriteError(w, http.StatusServiceUnavailable, "gallery_unavailable", "gallery path is unreadable")
+		return
+	}
 	if err != nil {
 		library.LogLandFailure("api createImage", err)
 		switch library.LandStageOf(err) {
@@ -1199,6 +1207,10 @@ func (h *Handler) deleteImage(w http.ResponseWriter, r *http.Request) {
 	res, err := g.DeleteImages(context.Background(), []int64{id}, library.DeleteOptions{
 		RemoveEmptyFolder: r.URL.Query().Get("delete_empty_folder") == "true",
 	}, nil)
+	if errors.Is(err, gallery.ErrRootUnreadable) {
+		contract.WriteError(w, http.StatusServiceUnavailable, "gallery_unavailable", "gallery path is unreadable")
+		return
+	}
 	if serverError(w, err) {
 		return
 	}
@@ -1221,6 +1233,12 @@ func (h *Handler) deleteImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) searchSource(g *library.Gallery) search.Source {
+	src := g.Source()
+	src.LookupBackends = h.cfg().LookupBackends(g.Name)
+	return src
 }
 
 func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
@@ -1255,9 +1273,7 @@ func (h *Handler) searchImages(w http.ResponseWriter, r *http.Request) {
 		sq.OrderCollection = search.PinnedCollectionName(expr)
 	}
 
-	src := g.Source()
-	src.LookupBackends = h.cfg().LookupBackends(g.Name)
-	result, err := search.Execute(r.Context(), src, sq)
+	result, err := search.Execute(r.Context(), h.searchSource(g), sq)
 	if err != nil && r.Context().Err() != nil {
 		return
 	}

@@ -45,7 +45,7 @@ jobs:
           git init --quiet /tmp/monbooru-plugins
           git -C /tmp/monbooru-plugins fetch --quiet --depth 1 https://github.com/monbooru/monbooru-plugins.git "$PLUGINS_COMMIT"
           mkdir /tmp/registry
-          git -C /tmp/monbooru-plugins archive FETCH_HEAD taggers themes/light themes/legacy-dark themes/legacy-light | tar -x -C /tmp/registry
+          git -C /tmp/monbooru-plugins archive FETCH_HEAD themes/light themes/legacy-dark themes/legacy-light | tar -x -C /tmp/registry
           diff -r /tmp/registry internal/registry/plugins
 
       - name: Build
