@@ -44,7 +44,7 @@ Monbooru is fully functional as a standalone application. The app itself never t
 
 ### Browse and search
 
-- **Gallery** with folder tree, favorites, collections, related-image suggestions, animated previews on hover, and a fullscreen slideshow of a search or a selection
+- **Gallery** with folder tree, favorites, collections, related-image suggestions, animated previews on hover, and a media viewer with zoom, video controls and a slideshow of a search or a selection
 - **Search** with wildcards, OR, parentheses, exclusions, saved searches, and filters on folder, date, size, dimensions, category, generation settings, and more
 - **Batch operations** on a selection or a whole search: add or remove tags, rename, move, delete, auto-tag, set collection or source, download as a zip, and more
 - **Keyboard-driven**: shortcuts on every page, from grid navigation to batch actions; press `?` in the app for the full list
