@@ -263,7 +263,10 @@ func (s *Server) tagSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	suggestions, catName, _ := s.tagSvc().SuggestTyped(prefix, 10)
+	suggestions, catName, err := s.tagSvc().SuggestTyped(prefix, 10)
+	if err != nil {
+		logx.Warnf("tag suggest: %v", err)
+	}
 	if q.Has("name") {
 		suggestions = slices.DeleteFunc(suggestions, func(t models.Tag) bool {
 			return t.CategoryName == "rating" || t.ViaAlias != ""
